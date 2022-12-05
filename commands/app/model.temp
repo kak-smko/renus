@@ -1,0 +1,18 @@
+from renus.core.model import ModelBase
+from extension.renus.activity.service import ActivityService
+from extension.renus.crud.model import CRUD
+
+class {name_camel}(ModelBase,CRUD):
+    _collection_name="{name_db}"
+    fields = {
+            '_id': {"type": "text-input", "formInput": False},
+            'updated_at': {"type": "time-ago", "formInput": False},
+            'created_at': {"type": "date-picker", "formInput": False, "sortable": False, }
+            }
+    search_fields = []
+
+    def __init__(self,request) -> None:
+        super().__init__(request)
+
+    def boot_event(self, typ: str, old, new):
+        ActivityService().handle(typ, old, new, self._request, self._collection_name)

@@ -1,0 +1,51 @@
+from renus.core.request import Request
+from app.{name}.model import {name_camel}
+from renus.core.response import JsonResponse
+from renus.core.validation.validate import Validate,vr
+
+class {name_camel}Controller:
+    def __init__(self,request:Request) -> None:
+        self.request=request
+
+    @property
+    def __inputs(self):
+        return Validate(self.request.inputs).rules({})
+
+    def index(self):
+        """
+        Get {name_camel} Records
+        :method: get
+        :return: JsonResponse of CRUD table
+        """
+        return JsonResponse({name_camel}(self.request).index())
+
+    def store(self):
+        """
+        Add new {name_camel} Item
+        :method: post
+        :return: JsonResponse
+        """
+
+        {name_camel}(self.request).create(self.__inputs)
+        return JsonResponse({'msg': 'stored'})
+
+    def update(self, id):
+        """
+        Update {name_camel} where _id is id
+        :method: put
+        :param id: {name_camel} _id
+        :return: JsonResponse
+        """
+
+        {name_camel}(self.request).where({'_id': id}).update(self.__inputs)
+        return JsonResponse({'msg': 'updated'})
+
+    def delete(self, id):
+        """
+        Delete {name_camel} where _id is id
+        :method: delete
+        :param id: {name_camel} _id
+        :return: JsonResponse
+        """
+        {name_camel}(self.request).where({'_id': id}).delete()
+        return JsonResponse({'msg': 'deleted'})

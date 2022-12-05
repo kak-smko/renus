@@ -1,0 +1,11 @@
+<template>
+  <r-container class="container-fluid">
+    <r-table-crud link="admin/{folder}{names}"></r-table-crud>
+  </r-container>
+</template>
+
+<script>
+export default {
+  name: "{name}"
+};
+</script>
