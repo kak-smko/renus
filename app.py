@@ -16,10 +16,9 @@ from renus.core.middleware import Middleware
 class App:
     store = {}
 
-    def __init__(self, routes:dict, lifespan=None,
+    def __init__(self, lifespan=None,
                  on_startup=None,
                  on_shutdown=None, middlewares: list = None) -> None:
-        self.routes = routes
         self.debug = Config('app').get('debug', False)
         self.env = Config('app').get('env', 'local')
         self.on_startup = [] if on_startup is None else list(on_startup)
@@ -202,4 +201,4 @@ class App:
         await response(request, scope, receive, send)
 
     def load_routes(self, req, scope):
-        return Router(scope, self.routes).response(req)
+        return Router(scope).response(req)
