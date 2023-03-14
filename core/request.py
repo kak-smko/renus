@@ -27,7 +27,7 @@ class Request:
     def cookies(self):
         if not hasattr(self, "_cookies"):
             headers = self.headers
-            self._cookies = []
+            self._cookies = {}
             if 'cookie' in headers:
                 self._cookies = cookie_parser(headers['cookie'])
 
@@ -66,7 +66,7 @@ class Request:
 
     @property
     def user_agent(self):
-        return self.headers.get("default-agent", None)
+        return self.headers.get("user-agent", None)
 
     @property
     def base_path(self):

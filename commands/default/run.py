@@ -6,7 +6,7 @@ from renus.util.helper import hash_new_password
 
 def run(args):
     if args[0] == 'setting':
-        from extension.renus.setting.model import Setting
+        from app.extension.renus.setting.model import Setting
         with open('extension/renus/setting/db.json','r') as db:
             d=json.loads(db.read())
             for item in d:
@@ -16,7 +16,7 @@ def run(args):
         print('DB Settings Created.')
 
     if args[0] == 'translate':
-        from extension.renus.translate.model import Translate
+        from app.extension.renus.translate.model import Translate
         with open('extension/renus/translate/db.json','r') as db:
             d=json.loads(db.read())
             for item in d:
@@ -26,9 +26,9 @@ def run(args):
         print('DB Translates Created.')
 
     if args[0]=='super_admin':
-        from extension.renus.role.model import Role
-        from extension.renus.permission.model import Permission
-        from extension.renus.user.model import User
+        from app.extension.renus.role.model import Role
+        from app.extension.renus.permission.model import Permission
+        from app.extension.renus.user.model import User
         country_code = int(input('country_code: '))
         phone = int(input('phone: '))
         name = input('name: ')

@@ -296,6 +296,7 @@ class FileResponse(Response):
             filename: str = None,
             stat_result: os.stat_result = None,
             method: str = None,
+            zipped:bool=True,
             on_end=None
     ) -> None:
         super().__init__()
@@ -304,6 +305,7 @@ class FileResponse(Response):
         self.background = background
         self.filename = filename
         self.on_end=on_end
+        self.zipped=zipped
         self.send_header_only = method is not None and method.upper() == "HEAD"
         if media_type is None:
             media_type = guess_type(filename or path)[0] or "text/plain"
@@ -336,7 +338,7 @@ class FileResponse(Response):
     async def __call__(self,request, scope, receive, send) -> None:
         headers=request.headers
         is_zip = False
-        if "gzip" in headers.get("accept-encoding", "") and not self.send_header_only:
+        if self.zipped and "gzip" in headers.get("accept-encoding", "") and not self.send_header_only:
             is_zip = True
             self.gzip_buffer = io.BytesIO()
             self.gzip_file = gzip.GzipFile(mode="wb", fileobj=self.gzip_buffer)

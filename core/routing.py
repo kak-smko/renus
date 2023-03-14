@@ -1,7 +1,11 @@
 import typing
 import re
 
-from bson import ObjectId
+try:
+    from bson import ObjectId
+except:
+    def ObjectId(s):
+        return s
 
 
 def full_path_builder(app_prefix: str, path: str):

@@ -4,7 +4,6 @@ from base64 import urlsafe_b64encode, urlsafe_b64decode
 from hashlib import sha3_512
 from renus.core.serialize import jsonEncoder
 
-
 def hash_new_password(password: str, salt: str = 'renus') -> str:
     p = password.encode("utf-8")
     s = salt.encode("utf-8")

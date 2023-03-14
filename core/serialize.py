@@ -3,7 +3,11 @@ import decimal
 import json
 import uuid
 
-from bson import ObjectId
+try:
+    from bson import ObjectId
+except:
+    def ObjectId(s):
+        raise
 
 
 class jsonEncoder(json.JSONEncoder):
@@ -35,19 +39,15 @@ def json_decoder(value):
         try:
             value = datetime.datetime.fromisoformat(value)
         except:
-            pass
+            try:
+                value = ObjectId(value)
+            except:
+                try:
+                    value = decimal.Decimal(value)
+                except:
+                    try:
+                        value = uuid.UUID(value)
+                    except:
+                        pass
 
-        try:
-            value = ObjectId(value)
-        except:
-            pass
-
-        try:
-            value = decimal.Decimal(value)
-        except:
-            pass
-        try:
-            value = uuid.UUID(value)
-        except:
-            pass
     return value

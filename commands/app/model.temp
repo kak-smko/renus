@@ -1,6 +1,6 @@
 from renus.core.model import ModelBase
-from extension.renus.activity.service import ActivityService
-from extension.renus.crud.model import CRUD
+from app.extension.renus.activity.service import ActivityService
+from app.extension.renus.crud.model import CRUD
 
 class {name_camel}(ModelBase,CRUD):
     _collection_name="{name_db}"
