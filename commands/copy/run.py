@@ -9,6 +9,7 @@ exclude_all = [
     '.github'
 ]
 exclude = [
+    'venv',
     'storage/cache',
     'storage/logs'
 ]
@@ -23,10 +24,10 @@ exclude_ext = [
 
 def zipdir(path, ziph):
     for dirname, subdirs, files in os.walk(path):
-        has=False
+        has = False
         for dir in exclude_all:
-            if dirname.find(dir)!=-1:
-                has=True
+            if dirname.find(dir) != -1:
+                has = True
                 break
         for dir in exclude:
             if dirname.startswith(dir):
@@ -46,20 +47,22 @@ def zipdir(path, ziph):
                     continue
             ziph.write(os.path.join(dirname, file))
 
+
 def folders():
-    res=[]
+    res = []
     for entry in os.scandir('./'):
         if entry.is_dir():
             res.append(entry.name)
 
     return res
 
+
 def run():
     path = input('copy folder path:<D:/projects/uploads>').lower()
-    if path =='':
-        path='D:/projects/uploads'
+    if path == '':
+        path = 'D:/projects/uploads'
 
-    ff=folders()
+    ff = folders()
 
     app_name = input('copy name:')
     print(f'start copy {app_name}...')
@@ -74,4 +77,3 @@ def run():
     zipf.close()
 
     print('end')
-

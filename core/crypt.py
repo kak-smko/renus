@@ -39,58 +39,40 @@ def decrypt(enc_dict:str, password:str)->str:
     d = f.decrypt(enc_dict.encode())
     return d.decode()
 
-def shift(text:str,password:str):
+
+def shift(text: str, password: str):
+    text += password
     rnd = get_random_string(6)
     password = rnd + password
     password = urlsafe_b64encode(password.encode()).decode()
+    text = urlsafe_b64encode(text.encode()).decode()
+    ls = []
+    ln = len(password)
+    for i in range(len(text)):
+        key_c = password[i % ln]
+        ls.append(chr((ord(text[i]) + ord(key_c)) % 256))
 
-    text=urlsafe_b64encode(text.encode()).decode()
-    text = pad(text, len(password))
-    lp=[]
-    ls=[]
-    for p in password:
-        lp.append(ord(p))
-    ii = 0
-    def nx(ii):
-        if len(lp)<ii+2:
-            return 0
-        return ii+1
-
-    for t in text:
-        ls.append(chr(ord(t) + lp[ii]))
-        ii = nx(ii)
-
-    text=rnd+''.join(ls)
-    text=urlsafe_b64encode(text.encode()).decode()
+    text = rnd + ''.join(ls)
+    text = urlsafe_b64encode(text.encode()).decode()
     return remove_pad64(text)
+
 
 def unshift(text: str, password: str):
     try:
-        text=add_pad64(text)
+        lnpass = len(password)
+        text = add_pad64(text)
         text = urlsafe_b64decode(text).decode()
         rnd = text[:6]
         text = text[6:]
         password = rnd + password
         password = urlsafe_b64encode(password.encode()).decode()
-        lp = []
         ls = []
-        for p in password:
-            lp.append(ord(p))
-        ii = 0
+        ln = len(password)
+        for i in range(len(text)):
+            key_c = password[i % ln]
+            ls.append(chr((256 + ord(text[i]) - ord(key_c)) % 256))
 
-        def nx(ii):
-            if len(lp) < ii + 2:
-                return 0
-            return ii + 1
-
-        for t in text:
-            ls.append(chr(ord(t) - lp[ii]))
-            ii = nx(ii)
-
-        if len(ls)<len(lp):
-            raise RuntimeError('Invalid Token Format')
-
-        text=''.join(ls).rstrip()
-        return urlsafe_b64decode(text).decode()
+        text = ''.join(ls).rstrip()
+        return urlsafe_b64decode(text).decode()[:-lnpass]
     except:
-        sys.exit('Invalid Token Format')
+        raise RuntimeError('Invalid Token Format')

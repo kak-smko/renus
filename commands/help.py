@@ -35,8 +35,6 @@ def Help():
         'backup': 'Backing up the entire project',
         'copy': 'Get a copy of the app to upload to the server',
         'permission': 'Add All Permissions to DB',
-        'default super_admin': 'Create Super Admin',
-        'default setting': 'Create Setting DB',
-        'default translate': 'Create Translate DB'
+        'default super_admin': 'Create Super Admin'
     },
         '{:<{}}', '{:<{}}', '\n\n', ' | '))

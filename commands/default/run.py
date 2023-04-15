@@ -7,6 +7,7 @@ from renus.util.helper import hash_new_password
 def run(args):
     if args[0] == 'setting':
         from app.extension.renus.setting.model import Setting
+        Setting('').where({'_id': {'$ne': 1}}).delete(True)
         with open('extension/renus/setting/db.json','r') as db:
             d=json.loads(db.read())
             for item in d:
@@ -17,6 +18,7 @@ def run(args):
 
     if args[0] == 'translate':
         from app.extension.renus.translate.model import Translate
+        Translate('').where({'_id':{'$ne':1}}).delete(True)
         with open('extension/renus/translate/db.json','r') as db:
             d=json.loads(db.read())
             for item in d:

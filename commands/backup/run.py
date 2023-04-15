@@ -10,6 +10,7 @@ exclude_all = [
     '.github'
 ]
 exclude = [
+    'venv',
     'storage/cache',
     'storage/logs'
 ]
