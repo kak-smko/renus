@@ -20,7 +20,7 @@ class ModelBase:
     _public_folder='public'
     hidden_fields = []
     fields = {}
-
+    _base_model=dictAttribute
     def __init__(self, request: Request) -> None:
         self._request = request
         self._steps = None
@@ -180,7 +180,7 @@ class ModelBase:
         self._steps = []
         return self
 
-    def get(self, police: bool = True) -> typing.List[dictAttribute]:
+    def _get(self, police: bool = True) -> typing.List[_base_model]:
         if self._steps is not None:
             return self.aggregate(self._steps)
 
@@ -199,13 +199,19 @@ class ModelBase:
 
         return self.__police(find) if police else list(find)
 
-    def first(self, police: bool = True) -> typing.Union[None, dictAttribute]:
+    def get(self,police: bool = True) -> typing.List[_base_model]:
+        return self._get(police)
+
+    def _first(self, police: bool = True) -> typing.Union[_base_model,None]:
         self.limit(1)
         res = self.get(police)
         self._limit = None
         if len(res) == 1:
             return res[0]
         return None
+
+    def first(self, police: bool = True) -> typing.Union[_base_model, None]:
+        return self._first(police)
 
     def create(self, document: dict) -> dict:
         if "updated_at" not in document:
@@ -321,13 +327,13 @@ class ModelBase:
     @staticmethod
     def cast(document:dict):
         return document
-    
-    def __cleaner(self, document: dict) -> dictAttribute:
+
+    def __cleaner(self, document: dict):
         for field in self.hidden_fields:
             if field in document and field not in self.visible_fields:
                 del document[field]
-        
-        return dictAttribute(self.cast(document))
+
+        return self._base_model(self.cast(document))
 
     def __police(self, documents: typing.Any):
         if documents is None:
