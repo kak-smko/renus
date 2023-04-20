@@ -5,7 +5,6 @@ from bson import ObjectId
 from pymongo import MongoClient
 from datetime import datetime
 from renus.core.config import Config
-from renus.core.request import Request
 from renus.util.helper import dictAttribute
 
 class ModelBase:
@@ -21,8 +20,7 @@ class ModelBase:
     hidden_fields = []
     fields = {}
     _base_model=dictAttribute
-    def __init__(self, request: Request) -> None:
-        self._request = request
+    def __init__(self) -> None:
         self._steps = None
         self._where = None
         self._distinct = None

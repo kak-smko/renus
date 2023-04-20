@@ -1,32 +1,29 @@
 import typing
 from datetime import datetime
 from bson import ObjectId
-from renus.util.helper import dictAttribute
 from renus.core.model import ModelBase
 from app.extension.renus.activity.service import ActivityService
 from app.extension.renus.crud.model import CRUD
 
-class _Base(dictAttribute):
+class _Base:
     _id:ObjectId
     created_at:datetime
     updated_at:datetime
 
-    def __init__(self, seq=None, **kwargs):
-        super().__init__(seq, **kwargs)
+    def __init__(self,doc) -> None:
+        for k,v in doc.items():
+            self[k]=v
+
+    def __setitem__(self, key, value):
+        self[key] = value
 
 
 class {name_camel}(ModelBase,CRUD):
     _collection_name="{name_db}"
     _base_model=_Base
-    fields = {
-            '_id': {"type": "text-input", "formInput": False},
-            'updated_at': {"type": "time-ago", "formInput": False},
-            'created_at': {"type": "date-picker", "formInput": False, "sortable": False, }
-            }
-    search_fields = []
 
     def __init__(self,request) -> None:
-        super().__init__(request)
+        self.request=request
 
     def get(self,police: bool = True) -> typing.List[_base_model]:
         return self._get(police)
@@ -35,4 +32,4 @@ class {name_camel}(ModelBase,CRUD):
         return self._first(police)
 
     def boot_event(self, typ: str, old, new):
-        ActivityService().handle(typ, old, new, self._request, self._collection_name)
+        ActivityService().handle(typ, old, new, self.request, self._collection_name)

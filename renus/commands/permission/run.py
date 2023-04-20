@@ -1,7 +1,7 @@
 from renus.core.routing import Router
 import routes.index
-from app.extension.renus.permission.middleware import PermissionMiddleware
-from app.extension.renus.permission.model import Permission
+from renus.app import PermissionMiddleware
+from renus.app import Permission
 
 def run():
     all=Router().all

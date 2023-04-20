@@ -17,7 +17,14 @@ class {name_camel}Controller:
         :method: get
         :return: JsonResponse of CRUD table
         """
-        return JsonResponse({name_camel}(self.request).index())
+        m={name_camel}(self.request)
+        m.fields = {
+            '_id': {"type": "text-input", "formInput": False},
+            'updated_at': {"type": "time-ago", "formInput": False},
+            'created_at': {"type": "date-picker", "formInput": False, "sortable": False, }
+            }
+        m.search_fields = []
+        return JsonResponse(m.index())
 
     def store(self):
         """
