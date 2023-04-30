@@ -19,17 +19,18 @@ class _Base:
 
 
 class {name_camel}(ModelBase,CRUD):
-    _collection_name="{name_db}"
-    _base_model=_Base
+    collection_name="{name_db}"
+    document_model=_Base
 
     def __init__(self,request) -> None:
+        super().__init__()
         self.request=request
 
-    def get(self,police: bool = True) -> typing.List[_base_model]:
+    def get(self,police: bool = True) -> typing.List[document_model]:
         return self._get(police)
 
-    def first(self,police: bool = True) -> _base_model:
+    def first(self,police: bool = True) -> typing.Union[document_model,None]:
         return self._first(police)
 
     def boot_event(self, typ: str, old, new):
-        ActivityService().handle(typ, old, new, self.request, self._collection_name)
+        ActivityService().handle(typ, old, new, self.request, self.collection_name)

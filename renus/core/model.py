@@ -1,11 +1,9 @@
 import os
 import typing
-
 from bson import ObjectId
 from pymongo import MongoClient
 from datetime import datetime
 from renus.core.config import Config
-from renus.util.helper import dictAttribute
 
 class ModelBase:
     _client = MongoClient(Config('database').get('host', '127.0.0.1'),
@@ -14,13 +12,17 @@ class ModelBase:
                           password=Config('database').get('password', None))
 
     _database_name = Config('database').get('name', 'renus')
-    _collection_name=None
+    collection_name=None
     metro = None
-    _public_folder='public'
+    public_folder='public'
     hidden_fields = []
-    fields = {}
-    _base_model=dictAttribute
+    document_model=dict
+    add_time_fields=True
     def __init__(self) -> None:
+        if hasattr(self, '_collection_name'):
+            raise RuntimeError('_collection_name has expired. Use collection_name')
+        if hasattr(self, '_public_folder'):
+            raise RuntimeError('_public_folder has expired. Use public_folder')
         self._steps = None
         self._where = None
         self._distinct = None
@@ -38,7 +40,7 @@ class ModelBase:
         return self
 
     def set_collection(self, name: str):
-        self._collection_name = name
+        self.collection_name = name
         return self
 
     @property
@@ -47,7 +49,7 @@ class ModelBase:
 
     def collection(self, name: str = None):
         if name is None:
-            name = self._collection_name
+            name = self.collection_name
 
         return self.db[name]
 
@@ -178,7 +180,7 @@ class ModelBase:
         self._steps = []
         return self
 
-    def _get(self, police: bool = True) -> typing.List[_base_model]:
+    def _get(self, police: bool = True) -> typing.List[document_model]:
         if self._steps is not None:
             return self.aggregate(self._steps)
 
@@ -197,10 +199,10 @@ class ModelBase:
 
         return self.__police(find) if police else list(find)
 
-    def get(self,police: bool = True) -> typing.List[_base_model]:
+    def get(self,police: bool = True) -> typing.List[document_model]:
         return self._get(police)
 
-    def _first(self, police: bool = True) -> typing.Union[_base_model,None]:
+    def _first(self, police: bool = True) -> typing.Union[document_model,None]:
         self.limit(1)
         res = self.get(police)
         self._limit = None
@@ -208,14 +210,14 @@ class ModelBase:
             return res[0]
         return None
 
-    def first(self, police: bool = True) -> typing.Union[_base_model, None]:
+    def first(self, police: bool = True) -> typing.Union[document_model, None]:
         return self._first(police)
 
     def create(self, document: dict) -> dict:
-        if "updated_at" not in document:
+        if self.add_time_fields and "updated_at" not in document:
             document["updated_at"] = datetime.utcnow()
 
-        if "created_at" not in document:
+        if self.add_time_fields and "created_at" not in document:
             document["created_at"] = datetime.utcnow()
 
         id = self.collection().insert_one(document).inserted_id
@@ -224,12 +226,13 @@ class ModelBase:
         return document
 
     def create_many(self, documents: typing.List) -> typing.List[ObjectId]:
-        for document in documents:
-            if "updated_at" not in document:
-                document["updated_at"] = datetime.utcnow()
+        if self.add_time_fields:
+            for document in documents:
+                if "updated_at" not in document:
+                    document["updated_at"] = datetime.utcnow()
 
-            if "created_at" not in document:
-                document["created_at"] = datetime.utcnow()
+                if "created_at" not in document:
+                    document["created_at"] = datetime.utcnow()
 
         ids = self.collection().insert_many(documents).inserted_ids
         self.boot_event('create_many', {}, ids)
@@ -237,9 +240,10 @@ class ModelBase:
 
     def update(self, new: dict, upsert=False, get_old=False) -> bool:
         where = self.__ud_gate('update')
-        new["updated_at"] = datetime.utcnow()
+        if self.add_time_fields:
+            new["updated_at"] = datetime.utcnow()
         d = {"$set": new}
-        if "created_at" not in new:
+        if self.add_time_fields and "created_at" not in new:
             d["$setOnInsert"] = {'created_at': datetime.utcnow()}
         old = self.collection().find_one_and_update(where, d, upsert=upsert)
         self.boot_event('update', old, new)
@@ -251,8 +255,9 @@ class ModelBase:
             new['$set'] = {}
         if '$setOnInsert' not in new:
             new['$setOnInsert'] = {}
-        new['$set']["updated_at"] = datetime.utcnow()
-        new['$setOnInsert']['created_at'] = datetime.utcnow()
+        if self.add_time_fields:
+            new['$set']["updated_at"] = datetime.utcnow()
+            new['$setOnInsert']['created_at'] = datetime.utcnow()
         old = self.collection().find_one_and_update(where, new, upsert=upsert)
         self.boot_event('update', old, {k[1:]:v for k,v in new.items()})
         return old if get_old else True
@@ -263,15 +268,17 @@ class ModelBase:
             new['$set'] = {}
         if '$setOnInsert' not in new:
             new['$setOnInsert'] = {}
-        new['$set']["updated_at"] = datetime.utcnow()
-        new['$setOnInsert']['created_at'] = datetime.utcnow()
+        if self.add_time_fields:
+            new['$set']["updated_at"] = datetime.utcnow()
+            new['$setOnInsert']['created_at'] = datetime.utcnow()
         old = self.collection().update_many(where, new, upsert=upsert).raw_result
         self.boot_event('update', old, {k[1:]:v for k,v in new.items()})
         return old if get_old else True
 
     def update_many(self, new: dict) -> bool:
         where = self.__ud_gate('update')
-        new["updated_at"] = datetime.utcnow()
+        if self.add_time_fields:
+            new["updated_at"] = datetime.utcnow()
         old = self.collection().update_many(where, {"$set": new}).raw_result
         self.boot_event('update_many', old, str(new))
         return True
@@ -331,7 +338,7 @@ class ModelBase:
             if field in document and field not in self.visible_fields:
                 del document[field]
 
-        return self._base_model(self.cast(document))
+        return self.document_model(self.cast(document))
 
     def __police(self, documents: typing.Any):
         if documents is None:
@@ -414,7 +421,7 @@ class ModelBase:
                 raise RuntimeError(f"type {link} must be string or dict but its {type(link)}")
 
             try:
-                os.remove(f'storage/{self._public_folder}/' + link)
+                os.remove(f'storage/{self.public_folder}/' + link)
             except:
                 pass
 
