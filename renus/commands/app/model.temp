@@ -5,17 +5,15 @@ from renus.core.model import ModelBase
 from app.extension.renus.activity.service import ActivityService
 from app.extension.renus.crud.model import CRUD
 
-class _Base:
-    _id:ObjectId
-    created_at:datetime
-    updated_at:datetime
+class _Base(dict):
+    _id: ObjectId
+    created_at: datetime
+    updated_at: datetime
 
-    def __init__(self,doc) -> None:
-        for k,v in doc.items():
-            self[k]=v
-
-    def __setitem__(self, key, value):
-        self[key] = value
+    def __init__(self, doc):
+        super().__init__(doc)
+        for k, v in doc.items():
+            setattr(self, k, v)
 
 
 class {name_camel}(ModelBase,CRUD):

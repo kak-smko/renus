@@ -5,32 +5,11 @@ from renus.util.helper import hash_new_password
 
 
 def run(args):
-    if args[0] == 'setting':
-        from renus.app import Setting
-        Setting('').where({'_id': {'$ne': 1}}).delete(True)
-        with open('extension/renus/setting/db.json','r') as db:
-            d=json.loads(db.read())
-            for item in d:
-                Setting('').where({
-                    'name':item['name']
-                }).update(item, True)
-        print('DB Settings Created.')
-
-    if args[0] == 'translate':
-        from renus.app import Translate
-        Translate('').where({'_id':{'$ne':1}}).delete(True)
-        with open('extension/renus/translate/db.json','r') as db:
-            d=json.loads(db.read())
-            for item in d:
-                Translate('').where({
-                    'key':item['key']
-                }).update(item, True)
-        print('DB Translates Created.')
 
     if args[0]=='super_admin':
-        from renus.app import Role
-        from renus.app import Permission
-        from renus.app import User
+        from app.extension.renus.role.model import Role
+        from app.extension.renus.permission.model import Permission
+        from app.extension.renus.user.model import User
         country_code = int(input('country_code: '))
         phone = int(input('phone: '))
         name = input('name: ')
