@@ -9,6 +9,13 @@ class Default:
             return self.d
         return True
 
+class Convert:
+    def __init__(self, func):
+        self.f = func
+
+    def __call__(self, input):
+        return self.f(input)
+
 
 def Required(input) -> any:
     if input is not None:

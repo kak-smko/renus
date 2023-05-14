@@ -5,11 +5,17 @@ app = Config('app')
 
 class Cprint:
 
-    def __init__(self) -> None:
-        self.debug = app.get('debug', False)
+    def __init__(self, debug: bool = None) -> None:
+        """
+        @param debug: by default read debug mode from Config file
+        """
+        self._debug = app.get('debug', False) if debug is None else debug
 
     def print(self, txt):
-        if self.debug:
+        """
+        print txt if debug mode is True
+        """
+        if self._debug:
             print(txt)
 
     @staticmethod

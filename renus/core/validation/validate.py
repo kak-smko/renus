@@ -53,6 +53,12 @@ class Validate:
                 return item
         return False
 
+    def has_convert(self, rules):
+        for item in rules:
+            if isinstance(item, vr.Convert):
+                return item
+        return False
+
     def has_required(self, rules):
         for item in rules:
             if type(item) == type(vr.Required):
@@ -65,8 +71,11 @@ class Validate:
             keys=field.split('.')
             val = keys_exists(self._form, keys)
             default = self.has_default(rules_data[field])
+            convert = self.has_convert(rules_data[field])
             if val is None and default is not False:
                 val = default(val)
+            if convert:
+                val=convert(val)
 
             check = self.__check(val, rules_data[field])
             if check == True:
@@ -85,7 +94,7 @@ class Validate:
         error = False
         msg = []
         for rule in rules:
-            if rule != '$or' and not isinstance(rule, vr.Default):
+            if rule != '$or' and not isinstance(rule, vr.Default) and not isinstance(rule, vr.Convert):
                 test = rule(input)
                 if test != True:
                     error = True
