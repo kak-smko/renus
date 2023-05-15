@@ -14,15 +14,13 @@ class ModelBase:
     _database_name = Config('database').get('name', 'renus')
     collection_name=None
     metro = None
-    public_folder='public'
+    file_remove_func=None
     hidden_fields = []
     document_model=dict
     add_time_fields=True
     def __init__(self) -> None:
         if hasattr(self, '_collection_name'):
             raise RuntimeError('_collection_name has expired. Use collection_name')
-        if hasattr(self, '_public_folder'):
-            raise RuntimeError('_public_folder has expired. Use public_folder')
         self._steps = None
         self._where = None
         self._distinct = None
@@ -412,18 +410,11 @@ class ModelBase:
 
         for link in links:
             if type(link) is str:
-                link = link.replace('storage/img/', '', 1)
-                link = link.replace('storage/', '', 1)
+                self.file_remove_func(link)
             elif type(link) is dict:
-                link = link.get('url').replace('storage/img/', '', 1)
-                link = link.replace('storage/', '', 1)
+                self.file_remove_func(link.get('url'))
             else:
                 raise RuntimeError(f"type {link} must be string or dict but its {type(link)}")
-
-            try:
-                os.remove(f'storage/{self.public_folder}/' + link)
-            except:
-                pass
 
     @property
     def database_name(self):

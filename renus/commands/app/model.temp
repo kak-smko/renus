@@ -4,6 +4,7 @@ from bson import ObjectId
 from renus.core.model import ModelBase
 from app.extension.renus.activity.service import ActivityService
 from app.extension.renus.crud.model import CRUD
+from app.extension.renus.storage.model import Storage
 
 class _Base(dict):
     _id: ObjectId
@@ -19,10 +20,12 @@ class _Base(dict):
 class {name_camel}(ModelBase,CRUD):
     collection_name="{name_db}"
     document_model=_Base
+    file_remove_func=
 
     def __init__(self,request) -> None:
         super().__init__()
         self.request=request
+        self.file_remove_func = Storage(request).remove
 
     def get(self,police: bool = True) -> typing.List[document_model]:
         return self._get(police)

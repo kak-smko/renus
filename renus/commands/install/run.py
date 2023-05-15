@@ -37,6 +37,8 @@ def download(app, version, installed, isUpdate=False):
     f.extractall(f"extension/{app}")
     if not isUpdate:
         install_app(app, installed)
+    else:
+        print(f'{bc.OKBLUE}   updated to version{res.headers["version"]}{bc.ENDC}')
     return res.headers['version']
 
 

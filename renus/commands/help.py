@@ -32,6 +32,7 @@ def Help():
     print(format({
         'app': 'Create New Package',
         'install renus/user/*': 'Install Apps',
+        'install -update renus/user/*': 'Update Apps',
         'backup': 'Backing up the entire project',
         'copy': 'Get a copy of the app to upload to the server',
         'permission': 'Add All Permissions to DB',
