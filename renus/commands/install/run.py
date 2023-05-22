@@ -4,8 +4,7 @@ import zipfile
 from renus.commands.help import bc
 from renus.commands.install.service import request
 
-from renus.commands.install.build import _add_route, _add_admin_templates, _add_index_templates, _add_user_templates, \
-    _add_db, _add_cls, _add_imprt
+from renus.commands.install.build import _add_route, _add_admin_templates, _add_index_templates, _add_user_templates, _add_cls, _add_imprt, _add_config
 
 
 def download(app, version, installed, isUpdate=False):
@@ -38,7 +37,7 @@ def download(app, version, installed, isUpdate=False):
     if not isUpdate:
         install_app(app, installed)
     else:
-        print(f'{bc.OKBLUE}   updated to version{res.headers["version"]}{bc.ENDC}')
+        print(f'{bc.OKBLUE}   updated to version {res.headers["version"]}{bc.ENDC}')
     return res.headers['version']
 
 
@@ -97,9 +96,14 @@ def install_app(app, installed):
         print(f'   add {app} user_templates...')
         _add_user_templates(install)
 
-    if hasattr(install, 'db'):
-        print(f'   add {app} DB...')
-        _add_db(install, app)
+    if hasattr(install, 'config'):
+        print(f'   add {app} config...')
+        _add_config(install)
+
+    if hasattr(install, 'setup'):
+        print(f'   setup {app}...')
+        install.setup()
+
 
 
 def install_all(apps, installed, isUpdate):

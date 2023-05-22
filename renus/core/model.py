@@ -1,9 +1,10 @@
-import os
+import re
 import typing
 from bson import ObjectId
 from pymongo import MongoClient
 from datetime import datetime
 from renus.core.config import Config
+
 
 class ModelBase:
     _client = MongoClient(Config('database').get('host', '127.0.0.1'),
@@ -12,15 +13,17 @@ class ModelBase:
                           password=Config('database').get('password', None))
 
     _database_name = Config('database').get('name', 'renus')
-    collection_name=None
+    collection_name = None
     metro = None
-    file_remove_func=None
+    storage = None
     hidden_fields = []
-    document_model=dict
-    add_time_fields=True
+    document_model = dict
+    add_time_fields = True
+
     def __init__(self) -> None:
         if hasattr(self, '_collection_name'):
             raise RuntimeError('_collection_name has expired. Use collection_name')
+
         self._steps = None
         self._where = None
         self._distinct = None
@@ -77,12 +80,12 @@ class ModelBase:
         else:
             if self._where is None:
                 self._where = {}
-            for k,v in where.items():
+            for k, v in where.items():
                 if k.startswith('$') and k in self._where:
                     if type(v) is list:
-                        self._where[k]+=v
+                        self._where[k] += v
                     else:
-                        self._where[k]={**self._where[k],**v}
+                        self._where[k] = {**self._where[k], **v}
                 else:
                     self._where[k] = v
 
@@ -92,13 +95,13 @@ class ModelBase:
         k = {}
         if self._where is not None:
             k['filter'] = self._where
-        else :
+        else:
             k['filter'] = {}
         if skip and self._skip is not None:
             k['skip'] = self._skip
         if limit and self._limit is not None:
             k['limit'] = self._limit
-        
+
         return self.collection().count_documents(**k)
 
     def distinct(self, key: str):
@@ -139,13 +142,13 @@ class ModelBase:
                 s = {i[0]: i[1] for i in s}
             self._steps.append({"$sort": s})
         else:
-            self._sort=s
+            self._sort = s
         return self
 
     def select(self, *select: [str, typing.Dict]):
         s = {}
-        if len(select)==1 and type(select[0]) is dict:
-            s=select[0]
+        if len(select) == 1 and type(select[0]) is dict:
+            s = select[0]
         else:
             for key in select:
                 if type(key) is dict:
@@ -157,10 +160,10 @@ class ModelBase:
             self._steps.append({'$project': s})
             return self
 
-        self._select=s
+        self._select = s
         return self
 
-    def with_relation(self, collection, local_field, forigen_field, to,single=False):
+    def with_relation(self, collection, local_field, forigen_field, to, single=False):
         if self._steps is not None:
             self._steps.append({
                 "$lookup": {
@@ -197,10 +200,10 @@ class ModelBase:
 
         return self.__police(find) if police else list(find)
 
-    def get(self,police: bool = True) -> typing.List[document_model]:
+    def get(self, police: bool = True) -> typing.List[document_model]:
         return self._get(police)
 
-    def _first(self, police: bool = True) -> typing.Union[document_model,None]:
+    def _first(self, police: bool = True) -> typing.Union[document_model, None]:
         self.limit(1)
         res = self.get(police)
         self._limit = None
@@ -221,6 +224,7 @@ class ModelBase:
         id = self.collection().insert_one(document).inserted_id
         document['_id'] = id
         self.boot_event('create', {}, document)
+        self._attach_file(document)
         return document
 
     def create_many(self, documents: typing.List) -> typing.List[ObjectId]:
@@ -234,6 +238,7 @@ class ModelBase:
 
         ids = self.collection().insert_many(documents).inserted_ids
         self.boot_event('create_many', {}, ids)
+        self._attach_file({'_id': 'create_many', 'documents': documents})
         return ids
 
     def update(self, new: dict, upsert=False, get_old=False) -> bool:
@@ -245,6 +250,8 @@ class ModelBase:
             d["$setOnInsert"] = {'created_at': datetime.utcnow()}
         old = self.collection().find_one_and_update(where, d, upsert=upsert)
         self.boot_event('update', old, new)
+        new['_id'] = old['_id']
+        self._attach_file(new)
         return old if get_old else True
 
     def update_opt(self, new: dict, upsert=False, get_old=False) -> bool:
@@ -257,7 +264,9 @@ class ModelBase:
             new['$set']["updated_at"] = datetime.utcnow()
             new['$setOnInsert']['created_at'] = datetime.utcnow()
         old = self.collection().find_one_and_update(where, new, upsert=upsert)
-        self.boot_event('update', old, {k[1:]:v for k,v in new.items()})
+        self.boot_event('update', old, {k[1:]: v for k, v in new.items()})
+        new['_id'] = old['_id']
+        self._attach_file(new)
         return old if get_old else True
 
     def update_opt_many(self, new: dict, upsert=False, get_old=False) -> bool:
@@ -270,7 +279,8 @@ class ModelBase:
             new['$set']["updated_at"] = datetime.utcnow()
             new['$setOnInsert']['created_at'] = datetime.utcnow()
         old = self.collection().update_many(where, new, upsert=upsert).raw_result
-        self.boot_event('update', old, {k[1:]:v for k,v in new.items()})
+        self.boot_event('update', old, {k[1:]: v for k, v in new.items()})
+        self._attach_file({'_id': 'update_opt_many', 'documents': new})
         return old if get_old else True
 
     def update_many(self, new: dict) -> bool:
@@ -279,6 +289,7 @@ class ModelBase:
             new["updated_at"] = datetime.utcnow()
         old = self.collection().update_many(where, {"$set": new}).raw_result
         self.boot_event('update_many', old, str(new))
+        self._attach_file({'_id': 'update_many', 'documents': new})
         return True
 
     def delete(self, all: bool = False) -> bool:
@@ -298,7 +309,7 @@ class ModelBase:
         return old
 
     def make_visible(self, fields: typing.List):
-        self.visible_fields=fields
+        self.visible_fields = fields
         return self
 
     @staticmethod
@@ -328,7 +339,7 @@ class ModelBase:
         return [where, select]
 
     @staticmethod
-    def cast(document:dict):
+    def cast(document: dict):
         return document
 
     def __cleaner(self, document: dict):
@@ -370,10 +381,11 @@ class ModelBase:
             for item in all:
                 for field, db in self.metro.items():
                     if type(db) is not list:
-                        raise RuntimeError("metro format not true. ex: '_id':[{'collection':'test','field': 'test_id'}]")
+                        raise RuntimeError(
+                            "metro format not true. ex: '_id':[{'collection':'test','field': 'test_id'}]")
                     for d in db:
-                        strg=d.get('storage',False)
-                        c=d.get('collection',False)
+                        strg = d.get('storage', False)
+                        c = d.get('collection', False)
                         if c is not False:
                             if strg:
                                 files = self.collection(c).find({
@@ -390,8 +402,7 @@ class ModelBase:
                             if l:
                                 self._remove_file(l)
 
-
-    def __get_links(self,field:str,doc:dict):
+    def __get_links(self, field: str, doc: dict):
         item = doc.copy()
         p = field.split('.')
         r = None
@@ -402,7 +413,17 @@ class ModelBase:
             item = item[i]
         return r
 
+    def _attach_file(self, item):
+        if self.storage is None:
+            return
+        links = _links_extractor(item)
+        self.storage.reset().where({
+            'path': {'$in': links}
+        }).update_many({'type': self.collection_name, 'type_id': item['_id']})
+
     def _remove_file(self, links):
+        if self.storage is None:
+            return
         if type(links) is dict:
             links = list(links.values())
         if type(links) is not list:
@@ -410,12 +431,18 @@ class ModelBase:
 
         for link in links:
             if type(link) is str:
-                self.file_remove_func(link)
+                self.storage.remove(link)
             elif type(link) is dict:
-                self.file_remove_func(link.get('url'))
+                self.storage.remove(link.get('url'))
             else:
                 raise RuntimeError(f"type {link} must be string or dict but its {type(link)}")
 
     @property
     def database_name(self):
         return self._database_name
+
+
+def _links_extractor(txt) -> list:
+    txt = str(txt)
+    s = re.findall("(storage/[^\s]+')", txt)
+    return [i.rstrip("'") for i in s]

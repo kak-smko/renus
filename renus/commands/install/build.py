@@ -1,4 +1,3 @@
-import json
 import os
 
 
@@ -32,7 +31,7 @@ def _add_route(install, app):
 
         with open('./routes/index.py', 'r') as file:
             all = file.read()
-            routes = 'import ' + f'app.extension.{app.replace("/",".")}.route' + '\n'
+            routes = 'import ' + f'app.extension.{app.replace("/", ".")}.route' + '\n'
             all = routes + all
             with open('./routes/index.py', 'w') as b:
                 b.write(all)
@@ -81,16 +80,7 @@ def _add_user_templates(install):
             b.write(all)
 
 
-def _add_db(install, app):
-    if install.db:
-        for m, db in install.db.items():
-            m = m.split('.')
-            name = m[-1]
-            m.pop(-1)
-            path = '.'.join(m)
-            model = __import__(path, fromlist=[''])
-            with open(f'extension/{app}/{db}', 'r') as db:
-                d = json.loads(db.read())
-                model = getattr(model, name)('app')
-                for item in d:
-                    model.create(item)
+def _add_config(install):
+    if install.config:
+        with open(f'./config/{install.config[0]}.py', 'w') as b:
+            b.write(open(install.config[1], 'r').read())

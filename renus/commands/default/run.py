@@ -1,6 +1,3 @@
-import json
-
-from renus.core.routing import Router
 from renus.util.helper import hash_new_password
 
 
@@ -27,15 +24,13 @@ def run(args):
         }).update({'permission_ids': res,'active':True}, True)
 
         User('').where({
-            'country_code': str(country_code),
-            'phone': str(phone)
+            'phone': str(country_code)+' '+str(phone)
         }).update({
             'name': name,
             'username': 'admin',
             'password':hash_new_password('admin')
         }, True)
         User('').where({
-            'country_code': str(country_code),
-            'phone': str(phone)
+            'phone': str(country_code)+' '+str(phone)
         }).sync_roles(['super_admin'])
         print('Super Admin Created.\nPlease Change username and password.\nusername=admin\npassword=admin')

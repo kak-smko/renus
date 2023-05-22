@@ -20,12 +20,11 @@ class _Base(dict):
 class {name_camel}(ModelBase,CRUD):
     collection_name="{name_db}"
     document_model=_Base
-    file_remove_func=
+    storage = Storage(None)
 
     def __init__(self,request) -> None:
         super().__init__()
         self.request=request
-        self.file_remove_func = Storage(request).remove
 
     def get(self,police: bool = True) -> typing.List[document_model]:
         return self._get(police)
