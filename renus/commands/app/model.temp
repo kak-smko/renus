@@ -6,20 +6,19 @@ from app.extension.renus.activity.service import ActivityService
 from app.extension.renus.crud.model import CRUD
 from app.extension.renus.storage.model import Storage
 
-class _Base(dict):
+class {name_camel}:
     _id: ObjectId
     created_at: datetime
     updated_at: datetime
 
     def __init__(self, doc):
-        super().__init__(doc)
         for k, v in doc.items():
             setattr(self, k, v)
 
 
-class {name_camel}(ModelBase,CRUD):
+class {names_camel}(ModelBase,CRUD):
     collection_name="{name_db}"
-    document_model=_Base
+    document_model={name_camel}
     storage = Storage(None)
 
     def __init__(self,request) -> None:

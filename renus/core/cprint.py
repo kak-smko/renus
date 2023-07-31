@@ -105,8 +105,3 @@ class Cprint:
     @staticmethod
     def bg_grey(txt):
         return f'\033[47m{txt}\033[0m'
-
-
-if __name__ == "__main__":
-    c = Cprint()
-    c.print(c.bg_cyan('test ' + c.red('ok')))

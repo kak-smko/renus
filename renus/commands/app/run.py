@@ -11,7 +11,7 @@ def to_camel_case(snake_str):
     return ''.join(x.title() for x in components)
 
 
-def add_temp(name,names, name_camel, name_db,folder:list):
+def add_temp(name,names, name_camel,names_camel, name_db,folder:list):
     pth = 'app/'
     pname = ''
     vname = ''
@@ -30,6 +30,7 @@ def add_temp(name,names, name_camel, name_db,folder:list):
 
     with open(model_temp,'r') as file:
         all=file.read()
+        all=all.replace('{names_camel}',names_camel)
         all=all.replace('{name_camel}',name_camel)
         all=all.replace('{name_db}',name_db)
         with open(pth+'model.py','w') as controller:
@@ -111,9 +112,10 @@ def run():
     name_camel = to_camel_case(name)
     names = to_plural(to_camel_case(name))
     names = names[0].lower() + names[1:]
+    names_camel = to_camel_case(names)
     name_db = name.replace('_', '-')
 
-    add_temp(name, names, name_camel, name_db,folder)
+    add_temp(name, names, name_camel,names_camel, name_db,folder)
     print('templates created.')
     add_routes(name, names, name_camel,folder)
     print('routes created.')

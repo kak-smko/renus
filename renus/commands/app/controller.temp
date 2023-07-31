@@ -1,5 +1,5 @@
 from renus.core.request import Request
-from app.{name}.model import {name_camel}
+from app.{name}.model import {names_camel}
 from renus.core.response import JsonResponse
 from renus.core.validation.validate import Validate,vr
 
@@ -17,7 +17,7 @@ class {name_camel}Controller:
         :method: get
         :return: JsonResponse of CRUD table
         """
-        m={name_camel}(self.request)
+        m={names_camel}(self.request)
         m.fields = {
             '_id': {"type": "text-input", "formInput": False},
             'updated_at': {"type": "time-ago", "formInput": False},
@@ -33,7 +33,7 @@ class {name_camel}Controller:
         :return: JsonResponse
         """
 
-        {name_camel}(self.request).create(self.__inputs)
+        {names_camel}(self.request).create(self.__inputs)
         return JsonResponse({'msg': 'stored'})
 
     def update(self, id):
@@ -44,7 +44,7 @@ class {name_camel}Controller:
         :return: JsonResponse
         """
 
-        {name_camel}(self.request).where({'_id': id}).update(self.__inputs)
+        {names_camel}(self.request).where({'_id': id}).update(self.__inputs)
         return JsonResponse({'msg': 'updated'})
 
     def delete(self, id):
@@ -54,5 +54,5 @@ class {name_camel}Controller:
         :param id: {name_camel} _id
         :return: JsonResponse
         """
-        {name_camel}(self.request).where({'_id': id}).delete()
+        {names_camel}(self.request).where({'_id': id}).delete()
         return JsonResponse({'msg': 'deleted'})

@@ -24,6 +24,8 @@ class jsonEncoder(json.JSONEncoder):
 
         elif isinstance(o, (dict, list, tuple, str, int, float, bool, type(None))):
             return super().default(o)
+        elif hasattr(o, '__dict__'):
+            return dict(o)
         else:
             return str(o)
 

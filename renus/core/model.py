@@ -4,6 +4,7 @@ from bson import ObjectId
 from pymongo import MongoClient
 from datetime import datetime
 from renus.core.config import Config
+from renus.core.cprint import Cprint
 
 
 class ModelBase:
@@ -64,10 +65,6 @@ class ModelBase:
         self._select = None
         self.visible_fields = []
         return self
-
-    def create_index(self, fields, unique=False):
-        return self.collection().create_index(fields,
-                                              unique=unique)
 
     def aggregate(self, pipeline: typing.Any, session: typing.Any = None):
         return self.__police(self.collection().aggregate(pipeline, session))
@@ -174,7 +171,10 @@ class ModelBase:
                 }
             })
             if single:
-                self._steps.append({'$unwind': f'${to}'})
+                self._steps.append({ '$addFields':{ f'{to}': {'$arrayElemAt': [ f"${to}", 0 ]} }})
+        else:
+            c=Cprint()
+            c.print(c.red('use steps mode for with_relation.'))
         return self
 
     def steps(self):
@@ -250,7 +250,10 @@ class ModelBase:
             d["$setOnInsert"] = {'created_at': datetime.utcnow()}
         old = self.collection().find_one_and_update(where, d, upsert=upsert)
         self.boot_event('update', old, new)
-        new['_id'] = old['_id']
+        if old is None:
+            new={'_id':'upsert','doc':new}
+        else:
+            new['_id'] = old['_id']
         self._attach_file(new)
         return old if get_old else True
 
@@ -265,7 +268,10 @@ class ModelBase:
             new['$setOnInsert']['created_at'] = datetime.utcnow()
         old = self.collection().find_one_and_update(where, new, upsert=upsert)
         self.boot_event('update', old, {k[1:]: v for k, v in new.items()})
-        new['_id'] = old['_id']
+        if old is None:
+            new={'_id':'upsert','doc':new}
+        else:
+            new['_id'] = old['_id']
         self._attach_file(new)
         return old if get_old else True
 
