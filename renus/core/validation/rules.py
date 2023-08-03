@@ -1,4 +1,6 @@
+import os
 import re
+
 
 class Default:
     def __init__(self, data):
@@ -8,6 +10,7 @@ class Default:
         if input is None:
             return self.d
         return True
+
 
 class Convert:
     def __init__(self, func):
@@ -359,3 +362,67 @@ class ExistsCount:
                 self.maxCount is not None and self.maxCount >= count):
             return True
         return ['exists_count_error', [input]]
+
+class FileSize:
+    def __init__(self, max_byte: int = 0, min_byte: int = 0, delete=True, replace:list=None, item_dict:str=None):
+        """
+        @param max_byte: maximum allowed Bytes
+        @param min_byte:minimum allowed Bytes
+        @param delete: delete file if not passed
+        @param replace: replace file path. default is [('storage/img/','storage/'),('storage/','storage/public/')]
+        @param item_dict: if file path in a dict. ex {url:'',meta:''} => item_dict='url'
+        """
+        if replace is None:
+            replace = [('storage/img/','storage/'),('storage/','storage/public/')]
+        self.delete = delete
+        self.maxByte = max_byte
+        self.minByte = min_byte
+        self.replace = replace
+        self.item_dict = item_dict
+
+    def __call__(self, input):
+        if input is None:
+            return True
+        t = type(input)
+        if t is str:
+            input = [input]
+        passed = True
+        if self.maxByte:
+            for item in input:
+                tt = type(item)
+                if tt is dict:
+                    link=item[self.item_dict]
+                else:
+                    link=item
+                for rep in self.replace:
+                    link=link.replace(rep[0],rep[1])
+                state = os.stat(link)
+                if state.st_size <= self.maxByte:
+                    continue
+                passed = ['max_file_size_error', [item,state.st_size,self.maxByte]]
+        if self.minByte:
+            for item in input:
+                tt = type(item)
+                if tt is dict:
+                    link = item[self.item_dict]
+                else:
+                    link = item
+                for rep in self.replace:
+                    link = link.replace(rep[0], rep[1])
+                state = os.stat(link)
+                if state.st_size >= self.minByte:
+                    continue
+                passed = ['min_file_size_error', [item,state.st_size,self.minByte]]
+        if passed is not True and self.delete:
+            for item in input:
+                tt = type(item)
+                if tt is dict:
+                    link = item[self.item_dict]
+                else:
+                    link = item
+                for rep in self.replace:
+                    link = link.replace(rep[0], rep[1])
+
+                os.remove(link)
+
+        return passed

@@ -3,7 +3,6 @@ from datetime import datetime
 from bson import ObjectId
 from renus.core.model import ModelBase
 from app.extension.renus.activity.service import ActivityService
-from app.extension.renus.storage.model import Storage
 
 class {name_camel}:
     _id: ObjectId
@@ -18,7 +17,6 @@ class {name_camel}:
 class {names_camel}(ModelBase):
     collection_name="{name_db}"
     document_model={name_camel}
-    storage = Storage(None)
 
     def __init__(self,request) -> None:
         super().__init__()
