@@ -1,4 +1,5 @@
 import os
+
 import pkg_resources
 
 controller_temp = pkg_resources.resource_filename('renus', './commands/app/controller.temp')
@@ -24,7 +25,8 @@ def add_temp(name,names, name_camel,names_camel, name_db,folder:list):
         os.makedirs(pth,exist_ok=True)
         all=file.read()
         all=all.replace('{name}',pname+name)
-        all=all.replace('{name_camel}',name_camel)
+        all = all.replace('{name_camel}', name_camel)
+        all = all.replace('{names_camel}', names_camel)
         with open(pth+'controller.py','w') as controller:
             controller.write(all)
 
@@ -112,7 +114,7 @@ def run():
     name_camel = to_camel_case(name)
     names = to_plural(to_camel_case(name))
     names = names[0].lower() + names[1:]
-    names_camel = to_camel_case(names)
+    names_camel = to_camel_case(to_plural(name))
     name_db = name.replace('_', '-')
 
     add_temp(name, names, name_camel,names_camel, name_db,folder)

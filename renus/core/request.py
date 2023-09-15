@@ -1,10 +1,12 @@
 import html
+import json
 import re
-import typing, json
-
-from multipart.multipart import parse_options_header
+import typing
 from http import cookies as http_cookies
 from urllib.parse import parse_qsl
+
+from multipart.multipart import parse_options_header
+
 from renus.core.config import Config
 from renus.core.formparsers import FormParser, MultiPartParser
 from renus.core.injection import Injection
@@ -155,7 +157,7 @@ class Request:
             if content_type == b"multipart/form-data":
                 multipart_parser = MultiPartParser(self.headers, self.stream())
                 self._form = await multipart_parser.parse()
-            elif content_type == b"app/x-www-form-urlencoded":
+            elif content_type in [b"app/x-www-form-urlencoded", b"application/x-www-form-urlencoded"]:
                 form_parser = FormParser(self.headers, self.stream())
                 self._form = await form_parser.parse()
             else:

@@ -1,10 +1,11 @@
 import shutil
-from io import BytesIO
 import zipfile
-from renus.commands.help import bc
-from renus.commands.install.service import request
+from io import BytesIO
 
-from renus.commands.install.build import _add_route, _add_admin_templates, _add_index_templates, _add_user_templates, _add_cls, _add_imprt, _add_config
+from renus.commands.help import bc
+from renus.commands.install.build import _add_route, _add_admin_templates, _add_index_templates, _add_user_templates, \
+    _add_cls, _add_imprt, _add_config
+from renus.commands.install.service import request
 
 
 def download(app, version, installed, isUpdate=False):
@@ -105,10 +106,12 @@ def install_app(app, installed):
         install.setup()
 
 
-
 def install_all(apps, installed, isUpdate):
-    for app, version in apps.items():
-        download(app, version, installed, isUpdate)
+    d = apps
+    if isUpdate:
+        d = installed
+    for app, version in d.items():
+        download(app, '*' if isUpdate else version, installed, isUpdate)
 
 
 def run(args=None):
