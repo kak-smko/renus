@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='renus',
-    version='1.1.8',
+    version='1.1.9',
     description='Renus Core Framework',
     url='https://github.com/smkoBa/renus',
     author='Smko Bayazidi',

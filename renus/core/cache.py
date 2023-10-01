@@ -1,12 +1,11 @@
 import os
-from datetime import datetime, timedelta
 import pickle
+from datetime import datetime, timedelta
 from hashlib import sha3_256
 
+from renus.core.config import Config
 from renus.core.log import Log
 from renus.util.helper import encode64
-
-from renus.core.config import Config
 
 try:
     import redis
@@ -16,7 +15,8 @@ except ImportError:
 
 class Cache:
     depth = 1
-    typ=Config('app').get('cacheDriver','file')
+    folder_path = 'cache'
+    typ = Config('app').get('cacheDriver', 'file')
     if typ=='redis':
         assert rds is not None, "'redis' must be installed for Cache"
         rd=rds
@@ -62,17 +62,17 @@ class Cache:
             return self.rd.delete(self._prefix+key)
 
         path = self._build_name(key, self.depth)
-        return self._delete_file("storage/cache" + path)
+        return self._delete_file(f"storage/{self.folder_path}{path}")
 
     def delete_expired(self):
-        filename = './storage/cache/'
+        filename = f'./storage/{self.folder_path}/'
         n = 0
         for dirname, subdirs, files in os.walk(filename):
             for file in files:
                 p=f'{dirname}/{file}'.replace(filename,'')
                 r=self._read_key(p)
                 if r['expire']==-1:
-                    t= self._delete_file("storage/cache/"+p)
+                    t = self._delete_file(f"storage/{self.folder_path}/" + p)
                     if t:
                         n+=1
 
@@ -95,13 +95,13 @@ class Cache:
             return True
         expired, path = res
         if (datetime.strptime(expired, '%Y-%m-%d %H:%M:%S').timestamp() < datetime.utcnow().timestamp()):
-            self._delete_file('storage/cache' + path)
+            self._delete_file(f'storage/{self.folder_path}{path}')
             return False
         return True
 
 
     def _create_if_not_exist(self, path, value, expire, n=0):
-        filename = 'storage/cache' + path
+        filename = f'storage/{self.folder_path}{path}'
         try:
             os.makedirs(os.path.dirname(filename), exist_ok=True)
             with open(filename, 'wb') as output:
@@ -112,7 +112,7 @@ class Cache:
                 self._create_if_not_exist(path, value, expire, n + 1)
 
     def _read_key(self, path, default=None, n=0):
-        filename = 'storage/cache' + path
+        filename = f'storage/{self.folder_path}{path}'
         if not os.path.exists(filename):
             return {'value': default, 'expire': -1}
 
