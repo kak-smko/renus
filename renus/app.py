@@ -1,16 +1,16 @@
 import inspect
 import traceback
 
-from renus.core.concurrency import run_in_threadpool
 from renus.core.cache import Cache
-from renus.core.status import Status
-from renus.core.exception import debug_response
-from renus.core.websockets import WebSocket
+from renus.core.concurrency import run_in_threadpool
 from renus.core.config import Config
-from renus.core.routing import Router
+from renus.core.exception import debug_response
+from renus.core.middleware import Middleware
 from renus.core.request import Request
 from renus.core.response import Response, TextResponse, JsonResponse
-from renus.core.middleware import Middleware
+from renus.core.routing import Router
+from renus.core.status import Status
+from renus.core.websockets import WebSocket
 
 
 class App:
@@ -114,7 +114,7 @@ class App:
         request = Request(scope, receive)
 
         if scope["method"] in ['POST', 'PUT', 'DELETE']:
-            setattr(request, 'inputs', await Request(scope, receive).form())
+            await request.form_safe()
 
         try:
             await self.view(request, scope, receive, send)

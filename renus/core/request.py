@@ -1,3 +1,4 @@
+import copy
 import html
 import json
 import re
@@ -148,6 +149,7 @@ class Request:
             async for chunk in self.stream():
                 chunks.append(chunk)
             self._body = b"".join(chunks)
+
         return self._body
 
     async def form(self):
@@ -167,9 +169,13 @@ class Request:
                 except Exception:
                     self._form = {}
 
-                self._form = Injection().protect(self._form)
-
         return self._form
+
+    async def form_safe(self):
+        if not hasattr(self, "_form_safe"):
+            self._form_safe = Injection().protect(copy.deepcopy(await self.form()))
+            self.inputs = self._form_safe
+        return self._form_safe
 
 
 def headers_parser(headers: list) -> typing.Dict[str, str]:
