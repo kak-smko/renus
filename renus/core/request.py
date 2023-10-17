@@ -173,7 +173,9 @@ class Request:
 
     async def form_safe(self):
         if not hasattr(self, "_form_safe"):
-            self._form_safe = Injection().protect(copy.deepcopy(await self.form()))
+            self._form_safe = await self.form()
+            if type(self._form_safe) == dict:
+                self._form_safe = Injection().protect(copy.deepcopy(self._form_safe))
             self.inputs = self._form_safe
         return self._form_safe
 
