@@ -21,6 +21,7 @@ class Request:
         self._stream_consumed = False
         self.inputs = {}
         self.route = {}
+        self.state = {}
 
     @property
     def headers(self) -> dict:
