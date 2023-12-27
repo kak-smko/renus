@@ -1,9 +1,12 @@
 import typing
 from enum import Enum
 from urllib.parse import unquote_plus
-from renus.core.datastructures import FormData, UploadFile
-from multipart.multipart import parse_options_header
+
 import multipart
+from multipart.multipart import parse_options_header
+
+from renus.core.datastructures import UploadFile
+
 
 class FormMessage(Enum):
     FIELD_START = 1
@@ -59,7 +62,7 @@ class FormParser:
         message = (FormMessage.END, b"")
         self.messages.append(message)
 
-    async def parse(self) -> FormData:
+    async def parse(self) -> dict:
         # Callbacks dictionary.
         callbacks = {
             "on_field_start": self.on_field_start,
@@ -74,10 +77,7 @@ class FormParser:
         field_name = b""
         field_value = b""
 
-        items = (
-            []
-        )  # type: typing.List[typing.Tuple[str, typing.Union[str, UploadFile]]]
-
+        items = {}
         # Feed the parser with data from the request.
         async for chunk in self.stream:
             if chunk:
@@ -97,11 +97,11 @@ class FormParser:
                 elif message_type == FormMessage.FIELD_END:
                     name = unquote_plus(field_name.decode("utf-8"))
                     value = unquote_plus(field_value.decode("utf-8"))
-                    items.append((name, value))
+                    items[name] = value
                 elif message_type == FormMessage.END:
                     pass
 
-        return FormData(items)
+        return items
 
 
 class MultiPartParser:
@@ -144,7 +144,7 @@ class MultiPartParser:
         message = (MultiPartMessage.END, b"")
         self.messages.append(message)
 
-    async def parse(self) -> FormData:
+    async def parse(self) -> dict:
         # Parse the Content-Type header to get the multipart boundary.
         content_type, params = parse_options_header(self.headers["content-type"])
         charset = params.get(b"charset", "utf-8")
@@ -174,10 +174,7 @@ class MultiPartParser:
         data = b""
         file = None  # type: typing.Optional[UploadFile]
 
-        items = (
-            []
-        )  # type: typing.List[typing.Tuple[str, typing.Union[str, UploadFile]]]
-
+        items = {}
         # Feed the parser with data from the request.
         async for chunk in self.stream:
             parser.write(chunk)
@@ -218,12 +215,12 @@ class MultiPartParser:
                         await file.write(message_bytes)
                 elif message_type == MultiPartMessage.PART_END:
                     if file is None:
-                        items.append((field_name, _user_safe_decode(data, charset)))
+                        items[field_name] = _user_safe_decode(data, charset)
                     else:
                         await file.seek(0)
-                        items.append((field_name, file))
+                        items[field_name] = file
                 elif message_type == MultiPartMessage.END:
                     pass
 
         parser.finalize()
-        return FormData(items)
+        return items

@@ -161,6 +161,7 @@ class JsonResponse(Response):
             cls=jsonEncoder
         ).encode("utf-8")
 
+
 class JsonResponseRedirect(Response):
 
     def __init__(self, content: typing.Any = None, headers: dict = None,

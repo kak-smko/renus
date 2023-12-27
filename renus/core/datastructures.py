@@ -1,7 +1,7 @@
+import asyncio
 import tempfile
 import typing
 
-import asyncio
 from renus.core.concurrency import run_in_threadpool
 
 
@@ -141,24 +141,3 @@ class UploadFile:
         else:
             await run_in_threadpool(self.file.close)
 
-
-class FormData(MultiDict):
-    """
-    An immutable multidict, containing both file uploads and text input.
-    """
-
-    def __init__(
-        self,
-        *args: typing.Union[
-            "FormData",
-            typing.Mapping[str, typing.Union[str, UploadFile]],
-            typing.List[typing.Tuple[str, typing.Union[str, UploadFile]]],
-        ],
-        **kwargs: typing.Union[str, UploadFile],
-    ) -> None:
-        super().__init__(*args, **kwargs)
-
-    async def close(self) -> None:
-        for key, value in self.multi_items():
-            if isinstance(value, UploadFile):
-                await value.close()
