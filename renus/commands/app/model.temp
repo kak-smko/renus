@@ -1,24 +1,13 @@
 import typing
 from datetime import datetime
 from bson import ObjectId
-from renus.core.model import ModelBase
+from renus.core.model import ModelBase, ReModel
 from app.extension.renus.activity.service import ActivityService
 
-class {name_camel}:
+class {name_camel}(ReModel):
     _id: ObjectId
     created_at: datetime
     updated_at: datetime
-
-    def __init__(self, doc):
-        for k, v in doc.items():
-            setattr(self, k, v)
-
-    def __iter__(self):
-        return iter({
-                "_id": str(self._id),
-                "updated_at": str(self.updated_at),
-                "created_at": str(self.created_at)
-               }.items())
 
 
 class {names_camel}(ModelBase):

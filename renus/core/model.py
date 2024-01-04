@@ -1,10 +1,21 @@
 import re
 import typing
+from datetime import datetime
+
 from bson import ObjectId
 from pymongo import MongoClient
-from datetime import datetime
+
 from renus.core.config import Config
 from renus.core.cprint import Cprint
+
+
+class ReModel:
+    def __init__(self, doc):
+        for k, v in doc.items():
+            setattr(self, k, v)
+
+    def __iter__(self):
+        return iter(self.__dict__.items())
 
 
 class ModelBase:

@@ -20,9 +20,9 @@ class {name_camel}Controller:
         """
         m=Table({names_camel}(self.request))
         m.fields = {
-            '_id': {"type": "text-input", "formInput": False},
-            'updated_at': {"type": "time-ago", "formInput": False},
-            'created_at': {"type": "date-input", "formInput": False, "sortable": False, }
+            '_id': {"type": "r-text-input", "formInput": False},
+            'updated_at': {"type": "r-time-ago", "formInput": False},
+            'created_at': {"type": "r-date-input", "formInput": False, "sortable": False, }
             }
         m.search_fields = []
         return JsonResponse(m.index())

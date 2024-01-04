@@ -116,6 +116,8 @@ class Response:
             self.gzip_file.close()
             self.body = self.gzip_buffer.getvalue()
             self.raw_headers.append((b"content-encoding", "gzip".encode("utf-8")))
+        else:
+            self.raw_headers.append((b"content-encoding", "none".encode("utf-8")))
         self.raw_headers.append((b"content-length", str(len(self.body)).encode("utf-8")))
         await send(
             {
@@ -254,6 +256,8 @@ class StreamingResponse(Response):
             self.gzip_buffer = io.BytesIO()
             self.gzip_file = gzip.GzipFile(mode="wb", fileobj=self.gzip_buffer)
             self.raw_headers.append((b"content-encoding", "gzip".encode("utf-8")))
+        else:
+            self.raw_headers.append((b"content-encoding", "none".encode("utf-8")))
 
         await send(
             {
@@ -354,6 +358,8 @@ class FileResponse(Response):
             self.gzip_buffer = io.BytesIO()
             self.gzip_file = gzip.GzipFile(mode="wb", fileobj=self.gzip_buffer)
             self.raw_headers.append((b"content-encoding", "gzip".encode("utf-8")))
+        else:
+            self.raw_headers.append((b"content-encoding", "none".encode("utf-8")))
 
         if self.stat_result is None:
             try:
