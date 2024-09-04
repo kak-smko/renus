@@ -162,7 +162,7 @@ class Request:
                 self._form = await multipart_parser.parse()
             elif content_type in [b"app/x-www-form-urlencoded", b"application/x-www-form-urlencoded"]:
                 form_parser = FormParser(self.headers, self.stream())
-                self._form = await form_parser.parse()
+                self._form = dict(await form_parser.parse())
             else:
                 body = await self.body()
                 try:

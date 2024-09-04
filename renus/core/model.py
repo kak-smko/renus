@@ -17,6 +17,9 @@ class ReModel:
     def __iter__(self):
         return iter(self.__dict__.items())
 
+    def __getitem__(self, item):
+        return self.__dict__[item]
+
 
 class ModelBase:
     _client = MongoClient(Config('database').get('host', '127.0.0.1'),
