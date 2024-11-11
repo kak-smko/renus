@@ -22,7 +22,7 @@ class ReModel:
 
 
 class ModelBase:
-    _client = MongoClient(Config('database').get('host', '127.0.0.1'),
+    client = MongoClient(Config('database').get('host', '127.0.0.1'),
                           Config('database').get('port', 27017),
                           username=Config('database').get('username', None),
                           password=Config('database').get('password', None))
@@ -61,7 +61,7 @@ class ModelBase:
 
     @property
     def db(self):
-        return self._client[self._database_name]
+        return self.client[self._database_name]
 
     def collection(self, name: str = None):
         if name is None:
@@ -195,13 +195,13 @@ class ModelBase:
         self._steps = []
         return self
 
-    def _get(self, police: bool = True) -> typing.List[document_model]:
+    def _get(self, police: bool = True, session=None) -> typing.List[document_model]:
         if self._steps is not None:
-            return self.aggregate(self._steps)
+            return self.aggregate(self._steps, session)
 
         where, select = self._base_gate(police)
 
-        find = self.collection().find(where, select)
+        find = self.collection().find(where, select, session=session)
 
         if self._sort is not None:
             find = find.sort(self._sort)
@@ -214,34 +214,34 @@ class ModelBase:
 
         return self.__police(find) if police else list(find)
 
-    def get(self, police: bool = True) -> typing.List[document_model]:
-        return self._get(police)
+    def get(self, police: bool = True, session=None) -> typing.List[document_model]:
+        return self._get(police, session)
 
-    def _first(self, police: bool = True) -> typing.Union[document_model, None]:
+    def _first(self, police: bool = True, session=None) -> typing.Union[document_model, None]:
         self.limit(1)
-        res = self.get(police)
+        res = self.get(police, session)
         self._limit = None
         if len(res) == 1:
             return res[0]
         return None
 
-    def first(self, police: bool = True) -> typing.Union[document_model, None]:
-        return self._first(police)
+    def first(self, police: bool = True, session=None) -> typing.Union[document_model, None]:
+        return self._first(police, session)
 
-    def create(self, document: dict) -> dict:
+    def create(self, document: dict, session=None) -> dict:
         if self.add_time_fields and "updated_at" not in document:
             document["updated_at"] = datetime.utcnow()
 
         if self.add_time_fields and "created_at" not in document:
             document["created_at"] = datetime.utcnow()
 
-        id = self.collection().insert_one(document).inserted_id
+        id = self.collection().insert_one(document, session=session).inserted_id
         document['_id'] = id
         self.boot_event('create', {}, document)
         self._attach_file(document)
         return document
 
-    def create_many(self, documents: typing.List) -> typing.List[ObjectId]:
+    def create_many(self, documents: typing.List, session=None) -> typing.List[ObjectId]:
         if self.add_time_fields:
             for document in documents:
                 if "updated_at" not in document:
@@ -250,19 +250,19 @@ class ModelBase:
                 if "created_at" not in document:
                     document["created_at"] = datetime.utcnow()
 
-        ids = self.collection().insert_many(documents).inserted_ids
+        ids = self.collection().insert_many(documents, session=session).inserted_ids
         self.boot_event('create_many', {}, ids)
         self._attach_file({'_id': 'create_many', 'documents': documents})
         return ids
 
-    def update(self, new: dict, upsert=False, get_old=False) -> bool:
+    def update(self, new: dict, upsert=False, get_old=False, session=None) -> bool:
         where = self.__ud_gate('update')
         if self.add_time_fields:
             new["updated_at"] = datetime.utcnow()
         d = {"$set": new}
         if self.add_time_fields and "created_at" not in new:
             d["$setOnInsert"] = {'created_at': datetime.utcnow()}
-        old = self.collection().find_one_and_update(where, d, upsert=upsert)
+        old = self.collection().find_one_and_update(where, d, upsert=upsert, session=session)
         self.boot_event('update', old, new)
         if old is None:
             new={'_id':'upsert','doc':new}
@@ -271,7 +271,7 @@ class ModelBase:
         self._attach_file(new)
         return old if get_old else True
 
-    def update_opt(self, new: dict, upsert=False, get_old=False) -> bool:
+    def update_opt(self, new: dict, upsert=False, get_old=False, session=None) -> bool:
         where = self.__ud_gate('update')
         if '$set' not in new:
             new['$set'] = {}
@@ -280,7 +280,7 @@ class ModelBase:
         if self.add_time_fields:
             new['$set']["updated_at"] = datetime.utcnow()
             new['$setOnInsert']['created_at'] = datetime.utcnow()
-        old = self.collection().find_one_and_update(where, new, upsert=upsert)
+        old = self.collection().find_one_and_update(where, new, upsert=upsert, session=session)
         self.boot_event('update', old, {k[1:]: v for k, v in new.items()})
         if old is None:
             new={'_id':'upsert','doc':new}
@@ -289,7 +289,7 @@ class ModelBase:
         self._attach_file(new)
         return old if get_old else True
 
-    def update_opt_many(self, new: dict, upsert=False, get_old=False) -> bool:
+    def update_opt_many(self, new: dict, upsert=False, get_old=False, session=None) -> bool:
         where = self.__ud_gate('update')
         if '$set' not in new:
             new['$set'] = {}
@@ -298,31 +298,31 @@ class ModelBase:
         if self.add_time_fields:
             new['$set']["updated_at"] = datetime.utcnow()
             new['$setOnInsert']['created_at'] = datetime.utcnow()
-        old = self.collection().update_many(where, new, upsert=upsert).raw_result
-        self.boot_event('update', old, {k[1:]: v for k, v in new.items()})
+        old = self.collection().update_many(where, new, upsert=upsert, session=session).raw_result
+        self.boot_event('update_many', old, {k[1:]: v for k, v in new.items()})
         self._attach_file({'_id': 'update_opt_many', 'documents': new})
         return old if get_old else True
 
-    def update_many(self, new: dict) -> bool:
+    def update_many(self, new: dict, session=None) -> bool:
         where = self.__ud_gate('update')
         if self.add_time_fields:
             new["updated_at"] = datetime.utcnow()
-        old = self.collection().update_many(where, {"$set": new}).raw_result
+        old = self.collection().update_many(where, {"$set": new}, session=session).raw_result
         self.boot_event('update_many', old, str(new))
         self._attach_file({'_id': 'update_many', 'documents': new})
         return True
 
-    def delete(self, all: bool = False) -> bool:
+    def delete(self, all: bool = False, session=None) -> bool:
         where = self.__ud_gate('delete')
         if all is False:
-            old = self.collection().find_one_and_delete(where)
+            old = self.collection().find_one_and_delete(where, session=session)
             if self.metro is not None:
                 self._handle_metro('delete', old)
             self.boot_event('delete', old, {})
         else:
             if self.metro is not None:
                 self._handle_metro('delete')
-            old = self.collection().delete_many(where)
+            old = self.collection().delete_many(where, session=session)
 
             self.boot_event('delete_many', {'deleted_count': old.deleted_count, 'where': str(where)}, {})
 
