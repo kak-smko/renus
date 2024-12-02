@@ -14,15 +14,15 @@ class {names_camel}(ModelBase):
     collection_name="{name_db}"
     document_model={name_camel}
 
-    def __init__(self,request) -> None:
+    def __init__(self, request) -> None:
         super().__init__()
         self.request=request
 
-    def get(self,police: bool = True) -> typing.List[document_model]:
-        return self._get(police)
+    def get(self, police: bool = True, session=None) -> typing.List[document_model]:
+        return self._get(police, session)
 
-    def first(self,police: bool = True) -> typing.Union[document_model,None]:
-        return self._first(police)
+    def first(self, police: bool = True, session=None) -> typing.Union[document_model,None]:
+        return self._first(police, session)
 
     def boot_event(self, typ: str, old, new):
         ActivityService().handle(typ, old, new, self.request, self.collection_name)

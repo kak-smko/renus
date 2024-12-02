@@ -1,4 +1,3 @@
-import re
 import typing
 from datetime import datetime
 
@@ -23,9 +22,9 @@ class ReModel:
 
 class ModelBase:
     client = MongoClient(Config('database').get('host', '127.0.0.1'),
-                          Config('database').get('port', 27017),
-                          username=Config('database').get('username', None),
-                          password=Config('database').get('password', None))
+                         Config('database').get('port', 27017),
+                         username=Config('database').get('username', None),
+                         password=Config('database').get('password', None))
 
     _database_name = Config('database').get('name', 'renus')
     collection_name = None
@@ -185,9 +184,9 @@ class ModelBase:
                 }
             })
             if single:
-                self._steps.append({ '$addFields':{ f'{to}': {'$arrayElemAt': [ f"${to}", 0 ]} }})
+                self._steps.append({'$addFields': {f'{to}': {'$arrayElemAt': [f"${to}", 0]}}})
         else:
-            c=Cprint()
+            c = Cprint()
             c.print(c.red('use steps mode for with_relation.'))
         return self
 
@@ -265,7 +264,7 @@ class ModelBase:
         old = self.collection().find_one_and_update(where, d, upsert=upsert, session=session)
         self.boot_event('update', old, new)
         if old is None:
-            new={'_id':'upsert','doc':new}
+            new = {'_id': 'upsert', 'doc': new}
         else:
             new['_id'] = old['_id']
         self._attach_file(new)
@@ -283,7 +282,7 @@ class ModelBase:
         old = self.collection().find_one_and_update(where, new, upsert=upsert, session=session)
         self.boot_event('update', old, {k[1:]: v for k, v in new.items()})
         if old is None:
-            new={'_id':'upsert','doc':new}
+            new = {'_id': 'upsert', 'doc': new}
         else:
             new['_id'] = old['_id']
         self._attach_file(new)
@@ -434,9 +433,9 @@ class ModelBase:
         return r
 
     def _attach_file(self, item):
-        if self.storage is None:
+        if self.storage is None or self.metro is None:
             return
-        links = _links_extractor(item)
+        links = self._links_extractor(item)
         self.storage.reset().where({
             'path': {'$in': links}
         }).update_many({'type': self.collection_name, 'type_id': item['_id']})
@@ -461,8 +460,17 @@ class ModelBase:
     def database_name(self):
         return self._database_name
 
+    def _links_extractor(self, item) -> list:
+        s = []
+        for field, db in self.metro.items():
+            if type(db) is not list:
+                raise RuntimeError(
+                    "metro format not true. ex: '_id':[{'collection':'test','field': 'test_id'}]")
+            for d in db:
+                strg = d.get('storage', False)
+                if strg is not False:
+                    l = self.__get_links(strg, item)
+                    if l:
+                        s.extend(l)
 
-def _links_extractor(txt) -> list:
-    txt = str(txt)
-    s = re.findall("(storage/[^\s]+')", txt)
-    return [i.rstrip("'") for i in s]
+        return s
