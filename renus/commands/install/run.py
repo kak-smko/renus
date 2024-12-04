@@ -2,10 +2,11 @@ import shutil
 import zipfile
 from io import BytesIO
 
+import requests
+
 from renus.commands.help import bc
 from renus.commands.install.build import _add_route, _add_admin_templates, _add_index_templates, _add_user_templates, \
     _add_cls, _add_imprt, _add_config
-from renus.commands.install.service import request
 
 
 def download(app, version, installed, isUpdate=False):
@@ -17,7 +18,7 @@ def download(app, version, installed, isUpdate=False):
 
     print(f'{bc.OKGREEN}downloading {app}/{version}{bc.ENDC}')
 
-    res = request(f'https://reapp.codenus.com/app/{app}/{version}')
+    res = requests.get(f'https://reapp.codenus.com/app/{app}/{version}')
 
     if res.status_code != 200:
         print(f'{bc.FAIL}download error{bc.ENDC}')
