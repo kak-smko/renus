@@ -1,8 +1,9 @@
 import copy
 
-from renus.core.exception import abort_if
-from renus.util.helper import dictAttribute
 import renus.core.validation.rules as vr
+from renus.core.exception import abort_if
+from renus.core.log import Log
+from renus.util.helper import dictAttribute
 
 
 def keys_exists(element, keys):
@@ -41,9 +42,10 @@ def set_key(_res, keys,val):
 
 
 class Validate:
-    def __init__(self, form: dict, break_on_error: bool = False) -> None:
+    def __init__(self, form: dict, break_on_error: bool = False, log_on_error: bool = False) -> None:
         self._form = copy.deepcopy(form)
         self._break_on_error = break_on_error
+        self._log_on_error = log_on_error
         self._error = False
         self._msg = {}
 
@@ -85,7 +87,8 @@ class Validate:
                 self._msg[field] = check
                 if self._break_on_error:
                     break
-
+        if self._log_on_error:
+            Log().error({'msg': msg, 'errors': self._msg})
         abort_if(self._error, {'msg': msg, 'errors': self._msg}, 422)
 
         return dictAttribute(res)

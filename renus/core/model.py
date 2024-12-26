@@ -173,14 +173,17 @@ class ModelBase:
         self._select = s
         return self
 
-    def with_relation(self, collection, local_field, forigen_field, to, single=False):
+    def with_relation(self, collection, local_field, forigen_field, to, single=False, pipeline=None):
+        if pipeline is None:
+            pipeline = []
         if self._steps is not None:
             self._steps.append({
                 "$lookup": {
                     "from": collection,
                     "localField": local_field,
                     "foreignField": forigen_field,
-                    "as": to
+                    "as": to,
+                    "pipeline": pipeline
                 }
             })
             if single:
