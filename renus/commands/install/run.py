@@ -76,7 +76,10 @@ def install_app(app, installed):
 
     if hasattr(install, 'cls'):
         print(f'   add {app} class...')
-        _add_cls(install,app)
+        try:
+            _add_cls(install, app)
+        except Exception as exc:
+            print('   ' + bc.FAIL + str(exc) + bc.ENDC)
 
     if hasattr(install, 'route'):
         print(f'   add {app} route...')
@@ -84,27 +87,45 @@ def install_app(app, installed):
 
     if hasattr(install, 'imprt'):
         print(f'   add {app} imports...')
-        _add_imprt(install,app)
+        try:
+            _add_imprt(install, app)
+        except Exception as exc:
+            print('   ' + bc.FAIL + str(exc) + bc.ENDC)
 
     if hasattr(install, 'admin_templates'):
         print(f'   add {app} admin_templates...')
-        _add_admin_templates(install)
+        try:
+            _add_admin_templates(install)
+        except Exception as exc:
+            print('   ' + bc.FAIL + str(exc) + bc.ENDC)
 
     if hasattr(install, 'index_templates'):
         print(f'   add {app} index_templates...')
-        _add_index_templates(install)
+        try:
+            _add_index_templates(install)
+        except Exception as exc:
+            print('   ' + bc.FAIL + str(exc) + bc.ENDC)
 
     if hasattr(install, 'user_templates'):
         print(f'   add {app} user_templates...')
-        _add_user_templates(install)
+        try:
+            _add_user_templates(install)
+        except Exception as exc:
+            print('   ' + bc.FAIL + str(exc) + bc.ENDC)
 
     if hasattr(install, 'config'):
         print(f'   add {app} config...')
-        _add_config(install)
+        try:
+            _add_config(install)
+        except Exception as exc:
+            print('   ' + bc.FAIL + str(exc) + bc.ENDC)
 
     if hasattr(install, 'setup'):
         print(f'   setup {app}...')
-        install.setup()
+        try:
+            install.setup()
+        except Exception as exc:
+            print('   ' + bc.FAIL + str(exc) + bc.ENDC)
 
 
 def install_all(apps, installed, isUpdate):

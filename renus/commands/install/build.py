@@ -38,7 +38,7 @@ def _add_route(install, app):
 
 
 def _add_admin_templates(install):
-    with open('./frontend/src/router/admin.js', 'r') as file:
+    with open('./frontend/admin/src/router/index.js', 'r') as file:
         all = file.read()
         for item in install.admin_templates:
             all = all.replace('/* {{place new import}} */',
@@ -48,12 +48,12 @@ def _add_admin_templates(install):
             all = all.replace('/* {{place new Route}} */',
                               '/* {{place new Route}} */\n' + item.get('path', '{}') + ',')
 
-        with open('./frontend/src/router/admin.js', 'w') as b:
+        with open('./frontend/admin/src/router/index.js', 'w') as b:
             b.write(all)
 
 
 def _add_index_templates(install):
-    with open('./frontend/src/router/index.js', 'r') as file:
+    with open('./frontend/index/src/router/index.js', 'r') as file:
         all = file.read()
         for item in install.index_templates:
             all = all.replace('/* {{place new import}} */',
@@ -62,12 +62,12 @@ def _add_index_templates(install):
                                   'file', 'test') + '");')
             all = all.replace('/* {{place new Route home}} */',
                               '/* {{place new Route home}} */\n' + item.get('path', '') + ',')
-        with open('./frontend/src/router/index.js', 'w') as b:
+        with open('./frontend/index/src/router/index.js', 'w') as b:
             b.write(all)
 
 
 def _add_user_templates(install):
-    with open('./frontend/src/router/index.js', 'r') as file:
+    with open('./frontend/index/src/router/index.js', 'r') as file:
         all = file.read()
         for item in install.user_templates:
             all = all.replace('/* {{place new import}} */',
@@ -76,7 +76,7 @@ def _add_user_templates(install):
                                   'file', 'test') + '");')
             all = all.replace('/* {{place new Route user}} */',
                               '/* {{place new Route user}} */\n' + item.get('path', '') + ',')
-        with open('./frontend/src/router/index.js', 'w') as b:
+        with open('./frontend/index/src/router/index.js', 'w') as b:
             b.write(all)
 
 
