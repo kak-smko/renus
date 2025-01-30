@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='renus',
-    version='1.4.0',
+    version='1.4.1',
     description='Renus Core Framework',
     url='https://github.com/smkoBa/renus',
     author='Smko Bayazidi',
@@ -11,5 +11,5 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     python_requires=">=3.8",
-    install_requires=['anyio', 'python-multipart', 'pymongo', 'requests']
+    install_requires=['anyio', 'python-multipart', 'pymongo', 'requests', 'setuptools']
 )

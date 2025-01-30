@@ -39,12 +39,12 @@ def add_temp(name,names, name_camel,names_camel, name_db,folder:list):
             controller.write(all)
 
     with open(vue_temp,'r') as file:
-        os.makedirs('./frontend/src/views/admin/'+vname.lstrip('/'), exist_ok=True)
+        os.makedirs('./frontend/admin/src/views/' + vname.lstrip('/'), exist_ok=True)
         all=file.read()
         all=all.replace('{name}',name)
         all=all.replace('{names}',names)
         all = all.replace('{folder}', vname.lstrip('/'))
-        with open('./frontend/src/views/admin/'+vname.lstrip('/')+name+'.vue','w') as controller:
+        with open('./frontend/admin/src/views/' + vname.lstrip('/') + name + '.vue', 'w') as controller:
             controller.write(all)
 
     with open(route_temp,'r') as file:
@@ -97,12 +97,13 @@ def add_routes(name, names, name_camel,folder):
         with open('./routes/index.py', 'w') as b:
                 b.write(all)
 
-    with open('./frontend/src/router/admin.js', 'r') as file:
+    with open('./frontend/admin/src/router/index.js', 'r') as file:
         all=file.read()
-        all=all.replace('/* {{place new import}} */','/* {{place new import}} */\nconst '+names+' = () => import("../views/admin/'+vname+name+'");')
+        all = all.replace('/* {{place new import}} */',
+                          '/* {{place new import}} */\nconst ' + names + ' = () => import("../views/' + vname + name + '");')
         all=all.replace('/* {{place new Route}} */','/* {{place new Route}} */\n{ path: "'+vname+names+'", name: "'+names+'", component: '+names+' },')
 
-        with open('./frontend/src/router/admin.js', 'w') as b:
+        with open('./frontend/admin/src/router/index.js', 'w') as b:
                 b.write(all)
 
 
