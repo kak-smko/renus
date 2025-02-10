@@ -239,8 +239,8 @@ class ModelBase:
 
         id = self.collection().insert_one(document, session=session).inserted_id
         document['_id'] = id
-        self.boot_event('create', {}, document)
-        self._attach_file(document)
+        self.boot_event('create', {}, document, session)
+        self._attach_file(document, session)
         return document
 
     def create_many(self, documents: typing.List, session=None) -> typing.List[ObjectId]:
@@ -253,8 +253,8 @@ class ModelBase:
                     document["created_at"] = datetime.utcnow()
 
         ids = self.collection().insert_many(documents, session=session).inserted_ids
-        self.boot_event('create_many', {}, ids)
-        self._attach_file({'_id': 'create_many', 'documents': documents})
+        self.boot_event('create_many', {}, ids, session)
+        self._attach_file({'_id': 'create_many', 'documents': documents}, session)
         return ids
 
     def update(self, new: dict, upsert=False, get_old=False, session=None) -> bool:
@@ -265,12 +265,12 @@ class ModelBase:
         if self.add_time_fields and "created_at" not in new:
             d["$setOnInsert"] = {'created_at': datetime.utcnow()}
         old = self.collection().find_one_and_update(where, d, upsert=upsert, session=session)
-        self.boot_event('update', old, new)
+        self.boot_event('update', old, new, session)
         if old is None:
             new = {'_id': 'upsert', 'doc': new}
         else:
             new['_id'] = old['_id']
-        self._attach_file(new)
+        self._attach_file(new, session)
         return old if get_old else True
 
     def update_opt(self, new: dict, upsert=False, get_old=False, session=None) -> bool:
@@ -283,12 +283,12 @@ class ModelBase:
             new['$set']["updated_at"] = datetime.utcnow()
             new['$setOnInsert']['created_at'] = datetime.utcnow()
         old = self.collection().find_one_and_update(where, new, upsert=upsert, session=session)
-        self.boot_event('update', old, {k[1:]: v for k, v in new.items()})
+        self.boot_event('update', old, {k[1:]: v for k, v in new.items()}, session)
         if old is None:
             new = {'_id': 'upsert', 'doc': new}
         else:
             new['_id'] = old['_id']
-        self._attach_file(new)
+        self._attach_file(new, session)
         return old if get_old else True
 
     def update_opt_many(self, new: dict, upsert=False, get_old=False, session=None) -> bool:
@@ -301,8 +301,8 @@ class ModelBase:
             new['$set']["updated_at"] = datetime.utcnow()
             new['$setOnInsert']['created_at'] = datetime.utcnow()
         old = self.collection().update_many(where, new, upsert=upsert, session=session).raw_result
-        self.boot_event('update_many', old, {k[1:]: v for k, v in new.items()})
-        self._attach_file({'_id': 'update_opt_many', 'documents': new})
+        self.boot_event('update_many', old, {k[1:]: v for k, v in new.items()}, session)
+        self._attach_file({'_id': 'update_opt_many', 'documents': new}, session)
         return old if get_old else True
 
     def update_many(self, new: dict, session=None) -> bool:
@@ -310,8 +310,8 @@ class ModelBase:
         if self.add_time_fields:
             new["updated_at"] = datetime.utcnow()
         old = self.collection().update_many(where, {"$set": new}, session=session).raw_result
-        self.boot_event('update_many', old, str(new))
-        self._attach_file({'_id': 'update_many', 'documents': new})
+        self.boot_event('update_many', old, str(new), session)
+        self._attach_file({'_id': 'update_many', 'documents': new}, session)
         return True
 
     def delete(self, all: bool = False, session=None) -> bool:
@@ -319,14 +319,14 @@ class ModelBase:
         if all is False:
             old = self.collection().find_one_and_delete(where, session=session)
             if self.metro is not None:
-                self._handle_metro('delete', old)
-            self.boot_event('delete', old, {})
+                self._handle_metro('delete', old, session=session)
+            self.boot_event('delete', old, {}, session)
         else:
             if self.metro is not None:
-                self._handle_metro('delete')
+                self._handle_metro('delete', session=session)
             old = self.collection().delete_many(where, session=session)
 
-            self.boot_event('delete_many', {'deleted_count': old.deleted_count, 'where': str(where)}, {})
+            self.boot_event('delete_many', {'deleted_count': old.deleted_count, 'where': str(where)}, {}, session)
 
         return old
 
@@ -335,7 +335,7 @@ class ModelBase:
         return self
 
     @staticmethod
-    def boot_event(typ: str, old, new):
+    def boot_event(typ: str, old, new, session):
         pass
 
     @staticmethod
@@ -392,11 +392,11 @@ class ModelBase:
 
         return where
 
-    def _handle_metro(self, typ, obj=None):
+    def _handle_metro(self, typ, obj=None, session=None):
         if typ == 'delete':
             if obj is None:
                 where = self.__ud_gate('delete')
-                all = self.collection().find(where)
+                all = self.collection().find(where, session=session)
             else:
                 all = [obj]
 
@@ -406,23 +406,13 @@ class ModelBase:
                         raise RuntimeError(
                             "metro format not true. ex: '_id':[{'collection':'test','field': 'test_id'}]")
                     for d in db:
-                        strg = d.get('storage', False)
                         c = d.get('collection', False)
                         if c is not False:
-                            if strg:
-                                files = self.collection(c).find({
-                                    d['field']: item[field]
-                                })
-
-                                for file in files:
-                                    self._remove_file(file.get(strg, []))
                             self.collection(c).delete_many({
                                 d['field']: item[field]
-                            })
-                        elif strg is not False:
-                            l = self.__get_links(strg, item)
-                            if l:
-                                self._remove_file(l)
+                            }, session=session)
+                self._detach_file(item, session)
+
 
     def __get_links(self, field: str, doc: dict):
         item = doc.copy()
@@ -435,29 +425,21 @@ class ModelBase:
             item = item[i]
         return r
 
-    def _attach_file(self, item):
+    def _attach_file(self, item, session):
         if self.storage is None or self.metro is None:
             return
         links = self._links_extractor(item)
         self.storage.reset().where({
             'path': {'$in': links}
-        }).update_many({'type': self.collection_name, 'type_id': item['_id']})
+        }).update_many({'type': self.collection_name, 'type_id': item['_id']}, session=session)
 
-    def _remove_file(self, links):
-        if self.storage is None:
+    def _detach_file(self, item, session):
+        if self.storage is None or self.metro is None:
             return
-        if type(links) is dict:
-            links = list(links.values())
-        if type(links) is not list:
-            links = [links]
+        self.storage.reset().where({
+            'type_id': item['_id']
+        }).update_many({'type': None, 'type_id': None}, session=session)
 
-        for link in links:
-            if type(link) is str:
-                self.storage.remove(link)
-            elif type(link) is dict:
-                self.storage.remove(link.get('url'))
-            else:
-                raise RuntimeError(f"type {link} must be string or dict but its {type(link)}")
 
     @property
     def database_name(self):
