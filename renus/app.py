@@ -135,7 +135,7 @@ class App:
             passed = Middleware(request, middlewares).next()
 
             if passed is not True and request.method != 'OPTIONS':
-                await self.result(request, JsonResponse(passed, Status.HTTP_403_FORBIDDEN), scope, receive, send)
+                await self.result(request, passed, scope, receive, send)
             else:
                 if res["controller"] is not None:
                     if 'request' in inspect.getfullargspec(res["controller"].__init__).args:

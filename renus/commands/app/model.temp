@@ -24,5 +24,5 @@ class {names_camel}(ModelBase):
     def first(self, police: bool = True, session=None) -> typing.Union[document_model,None]:
         return self._first(police, session)
 
-    def boot_event(self, typ: str, old, new):
-        ActivityService().handle(typ, old, new, self.request, self.collection_name)
+    def boot_event(self, typ: str, old, new, session=None):
+        ActivityService().handle(typ, old, new, self.request, self.collection_name, session)

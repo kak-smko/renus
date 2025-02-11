@@ -5,8 +5,8 @@ class Middleware:
 
     def next(self):
         for middleware in self.middlewares:
-            handle=middleware(self.request)
-            if handle.get('pass',False) is not True:
-                return {'msg':handle.get('msg',None)}
-
+            handle = middleware(self.request)
+            if handle is True:
+                continue
+            return handle
         return True
