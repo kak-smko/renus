@@ -419,10 +419,18 @@ class ModelBase:
         p = field.split('.')
         r = None
         for i in p:
-            if i not in item:
-                return False
-            r = item[i]
-            item = item[i]
+            if type(item) is list:
+                res = []
+                for f in item:
+                    if i not in f:
+                        return False
+                    res.append(f[i])
+                return res
+            else:
+                if i not in item:
+                    return False
+                r = item[i]
+                item = item[i]
         return r
 
     def _attach_file(self, item, session):

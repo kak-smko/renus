@@ -31,8 +31,9 @@ def format(header,
 def Help():
     print(format({
         'app': 'Create New Package',
-        'install renus/user/*': 'Install Apps',
-        'install -update renus/user/*': 'Update Apps',
+        'extension renus/user': 'Install App',
+        'extension --update renus/user': 'Update App',
+        'extension --remove renus/user': 'Remove App',
         'backup': 'Backing up the entire project',
         'copy': 'Get a copy of the app to upload to the server',
         'permission': 'Add All Permissions to DB',

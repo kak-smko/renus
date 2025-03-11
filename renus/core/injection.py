@@ -1,5 +1,6 @@
-from html.parser import HTMLParser
 from html import unescape
+from html.parser import HTMLParser
+
 
 class Injection:
     def escape(self, value:str):
@@ -43,6 +44,10 @@ class Xss(HTMLParser):
     allow_protocol=['http','https']
     allow_attr = {'class':1,
                   'id':1,
+                  'http-equiv': ['meta'],
+                  'content': ['meta'],
+                  'name': ['meta'],
+                  'charset': ['meta'],
                   'href':['a'],
                   'target':['a'],
                   'alt':['img'],
@@ -51,7 +56,7 @@ class Xss(HTMLParser):
                   'controls':['video'],
                   'src':['img','video']
                   }
-    no_end_tags = ["img", "hr", "br", "embed"]
+    no_end_tags = ["img", "hr", "br", "embed", "meta"]
 
     def __init__(self):
         HTMLParser.__init__(self)
