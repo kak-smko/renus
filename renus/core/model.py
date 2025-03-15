@@ -408,11 +408,17 @@ class ModelBase:
                     for d in db:
                         c = d.get('collection', False)
                         if c is not False:
+                            if self.storage:
+                                ids = list(self.collection(c).find({
+                                    d['field']: item[field]
+                                }, {"_id": 1}, session=session))
+                                for id_item in ids:
+                                    self._detach_file(id_item, session)
                             self.collection(c).delete_many({
                                 d['field']: item[field]
                             }, session=session)
-                self._detach_file(item, session)
 
+                self._detach_file(item, session)
 
     def __get_links(self, field: str, doc: dict):
         item = doc.copy()
