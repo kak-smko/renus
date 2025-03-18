@@ -20,7 +20,7 @@ def download(app, version, installed, isUpdate=False):
 
     print(f'{bc.OKGREEN}downloading {app}/{version}{bc.ENDC}')
 
-    res = requests.get(f'https://reapp.codenus.com/app/{app}/{version}')
+    res = requests.get(f'https://codenus.com/app/{app}/{version}')
 
     if res.status_code != 200:
         print(f'{bc.FAIL}download error{bc.ENDC}')

@@ -54,8 +54,8 @@ def _add_admin_templates(install, app):
     with open('./frontend/admin/src/router/index.js', 'r') as file:
         all = file.read()
         all = "import " + name + "_routes from '@/extension/" + app + "/route.js'\n" + all
-        all = all.replace('/* {{place new Route}} */',
-                          '/* {{place new Route}} */\n...' + name + '_routes,')
+        all = all.replace('/* {{place new route}} */',
+                          '/* {{place new route}} */\n...' + name + '_routes,')
 
         with open('./frontend/admin/src/router/index.js', 'w') as b:
             b.write(all)
@@ -80,8 +80,8 @@ def _add_index_templates(install, app):
         all = file.read()
         all = "import " + name + "_routes from '@/extension/" + app + "/route.js'\n" + all
 
-        all = all.replace('/* {{place new Route}} */',
-                          '/* {{place new Route}} */\n...' + name + '_routes,')
+        all = all.replace('/* {{place new route}} */',
+                          '/* {{place new route}} */\n...' + name + '_routes,')
 
         with open('./frontend/index/src/router/index.js', 'w') as b:
             b.write(all)

@@ -101,7 +101,8 @@ def add_routes(name, names, name_camel,folder):
         all=file.read()
         all = all.replace('/* {{place new import}} */',
                           '/* {{place new import}} */\nconst ' + names + ' = () => import("../views/' + vname + name + '.vue");')
-        all=all.replace('/* {{place new Route}} */','/* {{place new Route}} */\n{ path: "'+vname+names+'", name: "'+names+'", component: '+names+' },')
+        all = all.replace('/* {{place new app route}} */',
+                          '/* {{place new app route}} */\n{ path: "' + vname + names + '", name: "' + names + '", component: ' + names + ' },')
 
         with open('./frontend/admin/src/router/index.js', 'w') as b:
                 b.write(all)
