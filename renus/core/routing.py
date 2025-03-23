@@ -1,5 +1,5 @@
-import typing
 import re
+import typing
 
 try:
     from bson import ObjectId
@@ -25,21 +25,26 @@ class BaseRoute:
     _routes = {}
     _route_store = {}
 
-    def __init__(self, scope, prefix: str = '', middlewares=None, sub_domain=None) -> None:
+    def __init__(self, scope, prefix: str = '', middlewares=None, subdomain=None, shared=False) -> None:
         if middlewares is None:
             middlewares = []
+
+        if subdomain == '_' or subdomain == '__':
+            raise "subdomain cannot be '_'"
 
         self._scope = scope
         self._app_prefix = prefix
         self._middlewares = middlewares
-        self._sub_domain = sub_domain or '_'
+        self._subdomain = subdomain or '_'
+        if shared:
+            self._subdomain = "__"
 
-        if self._sub_domain not in self._routes:
-            self._routes[self._sub_domain] = {}
+        if self._subdomain not in self._routes:
+            self._routes[self._subdomain] = {}
 
         for m in ['POST', 'GET', 'PUT', 'OPTIONS', 'DELETE', 'WS']:
-            if m not in self._routes[self._sub_domain]:
-                self._routes[self._sub_domain][m] = []
+            if m not in self._routes[self._subdomain]:
+                self._routes[self._subdomain][m] = []
 
     def _add(self, path: str, controller: typing.Callable, func: typing.Union[str, typing.Callable], method: str,
              middlewares=None, cache=None):
@@ -57,24 +62,24 @@ class BaseRoute:
         }
         if cache:
             r['cache'] = cache
-        self._routes[self._sub_domain][method].append(r)
+        self._routes[self._subdomain][method].append(r)
 
     @property
     def all(self):
         return self._routes
 
     @property
-    def sub_domains(self):
+    def subdomains(self):
         if self._route_store.get('_subdomains', False) is False:
             self._route_store['_subdomains'] = list(self._routes.keys())
 
         return self._route_store['_subdomains']
 
     def __request_subdomain(self, request):
-        if len(self.sub_domains) == 1:
-            return self.sub_domains[0]
+        if len(self.subdomains) == 1:
+            return self.subdomains[0]
 
-        return request.sub_domain or '_'
+        return request.subdomain or '_'
 
     def response(self, request):
         method = request.method
@@ -86,11 +91,22 @@ class BaseRoute:
 
         path = self._scope['path']
 
-        sub_domain = self.__request_subdomain(request)
+        subdomain = self.__request_subdomain(request)
 
-        if sub_domain not in self._routes:
+        if subdomain not in self._routes:
             return False
-        for route in self._routes[sub_domain][method]:
+
+        if "__" in self._routes:
+            for route in self._routes["__"][method]:
+                regex, params = route['regex']
+                find = regex.search(path)
+                if find:
+                    args = {}
+                    for key, value in params.items():
+                        args[key] = value.convert(find.group(key))
+                    return build(route, args)
+
+        for route in self._routes[subdomain][method]:
             regex, params = route['regex']
             find = regex.search(path)
             if find:
@@ -104,10 +120,10 @@ class BaseRoute:
 
 class Router(BaseRoute):
     def __init__(self, scope=None, prefix: str = '', middlewares: typing.List[typing.Callable] = None,
-                 sub_domain: str = None) -> None:
+                 subdomain: str = None, shared: bool = False) -> None:
         if middlewares is None:
             middlewares = []
-        super().__init__(scope, prefix, middlewares, sub_domain)
+        super().__init__(scope, prefix, middlewares, subdomain, shared)
 
     def get(self, path, controller: typing.Callable = None, func: typing.Union[str, typing.Callable] = None,
             middlewares: typing.List[typing.Callable] = None, cache=None):
@@ -166,43 +182,44 @@ def build(route, args):
 
 PARAM_REGEX = re.compile("{([a-zA-Z_][a-zA-Z0-9_]*)(:[^/{]*)?}")
 
+
 class StringConvertor:
-    regex = "[^/]+"
+    regex = r"[^/]+"
 
     def convert(self, value: str) -> str:
         return value
 
 
 class PathConvertor:
-    regex = ".*"
+    regex = r".*"
 
     def convert(self, value: str) -> str:
         return str(value)
 
 
 class IntegerConvertor:
-    regex = "[0-9]+"
+    regex = r"[0-9]+"
 
     def convert(self, value: str) -> int:
         return int(value)
 
 
 class FloatConvertor:
-    regex = "[0-9]+(.[0-9]+)?"
+    regex = r"[0-9]+(.[0-9]+)?"
 
     def convert(self, value: str) -> float:
         return float(value)
 
 
 class OIdConvertor:
-    regex = "[a-f\d]{24}"
+    regex = r"[a-f\d]{24}"
 
     def convert(self, value: str) -> ObjectId:
         return ObjectId(value)
 
 
 class BoolConvertor:
-    regex = "(true)|(false)"
+    regex = r"(true)|(false)"
 
     def convert(self, value: str) -> bool:
         return bool(value)
@@ -241,4 +258,3 @@ def build_path(
     path_regex += re.escape(path[idx:]) + "$"
 
     return re.compile(path_regex), param_convertors
-

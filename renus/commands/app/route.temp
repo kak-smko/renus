@@ -3,7 +3,8 @@ from app.{name}.controller import {name_camel}Controller
 from app.extension.renus.permission.middleware import PermissionMiddleware
 from app.extension.renus.user.middleware import AuthMiddleware
 
-r=Router(prefix='api/admin{folder}', middlewares=[AuthMiddleware, PermissionMiddleware('admin')])
+r=Router(subdomain=Config('app').get('admin_subdomain','admin'),
+         prefix='api/admin{folder}', middlewares=[AuthMiddleware, PermissionMiddleware('admin')])
 r.crud('/{names}',{name_camel}Controller, middlewares=[PermissionMiddleware('{names}')])
 
 u=Router(prefix='api/user', middlewares=[AuthMiddleware])

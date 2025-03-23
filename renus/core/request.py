@@ -46,8 +46,8 @@ class Request:
         return self.headers.get(Config('app').get('ipHeader', False), self.client[0])
 
     @property
-    def sub_domain(self):
-        if not hasattr(self, "_sub_domain"):
+    def subdomain(self):
+        if not hasattr(self, "_subdomain"):
             host = self.headers.get('host', None)
             if host is None:
                 return None
@@ -64,9 +64,9 @@ class Request:
                     return r[0]
                 else:
                     return None
-            self._sub_domain = r[0]
+            self._subdomain = r[0]
 
-        return self._sub_domain
+        return self._subdomain
 
     @property
     def user_agent(self):
