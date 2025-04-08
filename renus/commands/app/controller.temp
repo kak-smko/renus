@@ -2,7 +2,7 @@ from renus.core.request import Request
 from app.{name}.model import {names_camel}
 from renus.core.response import JsonResponse
 from renus.core.validation.validate import Validate,vr
-from app.extension.renus.table.model import Table
+from app.extension.codenus.table.model import Table
 
 class {name_camel}Controller:
     def __init__(self,request:Request) -> None:

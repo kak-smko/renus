@@ -1,5 +1,5 @@
-import typing
 from datetime import datetime
+from typing import TypeVar, Generic, Any, List, Optional, Union, Tuple, Dict
 
 from bson import ObjectId
 from pymongo import MongoClient
@@ -20,7 +20,10 @@ class ReModel:
         return self.__dict__[item]
 
 
-class ModelBase:
+M = TypeVar('T')
+
+
+class ModelBase(Generic[M]):
     client = MongoClient(Config('database').get('host', '127.0.0.1'),
                          Config('database').get('port', 27017),
                          username=Config('database').get('username', None),
@@ -79,7 +82,7 @@ class ModelBase:
         self.visible_fields = []
         return self
 
-    def aggregate(self, pipeline: typing.Any, session: typing.Any = None):
+    def aggregate(self, pipeline: Any, session: Any = None):
         return self.__police(self.collection().aggregate(pipeline, session))
 
     def where(self, where: dict):
@@ -138,7 +141,7 @@ class ModelBase:
         self._steps.append({"$group": item})
         return self
 
-    def sort(self, key_or_list: typing.Union[str, typing.List[typing.Tuple]], asc: bool = True):
+    def sort(self, key_or_list: Union[str, List[Tuple]], asc: bool = True):
         if type(key_or_list) is dict:
             s = key_or_list
         elif type(key_or_list) is list:
@@ -155,7 +158,7 @@ class ModelBase:
             self._sort = s
         return self
 
-    def select(self, *select: [str, typing.Dict]):
+    def select(self, *select: [str, Dict]):
         s = {}
         if len(select) == 1 and type(select[0]) is dict:
             s = select[0]
@@ -197,7 +200,7 @@ class ModelBase:
         self._steps = []
         return self
 
-    def _get(self, police: bool = True, session=None) -> typing.List[document_model]:
+    def get(self, police: bool = True, session=None) -> List[M]:
         if self._steps is not None:
             return self.aggregate(self._steps, session)
 
@@ -216,19 +219,13 @@ class ModelBase:
 
         return self.__police(find) if police else list(find)
 
-    def get(self, police: bool = True, session=None) -> typing.List[document_model]:
-        return self._get(police, session)
-
-    def _first(self, police: bool = True, session=None) -> typing.Union[document_model, None]:
+    def first(self, police: bool = True, session=None) -> Optional[M]:
         self.limit(1)
         res = self.get(police, session)
         self._limit = None
         if len(res) == 1:
             return res[0]
         return None
-
-    def first(self, police: bool = True, session=None) -> typing.Union[document_model, None]:
-        return self._first(police, session)
 
     def create(self, document: dict, session=None) -> dict:
         if self.add_time_fields and "updated_at" not in document:
@@ -243,7 +240,7 @@ class ModelBase:
         self._attach_file(document, session)
         return document
 
-    def create_many(self, documents: typing.List, session=None) -> typing.List[ObjectId]:
+    def create_many(self, documents: List, session=None) -> List[ObjectId]:
         if self.add_time_fields:
             for document in documents:
                 if "updated_at" not in document:
@@ -330,7 +327,7 @@ class ModelBase:
 
         return old
 
-    def make_visible(self, fields: typing.List):
+    def make_visible(self, fields: List):
         self.visible_fields = fields
         return self
 
@@ -371,7 +368,7 @@ class ModelBase:
 
         return self.document_model(self.cast(document))
 
-    def __police(self, documents: typing.Any):
+    def __police(self, documents: Any):
         if documents is None:
             return None
         res = []

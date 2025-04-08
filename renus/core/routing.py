@@ -25,19 +25,17 @@ class BaseRoute:
     _routes = {}
     _route_store = {}
 
-    def __init__(self, scope, prefix: str = '', middlewares=None, subdomain=None, shared=False) -> None:
+    def __init__(self, scope, prefix: str = '', middlewares=None, subdomain=None) -> None:
         if middlewares is None:
             middlewares = []
 
-        if subdomain == '_' or subdomain == '__':
+        if subdomain == '_':
             raise "subdomain cannot be '_'"
 
         self._scope = scope
         self._app_prefix = prefix
         self._middlewares = middlewares
         self._subdomain = subdomain or '_'
-        if shared:
-            self._subdomain = "__"
 
         if self._subdomain not in self._routes:
             self._routes[self._subdomain] = {}
@@ -79,7 +77,7 @@ class BaseRoute:
         if len(self.subdomains) == 1:
             return self.subdomains[0]
 
-        return request.subdomain or '_'
+        return request.subdomain
 
     def response(self, request):
         method = request.method
@@ -93,37 +91,26 @@ class BaseRoute:
 
         subdomain = self.__request_subdomain(request)
 
-        if subdomain not in self._routes:
-            return False
-
-        if "__" in self._routes:
-            for route in self._routes["__"][method]:
-                regex, params = route['regex']
-                find = regex.search(path)
-                if find:
-                    args = {}
-                    for key, value in params.items():
-                        args[key] = value.convert(find.group(key))
-                    return build(route, args)
-
-        for route in self._routes[subdomain][method]:
-            regex, params = route['regex']
-            find = regex.search(path)
-            if find:
-                args = {}
-                for key, value in params.items():
-                    args[key] = value.convert(find.group(key))
-                return build(route, args)
+        for sub in [subdomain, "_"]:
+            if sub in self._routes:
+                for route in self._routes[sub][method]:
+                    regex, params = route['regex']
+                    find = regex.search(path)
+                    if find:
+                        args = {}
+                        for key, value in params.items():
+                            args[key] = value.convert(find.group(key))
+                        return build(route, args)
 
         return False
 
 
 class Router(BaseRoute):
     def __init__(self, scope=None, prefix: str = '', middlewares: typing.List[typing.Callable] = None,
-                 subdomain: str = None, shared: bool = False) -> None:
+                 subdomain: str = None) -> None:
         if middlewares is None:
             middlewares = []
-        super().__init__(scope, prefix, middlewares, subdomain, shared)
+        super().__init__(scope, prefix, middlewares, subdomain)
 
     def get(self, path, controller: typing.Callable = None, func: typing.Union[str, typing.Callable] = None,
             middlewares: typing.List[typing.Callable] = None, cache=None):

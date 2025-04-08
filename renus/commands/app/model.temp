@@ -2,7 +2,7 @@ import typing
 from datetime import datetime
 from bson import ObjectId
 from renus.core.model import ModelBase, ReModel
-from app.extension.renus.activity.service import ActivityService
+from app.extension.codenus.activity.service import ActivityService
 
 class {name_camel}(ReModel):
     _id: ObjectId
@@ -10,19 +10,13 @@ class {name_camel}(ReModel):
     updated_at: datetime
 
 
-class {names_camel}(ModelBase):
+class {names_camel}(ModelBase[{name_camel}]):
     collection_name="{name_db}"
     document_model={name_camel}
 
     def __init__(self, request) -> None:
         super().__init__()
         self.request=request
-
-    def get(self, police: bool = True, session=None) -> typing.List[document_model]:
-        return self._get(police, session)
-
-    def first(self, police: bool = True, session=None) -> typing.Union[document_model,None]:
-        return self._first(police, session)
 
     def boot_event(self, typ: str, old, new, session=None):
         ActivityService().handle(typ, old, new, self.request, self.collection_name, session)

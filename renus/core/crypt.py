@@ -1,69 +1,107 @@
+import random
 from base64 import urlsafe_b64encode, urlsafe_b64decode
-import sys
+from hashlib import sha3_256
+from typing import List
 
-from renus.util.helper import get_random_string, remove_pad64, add_pad64
-
-try:
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-    from cryptography.fernet import Fernet
-except ImportError:
-    Fernet = None
-
-def pad(s,n=16):
-    block_size = n
-    remainder = len(s) % block_size
-    padding_needed = block_size - remainder
-    return s + padding_needed * ' '
+from renus.util.helper import get_random_string
 
 
-def __generate_key(password):
-    salt = b'dfkTGG536fdfkTGG536fkdfijdkdfijd'
-    kdf = PBKDF2HMAC(algorithm = hashes.SHA256(),length = 32,salt = salt,iterations = 100000)
-    return urlsafe_b64encode(kdf.derive(password.encode()))
+class FastEncryptor:
+    def __init__(self, length=32):
+        self._matrix = length
 
+    def _pad_list(self, s: List[int]) -> List[int]:
+        """Pads the input list with zeros until its length is a multiple of n."""
+        block_size = self._matrix
+        remainder = len(s) % block_size
+        padding_needed = block_size - remainder
+        return s + [0] * padding_needed
 
-def encrypt(text:str,password:str)->str:
-    assert Fernet is not None, "'cryptography' must be installed to use encrypt"
-    key = __generate_key(password)
-    f = Fernet(key)
-    d= f.encrypt(text.encode())
-    return d.decode()
+    def _generate_password(self, password: bytes) -> List[int]:
+        """Generates a list of matrix bytes from the hashed password."""
+        p = sha3_256()
+        r = []
+        while len(r) < self._matrix:
+            p.update(password)
+            r.extend(p.digest())
+        return r[:self._matrix]
 
+    def _to_matrix(self, text: List[int]) -> List[List[int]]:
+        """Converts a flat list into a matrix of size matrix."""
+        return [text[i * self._matrix:(i + 1) * self._matrix] for i in range(len(text) // self._matrix)]
 
+    def _from_matrix(self, text: List[List[int]]) -> List[int]:
+        """Flattens a matrix back into a single list."""
+        return [item for sublist in text for item in sublist]
 
-def decrypt(enc_dict:str, password:str)->str:
-    assert Fernet is not None, "'cryptography' must be installed to use decrypt"
-    key = __generate_key(password)
-    f = Fernet(key)
-    d = f.decrypt(enc_dict.encode())
-    return d.decode()
+    def _getperm(self, l, seed):
+        perm = list(range(len(l)))
+        random.Random(seed).shuffle(perm)
+        return perm
 
+    def _shuffle(self, l, seed):
+        perm = self._getperm(l, seed)
+        l[:] = [l[j] for j in perm]
 
-def shift(clear, key):
-    clear += key
-    rnd = get_random_string(6)
-    clear = rnd + clear
-    clear = urlsafe_b64encode(clear.encode()).decode()
-    enc = []
-    lnk=len(key)
-    for i in range(len(clear)):
-        key_c = key[i % lnk]
-        enc_c = chr((ord(clear[i]) + ord(key_c)) % 256)
-        enc.append(enc_c)
+    def _unshuffle(self, l, seed):
+        perm = self._getperm(l, seed)
+        res = [None] * len(l)
+        for i, j in enumerate(perm):
+            res[j] = l[i]
+        l[:] = res
 
-    return remove_pad64(urlsafe_b64encode("".join(enc).encode()).decode())
+    def _sum_matrix(self, l: List[List[int]], key: List[int]) -> None:
+        """Applies XOR operation to the matrix with the key."""
+        for i in range(len(l)):
+            for j in range(len(l[i])):
+                l[i][j] ^= l[i - 1][j] if i > 0 else key[j]
 
+    def _minus_matrix(self, l: List[List[int]], key: List[int]) -> None:
+        """Reverses the sum_matrix operation."""
+        ln = len(l)
+        for k in range(ln):
+            i = ln - k - 1
+            for j in range(len(l[i])):
+                l[i][j] ^= l[i - 1][j] if i > 0 else key[j]
 
-def unshift(enc, key):
-    try:
-        enc = urlsafe_b64decode(add_pad64(enc)).decode()
-        ln = len(key)
-        dec = []
-        for i in range(len(enc)):
-            key_c = key[i % ln]
-            dec_c = chr((256 + ord(enc[i]) - ord(key_c)) % 256)
-            dec.append(dec_c)
-        return urlsafe_b64decode("".join(dec)).decode()[6:-ln]
-    except:
-        raise RuntimeError('Invalid Token Format')
+    def _decode(self, enc):
+        return urlsafe_b64encode(bytearray(enc)).decode()
+
+    def _encode(self, dec):
+        return list(urlsafe_b64decode(dec.encode()))
+
+    def shift(self, text: str, key: str):
+        key = self._generate_password(key.encode("utf-8"))
+        text = get_random_string(self._matrix) + text
+        text = self._pad_list(list(text.encode("utf-8")))
+        text = self._to_matrix(text)
+        self._shuffle(text, sum(key))
+        for i in range(len(text)):
+            if i > len(text) - 2:
+                self._shuffle(text[i], key[0])
+            else:
+                self._shuffle(text[i], text[i + 1][0])
+
+        self._sum_matrix(text, key)
+        return self._decode(self._from_matrix(text))
+
+    def unshift(self, text, key):
+        text = self._encode(text)
+        remainder = len(text) % self._matrix
+        if remainder != 0:
+            raise RuntimeError('Invalid Token Matrix Length')
+        key = self._generate_password(key.encode("utf-8"))
+        text = self._to_matrix(text)
+        self._minus_matrix(text, key)
+        for k in range(len(text)):
+            i = len(text) - k - 1
+            if i == len(text) - 1:
+                self._unshuffle(text[i], key[0])
+            else:
+                self._unshuffle(text[i], text[i + 1][0])
+
+        self._unshuffle(text, sum(key))
+        text = self._from_matrix(text)
+        if len(text) <= self._matrix:
+            raise RuntimeError('Invalid Token Matrix Length')
+        return bytearray(text[self._matrix:]).decode("utf-8").rstrip(chr(0))

@@ -1,7 +1,8 @@
 from renus.core.routing import Router
+from renus.core.config import Config
 from app.{name}.controller import {name_camel}Controller
-from app.extension.renus.permission.middleware import PermissionMiddleware
-from app.extension.renus.user.middleware import AuthMiddleware
+from app.extension.codenus.permission.middleware import PermissionMiddleware
+from app.extension.codenus.user.middleware import AuthMiddleware
 
 r=Router(subdomain=Config('app').get('admin_subdomain','admin'),
          prefix='api/admin{folder}', middlewares=[AuthMiddleware, PermissionMiddleware('admin')])
