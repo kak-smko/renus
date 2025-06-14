@@ -1,8 +1,10 @@
-from json import dumps as json_dump, loads as json_loads
-from random import choice as random_choice
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 from hashlib import sha3_512
+from json import dumps as json_dump, loads as json_loads
+from random import choice as random_choice
+
 from renus.core.serialize import jsonEncoder
+
 
 def hash_new_password(password: str, salt: str = 'renus') -> str:
     p = password.encode("utf-8")
@@ -43,25 +45,6 @@ def decode64(value: str, decoder=None):
     except:
         raise RuntimeError('Invalid encode64 Format:' + str(value))
 
-
-
-class dictAttribute(dict):
-    def __init__(self, seq=None, **kwargs):
-        super().__init__(seq, **kwargs)
-
-    def __getattr__(self, key):
-        ret = self.get(key)
-        if not ret and key.startswith("__"):
-            raise AttributeError()
-        if type(ret) == dict:
-            return dictAttribute(ret)
-        return ret
-
-    def __setattr__(self, key, value):
-        self[key] = value
-
-    def copy(self):
-        return dictAttribute(dict(self).copy())
 
 
 def remove_pad64(text):

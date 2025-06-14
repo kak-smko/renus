@@ -303,7 +303,7 @@ class Extension:
     def __check(self, string):
         i = string.split('.')
         if i[-1] not in self.allowed:
-            return ['image_error', [string]]
+            return ['extension_error', [string]]
         return True
 
 
@@ -371,17 +371,15 @@ class ExistsCount:
 
 
 class FileSize:
-    def __init__(self, max_byte: int = 0, min_byte: int = 0, delete=True, replace: list = None, item_dict: str = None):
+    def __init__(self, max_byte: int = 0, min_byte: int = 0, replace: list = None, item_dict: str = None):
         """
         @param max_byte: maximum allowed Bytes
         @param min_byte:minimum allowed Bytes
-        @param delete: delete file if not passed
         @param replace: replace file path. default is [('storage/img/','storage/'),('storage/','storage/public/')]
         @param item_dict: if file path in a dict. ex {url:'',meta:''} => item_dict='url'
         """
         if replace is None:
             replace = [('storage/img/', 'storage/'), ('storage/', 'storage/public/')]
-        self.delete = delete
         self.maxByte = max_byte
         self.minByte = min_byte
         self.replace = replace
@@ -420,16 +418,5 @@ class FileSize:
                 if state.st_size >= self.minByte:
                     continue
                 passed = ['min_file_size_error', [item, state.st_size, self.minByte]]
-        if passed is not True and self.delete:
-            for item in input:
-                tt = type(item)
-                if tt is dict:
-                    link = item[self.item_dict]
-                else:
-                    link = item
-                for rep in self.replace:
-                    link = link.replace(rep[0], rep[1])
-
-                os.remove(link)
 
         return passed

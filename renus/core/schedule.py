@@ -12,6 +12,7 @@ class Schedule:
     def __init__(self) -> None:
         self._interval = 1
         self._max_try=3
+        self._timedelta = 210
         self._unit = None
         self._at_day = None
         self._at_hour = None
@@ -23,6 +24,10 @@ class Schedule:
         self._forget_secound = None
         self._job_list = {}
         self._last_run = Cache().get('schedule_last_run',{})
+
+    def timedelta(self, n):
+        self._timedelta = n
+        return self
 
     def every(self, n=1):
         self._interval = n
@@ -77,7 +82,7 @@ class Schedule:
         return self
 
     def do(self, key: str, func, *args, **kwargs):
-        now = datetime.datetime.utcnow() + datetime.timedelta(hours=3, minutes=30)
+        now = datetime.datetime.utcnow() + datetime.timedelta(minutes=self._timedelta)
 
         job_func = functools.partial(func, *args, **kwargs)
         try:

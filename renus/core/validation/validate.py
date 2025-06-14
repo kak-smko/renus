@@ -3,7 +3,6 @@ import copy
 import renus.core.validation.rules as vr
 from renus.core.exception import abort_if
 from renus.core.log import Log
-from renus.util.helper import dictAttribute
 
 
 def keys_exists(element, keys):
@@ -67,7 +66,7 @@ class Validate:
                 return True
         return False
 
-    def rules(self, rules_data: dict, msg: str = 'invalid_data') -> dictAttribute:
+    def rules(self, rules_data: dict, msg: str = 'invalid_data') -> dict:
         res = {}
         for field in rules_data:
             keys=field.split('.')
@@ -91,7 +90,7 @@ class Validate:
             Log().error({'msg': msg, 'errors': self._msg})
         abort_if(self._error, {'msg': msg, 'errors': self._msg}, 422)
 
-        return dictAttribute(res)
+        return res
 
     def __check(self, input, rules):
         error = False

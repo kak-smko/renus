@@ -1,107 +1,206 @@
+import base64
+import os
 import random
-from base64 import urlsafe_b64encode, urlsafe_b64decode
-from hashlib import sha3_256
-from typing import List
-
-from renus.util.helper import get_random_string
 
 
-class FastEncryptor:
-    def __init__(self, length=32):
-        self._matrix = length
+class Cryptor:
+    """A cryptographic utility for encrypting and decrypting text using a matrix-based transformation.
 
-    def _pad_list(self, s: List[int]) -> List[int]:
-        """Pads the input list with zeros until its length is a multiple of n."""
-        block_size = self._matrix
-        remainder = len(s) % block_size
-        padding_needed = block_size - remainder
-        return s + [0] * padding_needed
+    The Cryptor uses a combination of shuffling, mixing, and matrix operations to obscure the
+    original text. It supports configurable matrix sizes for the transformation process.
+    """
 
-    def _generate_password(self, password: bytes) -> List[int]:
-        """Generates a list of matrix bytes from the hashed password."""
-        p = sha3_256()
-        r = []
-        while len(r) < self._matrix:
-            p.update(password)
-            r.extend(p.digest())
-        return r[:self._matrix]
+    def __init__(self):
+        """Creates a new Cryptor instance with default matrix size (32)."""
+        self.matrix = 32
 
-    def _to_matrix(self, text: List[int]) -> List[List[int]]:
-        """Converts a flat list into a matrix of size matrix."""
-        return [text[i * self._matrix:(i + 1) * self._matrix] for i in range(len(text) // self._matrix)]
+    def encrypt(self, data: bytes, key: str) -> bytes:
+        """Encrypts raw bytes using the provided key.
 
-    def _from_matrix(self, text: List[List[int]]) -> List[int]:
-        """Flattens a matrix back into a single list."""
-        return [item for sublist in text for item in sublist]
+        Args:
+            data: The bytes to encrypt
+            key: The encryption key
 
-    def _getperm(self, l, seed):
-        perm = list(range(len(l)))
-        random.Random(seed).shuffle(perm)
-        return perm
+        Returns:
+            The encrypted bytes
 
-    def _shuffle(self, l, seed):
-        perm = self._getperm(l, seed)
-        l[:] = [l[j] for j in perm]
+        Raises:
+            ValueError: If encryption fails
+        """
+        matrix_size = self.matrix
+        key_bytes = self._generate_password(matrix_size, key.encode())
+        data_size = len(data).to_bytes(4, byteorder='big')
+        random_prefix = self._get_random_bytes(6)
+        seed_random = sum(b for b in random_prefix)
 
-    def _unshuffle(self, l, seed):
-        perm = self._getperm(l, seed)
-        res = [None] * len(l)
-        for i, j in enumerate(perm):
-            res[j] = l[i]
-        l[:] = res
+        padded_text = bytearray()
+        padded_text.extend(data_size)
+        padded_text.extend(random_prefix)
+        padded_text.extend(data)
 
-    def _sum_matrix(self, l: List[List[int]], key: List[int]) -> None:
-        """Applies XOR operation to the matrix with the key."""
-        for i in range(len(l)):
-            for j in range(len(l[i])):
-                l[i][j] ^= l[i - 1][j] if i > 0 else key[j]
+        seed_sum = sum(b for b in key_bytes)
+        self._shuffle(padded_text, seed_sum + seed_random, 5)
 
-    def _minus_matrix(self, l: List[List[int]], key: List[int]) -> None:
-        """Reverses the sum_matrix operation."""
-        ln = len(l)
-        for k in range(ln):
-            i = ln - k - 1
-            for j in range(len(l[i])):
-                l[i][j] ^= l[i - 1][j] if i > 0 else key[j]
+        # Split into matrix chunks
+        matrix = [padded_text[i:i + matrix_size] for i in range(0, len(padded_text), matrix_size)]
 
-    def _decode(self, enc):
-        return urlsafe_b64encode(bytearray(enc)).decode()
+        for i in range(len(matrix)):
+            seed = matrix[i + 1][0] if i + 1 < len(matrix) else key_bytes[0]
+            self._shuffle(matrix[i], seed + seed_random, 2)
 
-    def _encode(self, dec):
-        return list(urlsafe_b64decode(dec.encode()))
+        # Flatten the matrix back to bytes
+        padded_text = bytearray().join(matrix)
+        self._mix(matrix_size, padded_text, key_bytes)
 
-    def shift(self, text: str, key: str):
-        key = self._generate_password(key.encode("utf-8"))
-        text = get_random_string(self._matrix) + text
-        text = self._pad_list(list(text.encode("utf-8")))
-        text = self._to_matrix(text)
-        self._shuffle(text, sum(key))
-        for i in range(len(text)):
-            if i > len(text) - 2:
-                self._shuffle(text[i], key[0])
+        padded_text.extend(seed_random.to_bytes(2, byteorder='big'))
+        return bytes(padded_text)
+
+    def encrypt_text(self, text: str, key: str) -> str:
+        """Encrypts text using the provided key and returns a URL-safe base64 string.
+
+        Args:
+            text: The plaintext to encrypt
+            key: The encryption key
+
+        Returns:
+            URL-safe base64 encoded encrypted string without padding
+        """
+        encrypted = self.encrypt(text.encode(), key)
+        return base64.urlsafe_b64encode(encrypted).decode().rstrip('=')
+
+    def decrypt(self, encoded: bytes, key: str) -> bytes:
+        """Decrypts bytes using the provided key.
+
+        Args:
+            encoded: The encrypted bytes to decrypt
+            key: The decryption key
+
+        Returns:
+            The decrypted bytes
+
+        Raises:
+            ValueError: If decryption fails
+        """
+        if len(encoded) < 6:
+            raise ValueError("Invalid Token Matrix Length")
+
+        seed_random = int.from_bytes(encoded[-2:], byteorder='big')
+        decoded = bytearray(encoded[:-2])
+        matrix_size = self.matrix
+
+        key_bytes = self._generate_password(matrix_size, key.encode())
+        self._unmix(matrix_size, decoded, key_bytes)
+
+        # Split into matrix chunks
+        matrix = [decoded[i:i + matrix_size] for i in range(0, len(decoded), matrix_size)]
+
+        for i in reversed(range(len(matrix))):
+            seed = matrix[i + 1][0] if i + 1 < len(matrix) else key_bytes[0]
+            self._unshuffle(matrix[i], seed + seed_random, 2)
+
+        # Flatten the matrix back to bytes
+        decoded = bytearray().join(matrix)
+        seed_sum = sum(b for b in key_bytes)
+        self._unshuffle(decoded, seed_sum + seed_random, 5)
+
+        data_size = int.from_bytes(decoded[:4], byteorder='big')
+        if len(decoded) < data_size + 10:
+            raise ValueError("Invalid Token Matrix Length")
+
+        return bytes(decoded[10:data_size + 10])
+
+    def decrypt_text(self, encoded: str, key: str) -> str:
+        """Decrypts a URL-safe base64 encoded string using the provided key.
+
+        Args:
+            encoded: URL-safe base64 encoded string to decrypt
+            key: The decryption key
+
+        Returns:
+            The decrypted string
+
+        Raises:
+            ValueError: If decryption fails
+        """
+        # Add padding if needed
+        padding = len(encoded) % 4
+        if padding != 0:
+            encoded += '=' * (4 - padding)
+
+        data = base64.urlsafe_b64decode(encoded)
+        return self.decrypt(data, key).decode()
+
+    def set_matrix(self, size: int):
+        """Sets the matrix size used for cryptographic operations.
+
+        The matrix size determines how data is chunked and processed during encryption/decryption.
+        Must be a positive non-zero value.
+        """
+        if size > 0:
+            self.matrix = size
+
+    # Utility methods
+    def _generate_password(self, matrix: int, password: bytes) -> bytes:
+        """Generates a key of specified length by repeating the password."""
+        if not password:
+            return bytes(matrix)
+
+        password_len = len(password)
+        repeats = matrix // password_len
+        remainder = matrix % password_len
+
+        result = bytearray()
+        for _ in range(repeats):
+            result.extend(password)
+        if remainder > 0:
+            result.extend(password[:remainder])
+
+        return bytes(result)
+
+    def _shuffle(self, data: bytearray, seed: int, step: int):
+        """Shuffles the data using the given seed."""
+        random.seed(seed)
+        length = len(data)
+
+        for i in reversed(range(1, length, step)):
+            j = random.randint(0, i)
+            data[i], data[j] = data[j], data[i]
+
+    def _unshuffle(self, data: bytearray, seed: int, step: int):
+        """Reverses the shuffling operation."""
+        random.seed(seed)
+        length = len(data)
+        swaps = []
+
+        for i in reversed(range(1, length, step)):
+            j = random.randint(0, i)
+            swaps.append((i, j))
+
+        for i, j in reversed(swaps):
+            data[i], data[j] = data[j], data[i]
+
+    def _mix(self, block_size: int, buf: bytearray, key: bytes):
+        """Mixes the data blocks with XOR operations."""
+        prev_block = key
+
+        for i in range(0, len(buf), block_size):
+            block = buf[i:i + block_size]
+            for j in range(len(block)):
+                block[j] ^= prev_block[j]
+            prev_block = block
+
+    def _unmix(self, block_size: int, buf: bytearray, key: bytes):
+        """Reverses the mixing operation."""
+        chunks = [buf[i:i + block_size] for i in range(0, len(buf), block_size)]
+
+        for i in reversed(range(len(chunks))):
+            if i == 0:
+                for j in range(len(chunks[i])):
+                    chunks[i][j] ^= key[j]
             else:
-                self._shuffle(text[i], text[i + 1][0])
+                for j in range(len(chunks[i])):
+                    chunks[i][j] ^= chunks[i - 1][j]
 
-        self._sum_matrix(text, key)
-        return self._decode(self._from_matrix(text))
-
-    def unshift(self, text, key):
-        text = self._encode(text)
-        remainder = len(text) % self._matrix
-        if remainder != 0:
-            raise RuntimeError('Invalid Token Matrix Length')
-        key = self._generate_password(key.encode("utf-8"))
-        text = self._to_matrix(text)
-        self._minus_matrix(text, key)
-        for k in range(len(text)):
-            i = len(text) - k - 1
-            if i == len(text) - 1:
-                self._unshuffle(text[i], key[0])
-            else:
-                self._unshuffle(text[i], text[i + 1][0])
-
-        self._unshuffle(text, sum(key))
-        text = self._from_matrix(text)
-        if len(text) <= self._matrix:
-            raise RuntimeError('Invalid Token Matrix Length')
-        return bytearray(text[self._matrix:]).decode("utf-8").rstrip(chr(0))
+    def _get_random_bytes(self, length: int) -> bytes:
+        """Generates cryptographically secure random bytes."""
+        return os.urandom(length)

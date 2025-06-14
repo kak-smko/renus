@@ -50,7 +50,7 @@ class App:
         startup and shutdown events.
         """
         first = True
-        app = scope.get("app")
+        app = scope
         await receive()
         try:
             if inspect.isasyncgenfunction(self.lifespan_context):

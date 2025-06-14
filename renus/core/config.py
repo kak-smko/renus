@@ -1,4 +1,4 @@
-def import_by_string(name):
+def _import_by_string(name):
     return __import__(f"config.{name}", fromlist=[''])
 
 class Config:
@@ -8,7 +8,7 @@ class Config:
         if name in self.lists:
             self.config = self.lists[name]
         else:
-            self.config = import_by_string(name)
+            self.config = _import_by_string(name)
             self.lists[name] = self.config
 
     def get(self, name:str, *default):

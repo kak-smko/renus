@@ -2,9 +2,9 @@ import enum
 import json
 import typing
 
-from renus.core.serialize import jsonEncoder
 from renus.core.injection import Injection
 from renus.core.request import Request
+from renus.core.serialize import jsonEncoder
 
 
 class WebSocketState(enum.Enum):
@@ -27,6 +27,10 @@ class WebSocket(Request):
         self._send = send
         self.client_state = WebSocketState.CONNECTING
         self.application_state = WebSocketState.CONNECTING
+
+    @property
+    def scope(self):
+        return self._scope
 
     async def receive(self):
         """
