@@ -16,7 +16,7 @@ import anyio
 
 from renus.core.cache import Cache
 from renus.core.concurrency import iterate_in_threadpool
-from renus.core.crypt import FastEncryptor
+from renus.core.crypt import Cryptor
 from renus.core.datastructures import Background
 from renus.core.serialize import jsonEncoder
 from renus.core.status import Status
@@ -201,7 +201,7 @@ class EncryptResponse(Response):
         if isinstance(content, bytes):
             return content
 
-        return FastEncryptor().encrypt(str(content), self.password).encode("utf-8")
+        return Cryptor().encrypt_text(str(content), self.password).encode("utf-8")
 
 
 class RedirectResponse(Response):
