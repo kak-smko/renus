@@ -1,36 +1,130 @@
 import base64
-import os
-import random
+import struct
+import time
+
+
+class SimpleRng:
+    """A simple random number generator"""
+
+    def __init__(self, seed: int = None):
+        if seed is None:
+            seed = int(time.time())
+        self.state = seed
+
+    def next_u32(self) -> int:
+        """Generates a random 32-bit unsigned integer"""
+        self.state = (self.state * 6364136223846793005 + 1442695040888963407) & 0xFFFFFFFFFFFFFFFF
+        return (self.state >> 32) & 0xFFFFFFFF
+
+    def next_u64(self) -> int:
+        """Generates a random 64-bit unsigned integer"""
+        high = self.next_u32()
+        low = self.next_u32()
+        return (high << 32) | low
+
+    def next_f64(self) -> float:
+        """Generates a random float between 0 and 1"""
+        val = self.next_u32()
+        return val / 4294967295.0
+
+    def gen_range(self, low: float, high: float) -> float:
+        """Generates a random float in the given range"""
+        return low + (high - low) * self.next_f64()
+
+    def get_random_bytes(self, length: int) -> bytes:
+        """Generates random bytes of specified length"""
+        result = bytearray()
+        chunks = length // 4
+        remainder = length % 4
+
+        for _ in range(chunks):
+            random = self.next_u32()
+            result.extend(struct.pack('<I', random))
+
+        if remainder > 0:
+            random = self.next_u32()
+            result.extend(struct.pack('<I', random)[:remainder])
+
+        return bytes(result)
+
+
+def generate_password(matrix_size: int, password: bytes) -> bytes:
+    """Generates a key of specified length by repeating the password"""
+    if not password:
+        return bytes([0] * matrix_size)
+
+    repeats = matrix_size // len(password)
+    remainder = matrix_size % len(password)
+
+    result = password * repeats
+    if remainder > 0:
+        result += password[:remainder]
+
+    return result
+
+
+def shuffle(data: bytearray, seed: int, step: int) -> None:
+    """Shuffles the data using the given seed"""
+    rng = SimpleRng(seed)
+    length = len(data)
+
+    for i in range(length - 1, 0, -step):
+        j = int(rng.gen_range(0, i))
+        data[i], data[j] = data[j], data[i]
+
+
+def unshuffle(data: bytearray, seed: int, step: int) -> None:
+    """Reverses the shuffle operation"""
+    rng = SimpleRng(seed)
+    length = len(data)
+    swaps = []
+
+    for i in range(length - 1, 0, -step):
+        j = int(rng.gen_range(0, i))
+        swaps.append((i, j))
+
+    for i, j in reversed(swaps):
+        data[i], data[j] = data[j], data[i]
+
+
+def mix(block_size: int, buf: bytearray, key: bytes) -> None:
+    """Mixes the data with the key using XOR operations"""
+    prev_block = key
+
+    for i in range(0, len(buf), block_size):
+        block = buf[i:i + block_size]
+        for j in range(len(block)):
+            block[j] ^= prev_block[j]
+        prev_block = block
+
+
+def unmix(block_size: int, buf: bytearray, key: bytes) -> None:
+    """Reverses the mix operation"""
+    blocks = [buf[i:i + block_size] for i in range(0, len(buf), block_size)]
+
+    for i in range(len(blocks) - 1, -1, -1):
+        if i == 0:
+            for j in range(len(blocks[i])):
+                blocks[i][j] ^= key[j]
+        else:
+            for j in range(len(blocks[i])):
+                blocks[i][j] ^= blocks[i - 1][j]
 
 
 class Cryptor:
-    """A cryptographic utility for encrypting and decrypting text using a matrix-based transformation.
-
-    The Cryptor uses a combination of shuffling, mixing, and matrix operations to obscure the
-    original text. It supports configurable matrix sizes for the transformation process.
-    """
+    """A cryptographic utility for encrypting and decrypting data using matrix-based transformations"""
 
     def __init__(self):
-        """Creates a new Cryptor instance with default matrix size (32)."""
         self.matrix = 32
 
     def encrypt(self, data: bytes, key: str) -> bytes:
-        """Encrypts raw bytes using the provided key.
-
-        Args:
-            data: The bytes to encrypt
-            key: The encryption key
-
-        Returns:
-            The encrypted bytes
-
-        Raises:
-            ValueError: If encryption fails
-        """
+        """Encrypts raw bytes using the provided key"""
         matrix_size = self.matrix
-        key_bytes = self._generate_password(matrix_size, key.encode())
-        data_size = len(data).to_bytes(4, byteorder='big')
-        random_prefix = self._get_random_bytes(6)
+        key_bytes = generate_password(matrix_size, key.encode())
+
+        # Prepare data with size prefix and random prefix
+        data_size = struct.pack('>I', len(data))
+        random_prefix = SimpleRng().get_random_bytes(6)
         seed_random = sum(b for b in random_prefix)
 
         padded_text = bytearray()
@@ -38,169 +132,72 @@ class Cryptor:
         padded_text.extend(random_prefix)
         padded_text.extend(data)
 
+        # First shuffle
         seed_sum = sum(b for b in key_bytes)
-        self._shuffle(padded_text, seed_sum + seed_random, 5)
+        shuffle(padded_text, seed_sum + seed_random, 5)
 
-        # Split into matrix chunks
+        # Matrix operations
         matrix = [padded_text[i:i + matrix_size] for i in range(0, len(padded_text), matrix_size)]
+        matrix_len = len(matrix)
 
-        for i in range(len(matrix)):
-            seed = matrix[i + 1][0] if i + 1 < len(matrix) else key_bytes[0]
-            self._shuffle(matrix[i], seed + seed_random, 2)
+        for i in range(matrix_len):
+            seed = matrix[i + 1][0] if i + 1 < matrix_len else key_bytes[0]
+            shuffle(matrix[i], seed + seed_random, 2)
 
-        # Flatten the matrix back to bytes
-        padded_text = bytearray().join(matrix)
-        self._mix(matrix_size, padded_text, key_bytes)
+        # Final mix and add seed
+        mix(matrix_size, padded_text, key_bytes)
+        padded_text.extend(struct.pack('>H', seed_random & 0xFFFF))
 
-        padded_text.extend(seed_random.to_bytes(2, byteorder='big'))
         return bytes(padded_text)
 
     def encrypt_text(self, text: str, key: str) -> str:
-        """Encrypts text using the provided key and returns a URL-safe base64 string.
-
-        Args:
-            text: The plaintext to encrypt
-            key: The encryption key
-
-        Returns:
-            URL-safe base64 encoded encrypted string without padding
-        """
+        """Encrypts text and returns a URL-safe base64 string"""
         encrypted = self.encrypt(text.encode(), key)
         return base64.urlsafe_b64encode(encrypted).decode().rstrip('=')
 
     def decrypt(self, encoded: bytes, key: str) -> bytes:
-        """Decrypts bytes using the provided key.
-
-        Args:
-            encoded: The encrypted bytes to decrypt
-            key: The decryption key
-
-        Returns:
-            The decrypted bytes
-
-        Raises:
-            ValueError: If decryption fails
-        """
+        """Decrypts bytes using the provided key"""
         if len(encoded) < 6:
             raise ValueError("Invalid Token Matrix Length")
 
-        seed_random = int.from_bytes(encoded[-2:], byteorder='big')
+        # Extract seed and prepare data
+        seed_random = struct.unpack('>H', encoded[-2:])[0]
         decoded = bytearray(encoded[:-2])
         matrix_size = self.matrix
+        key_bytes = generate_password(matrix_size, key.encode())
 
-        key_bytes = self._generate_password(matrix_size, key.encode())
-        self._unmix(matrix_size, decoded, key_bytes)
+        # Reverse operations
+        unmix(matrix_size, decoded, key_bytes)
 
-        # Split into matrix chunks
         matrix = [decoded[i:i + matrix_size] for i in range(0, len(decoded), matrix_size)]
+        matrix_len = len(matrix)
 
-        for i in reversed(range(len(matrix))):
-            seed = matrix[i + 1][0] if i + 1 < len(matrix) else key_bytes[0]
-            self._unshuffle(matrix[i], seed + seed_random, 2)
+        for i in range(matrix_len - 1, -1, -1):
+            seed = matrix[i + 1][0] if i + 1 < matrix_len else key_bytes[0]
+            unshuffle(matrix[i], seed + seed_random, 2)
 
-        # Flatten the matrix back to bytes
-        decoded = bytearray().join(matrix)
         seed_sum = sum(b for b in key_bytes)
-        self._unshuffle(decoded, seed_sum + seed_random, 5)
+        unshuffle(decoded, seed_sum + seed_random, 5)
 
-        data_size = int.from_bytes(decoded[:4], byteorder='big')
+        # Extract original data
+        data_size = struct.unpack('>I', decoded[:4])[0]
         if len(decoded) < data_size + 10:
             raise ValueError("Invalid Token Matrix Length")
 
-        return bytes(decoded[10:data_size + 10])
+        return bytes(decoded[10:10 + data_size])
 
     def decrypt_text(self, encoded: str, key: str) -> str:
-        """Decrypts a URL-safe base64 encoded string using the provided key.
-
-        Args:
-            encoded: URL-safe base64 encoded string to decrypt
-            key: The decryption key
-
-        Returns:
-            The decrypted string
-
-        Raises:
-            ValueError: If decryption fails
-        """
+        """Decrypts a URL-safe base64 encoded string"""
         # Add padding if needed
         padding = len(encoded) % 4
         if padding != 0:
             encoded += '=' * (4 - padding)
 
         data = base64.urlsafe_b64decode(encoded)
-        return self.decrypt(data, key).decode()
+        decrypted = self.decrypt(data, key)
+        return decrypted.decode()
 
-    def set_matrix(self, size: int):
-        """Sets the matrix size used for cryptographic operations.
-
-        The matrix size determines how data is chunked and processed during encryption/decryption.
-        Must be a positive non-zero value.
-        """
+    def set_matrix(self, size: int) -> None:
+        """Sets the matrix size used for cryptographic operations"""
         if size > 0:
             self.matrix = size
-
-    # Utility methods
-    def _generate_password(self, matrix: int, password: bytes) -> bytes:
-        """Generates a key of specified length by repeating the password."""
-        if not password:
-            return bytes(matrix)
-
-        password_len = len(password)
-        repeats = matrix // password_len
-        remainder = matrix % password_len
-
-        result = bytearray()
-        for _ in range(repeats):
-            result.extend(password)
-        if remainder > 0:
-            result.extend(password[:remainder])
-
-        return bytes(result)
-
-    def _shuffle(self, data: bytearray, seed: int, step: int):
-        """Shuffles the data using the given seed."""
-        random.seed(seed)
-        length = len(data)
-
-        for i in reversed(range(1, length, step)):
-            j = random.randint(0, i)
-            data[i], data[j] = data[j], data[i]
-
-    def _unshuffle(self, data: bytearray, seed: int, step: int):
-        """Reverses the shuffling operation."""
-        random.seed(seed)
-        length = len(data)
-        swaps = []
-
-        for i in reversed(range(1, length, step)):
-            j = random.randint(0, i)
-            swaps.append((i, j))
-
-        for i, j in reversed(swaps):
-            data[i], data[j] = data[j], data[i]
-
-    def _mix(self, block_size: int, buf: bytearray, key: bytes):
-        """Mixes the data blocks with XOR operations."""
-        prev_block = key
-
-        for i in range(0, len(buf), block_size):
-            block = buf[i:i + block_size]
-            for j in range(len(block)):
-                block[j] ^= prev_block[j]
-            prev_block = block
-
-    def _unmix(self, block_size: int, buf: bytearray, key: bytes):
-        """Reverses the mixing operation."""
-        chunks = [buf[i:i + block_size] for i in range(0, len(buf), block_size)]
-
-        for i in reversed(range(len(chunks))):
-            if i == 0:
-                for j in range(len(chunks[i])):
-                    chunks[i][j] ^= key[j]
-            else:
-                for j in range(len(chunks[i])):
-                    chunks[i][j] ^= chunks[i - 1][j]
-
-    def _get_random_bytes(self, length: int) -> bytes:
-        """Generates cryptographically secure random bytes."""
-        return os.urandom(length)
