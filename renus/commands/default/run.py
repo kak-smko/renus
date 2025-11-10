@@ -4,9 +4,9 @@ from renus.util.helper import hash_new_password
 def run(args):
 
     if args[0]=='super_admin':
-        from app.extension.renus.role.model import Role
-        from app.extension.renus.permission.model import Permission
-        from app.extension.renus.user.model import User
+        from app.extension.codenus.role.model import Role
+        from app.extension.codenus.permission.model import Permission
+        from app.extension.codenus.user.model import User
         country_code = int(input('country_code: '))
         phone = int(input('phone: '))
         name = input('name: ')

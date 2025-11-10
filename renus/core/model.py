@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TypeVar, Generic, Any, List, Optional, Union, Tuple, Dict
+from typing import TypeVar, Generic, Any, List, Optional, Union, Tuple, Dict, get_origin, get_args
 
 from bson import ObjectId
 from pymongo import MongoClient
@@ -10,14 +10,50 @@ from renus.core.cprint import Cprint
 
 class ReModel:
     def __init__(self, doc):
+        self._convert_dict_to_objects(doc)
+
+    def _convert_dict_to_objects(self, doc):
+        annotations = getattr(self.__class__, '__annotations__', {})
+
         for k, v in doc.items():
+            field_type = annotations.get(k)
+
+            if isinstance(v, dict):
+                if field_type and isinstance(field_type, type) and issubclass(field_type, ReModel):
+                    v = field_type(v)
+                else:
+                    v = ReModel(v)
+            elif isinstance(v, list):
+                v = self._process_list_items(v, field_type)
+
             setattr(self, k, v)
+
+    def _process_list_items(self, items, field_type):
+        if not field_type:
+            return items
+
+        origin = get_origin(field_type)
+        if origin is list and items:
+            args = get_args(field_type)
+            if args and issubclass(args[0], ReModel):
+                r = []
+                for item in items:
+                    if isinstance(item, dict):
+                        r.append(args[0](item))
+                    else:
+                        r.append(item)
+                return r
+
+        return items
 
     def __iter__(self):
         return iter(self.__dict__.items())
 
     def __getitem__(self, item):
         return self.__dict__[item]
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.__dict__})"
 
 
 M = TypeVar('T')

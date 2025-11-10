@@ -142,17 +142,19 @@ class Router(BaseRoute):
         self._add(path, controller, func, 'WS', middlewares)
         return self
 
-    def crud(self, path, controller: typing.Callable = None, middlewares: typing.List[typing.Callable] = None):
-        self._add(path, controller, 'index', 'GET', middlewares)
-        self._add(path, controller, 'store', 'POST', middlewares)
-        self._add(path + '/{id:oid}', controller, 'update', 'PUT', middlewares)
-        self._add(path + '/{id:oid}', controller, 'delete', 'DELETE', middlewares)
+    def crud(self, path, controller: typing.Callable = None, middlewares: typing.List[typing.Callable] = None,
+             func_prefix=''):
+        self._add(path, controller, f'{func_prefix}index', 'GET', middlewares)
+        self._add(path, controller, f'{func_prefix}store', 'POST', middlewares)
+        self._add(path + '/{id:oid}', controller, f'{func_prefix}update', 'PUT', middlewares)
+        self._add(path + '/{id:oid}', controller, f'{func_prefix}delete', 'DELETE', middlewares)
         return self
 
-    def mcud(self, path, controller: typing.Callable = None, middlewares: typing.List[typing.Callable] = None):
-        self._add(path, controller, 'm_store', 'POST', middlewares)
-        self._add(path, controller, 'm_update', 'PUT', middlewares)
-        self._add(path, controller, 'm_delete', 'DELETE', middlewares)
+    def mcud(self, path, controller: typing.Callable = None, middlewares: typing.List[typing.Callable] = None,
+             func_prefix=''):
+        self._add(path, controller, f'{func_prefix}m_store', 'POST', middlewares)
+        self._add(path, controller, f'{func_prefix}m_update', 'PUT', middlewares)
+        self._add(path, controller, f'{func_prefix}m_delete', 'DELETE', middlewares)
         return self
 
 

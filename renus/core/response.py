@@ -229,7 +229,7 @@ class StreamingResponse(Response):
             headers: dict = None,
             media_type: str = None,
             background: Background = None,
-            zipped: bool = True
+            zipped: bool = False
     ) -> None:
         super().__init__()
         if inspect.isasyncgen(content):
