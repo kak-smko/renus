@@ -21,8 +21,7 @@ class ReModel:
             if isinstance(v, dict):
                 if field_type and isinstance(field_type, type) and issubclass(field_type, ReModel):
                     v = field_type(v)
-                else:
-                    v = ReModel(v)
+
             elif isinstance(v, list):
                 v = self._process_list_items(v, field_type)
 
