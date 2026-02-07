@@ -31,10 +31,12 @@ def format(header,
 def Help():
     print(format({
         'app': 'Create New Package',
-        'extension renus/user': 'Install App',
-        'extension --update renus/user': 'Update App',
-        'extension --remove renus/user': 'Remove App',
+        'extension codenus/user': 'Install App',
+        'extension --update codenus/user': 'Update App',
+        'extension --remove codenus/user': 'Remove App',
         'backup': 'Backing up the entire project',
+        'db --backup': 'Backing up the database',
+        'db --restore': 'Restore the database',
         'copy': 'Get a copy of the app to upload to the server',
         'permission': 'Add All Permissions to DB',
         'default super_admin': 'Create Super Admin'
