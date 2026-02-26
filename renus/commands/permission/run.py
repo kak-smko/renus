@@ -2,7 +2,7 @@ from app.extension.codenus.permission.middleware import PermissionMiddleware
 from app.extension.codenus.permission.model import Permission
 
 from renus.core.routing import Router
-
+import routes.index
 
 def run():
     all=Router().all
