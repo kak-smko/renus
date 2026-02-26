@@ -141,6 +141,12 @@ def mongo_json_decoder(obj):
     return obj
 
 
+def drop():
+    collections = ModelBase().db.list_collection_names()
+    for collection in collections:
+        print('drop', collection)
+        ModelBase().db.drop_collection(collection)
+
 def backup():
     collections = ModelBase().db.list_collection_names()
     for collection in collections:
@@ -150,27 +156,27 @@ def backup():
 
 
 def restore():
-    collections = ModelBase().db.list_collection_names()
-    for collection in collections:
-        print('drop', collection)
-        ModelBase().db.drop_collection(collection)
-
     with os.scandir('./db') as entries:
         for entry in entries:
             if entry.is_file():
+                ModelBase().db.drop_collection(entry.name)
                 data = json.load(open(entry.path, 'r'), object_hook=mongo_json_decoder)
                 ModelBase().collection(entry.name).insert_many(data)
                 print('restore', entry.name)
 
 
 def run(args=None):
-    if args and '--backup' in args:
+    if args and '--drop' in args:
+        print(f'start dropping')
+        drop()
+
+    elif args and '--backup' in args:
         print(f'start backing up in ./db')
         shutil.rmtree("./db", ignore_errors=True)
         os.mkdir("./db")
         backup()
 
-    if args and '--restore' in args:
+    elif args and '--restore' in args:
         print(f'start restore db from ./db')
         restore()
 
