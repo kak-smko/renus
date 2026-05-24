@@ -14,8 +14,6 @@ from renus.core.websockets import WebSocket
 
 
 class App:
-    store = {}
-
     def __init__(self, lifespan=None,
                  on_startup=None,
                  on_shutdown=None, middlewares: list = None) -> None:
@@ -113,9 +111,6 @@ class App:
         scope["method"] = scope["method"].upper()
         request = Request(scope, receive)
 
-        if scope["method"] in ['POST', 'PUT', 'DELETE']:
-            await request.form_safe()
-
         try:
             await self.view(request, scope, receive, send)
         except Exception as exc:
@@ -134,9 +129,11 @@ class App:
             middlewares = self.middlewares + res['middlewares']
             passed = Middleware(request, middlewares).next()
 
-            if passed is not True and request.method != 'OPTIONS':
+            if passed is not True:
                 await self.result(request, passed, scope, receive, send)
             else:
+                if scope["method"] in ['POST', 'PUT', 'DELETE']:
+                    await request.form_safe()
                 if res["controller"] is not None:
                     if 'request' in inspect.getfullargspec(res["controller"].__init__).args:
                         controller = res["controller"](request)

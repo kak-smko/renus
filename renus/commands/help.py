@@ -40,6 +40,7 @@ def Help():
         'db --restore': 'Restore the database',
         'copy': 'Get a copy of the app to upload to the server',
         'permission': 'Add All Permissions to DB',
-        'default super_admin': 'Create Super Admin'
+        'default super_admin': 'Create Super Admin',
+        'default encrypt': 'Add Encryption to App',
     },
         '{:<{}}', '{:<{}}', '\n\n', ' | '))

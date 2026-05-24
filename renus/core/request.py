@@ -14,6 +14,8 @@ from renus.core.injection import Injection
 
 
 class Request:
+    cryptor = None
+
     def __init__(self, scope, receive) -> None:
         self._scope = scope
         self._receive = receive
@@ -121,6 +123,27 @@ class Request:
     def method(self) -> str:
         return self._scope.get("method", '')
 
+    def _is_encrypted(self) -> bool:
+        return self.headers.get('encrypted', '') == '1'
+
+    def _get_real_content_type(self) -> str:
+        return self.headers.get('real-type', 'application/json')
+
+    def _decrypt_body(self, body: bytes) -> typing.Any:
+        try:
+            decrypted_text = self.cryptor(request=self).decrypt_text(body.decode('utf-8').strip())
+            real_type = self._get_real_content_type().lower()
+
+            if 'application/json' in real_type:
+                return json.loads(decrypted_text)
+            elif 'application/x-www-form-urlencoded' in real_type:
+                return dict(parse_qsl(decrypted_text, keep_blank_values=True))
+            else:
+                return decrypted_text
+
+        except Exception as e:
+            raise ValueError(f"Failed to decrypt request body: {e}")
+
     async def stream(self) -> typing.AsyncGenerator[bytes, None]:
         if hasattr(self, "_body"):
             yield self._body
@@ -155,9 +178,13 @@ class Request:
 
     async def form(self):
         if not hasattr(self, "_form"):
-            content_type_header = self.headers.get("content-type")
+            content_type_header = self.headers.get("content-type", "")
             content_type, options = parse_options_header(content_type_header)
-            if content_type == b"multipart/form-data":
+
+            if self._is_encrypted():
+                raw_body = await self.body()
+                self._form = self._decrypt_body(raw_body)
+            elif content_type == b"multipart/form-data":
                 multipart_parser = MultiPartParser(self.headers, self.stream())
                 self._form = await multipart_parser.parse()
             elif content_type in [b"app/x-www-form-urlencoded", b"application/x-www-form-urlencoded"]:

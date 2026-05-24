@@ -16,7 +16,6 @@ import anyio
 
 from renus.core.cache import Cache
 from renus.core.concurrency import iterate_in_threadpool
-from renus.core.crypt import Cryptor
 from renus.core.datastructures import Background
 from renus.core.serialize import jsonEncoder
 from renus.core.status import Status
@@ -26,6 +25,7 @@ from renus.util.helper import get_random_string
 class Response:
     media_type = "text/html"
     charset = "utf-8"
+    cryptor = None
 
     def __init__(
             self,
@@ -34,10 +34,17 @@ class Response:
             headers: dict = None,
             media_type: str = None,
             background: Background = None,
+            cryptor: typing.Any = None
     ) -> None:
         self.status_code = status_code
         if media_type is not None:
             self.media_type = media_type
+        self.encrypt = False
+        if cryptor is not None:
+            self.cryptor = cryptor
+        if self.cryptor:
+            self.encrypt = True
+
         self.body = self.render(content)
         self.init_headers(headers)
         self.background = background
@@ -52,10 +59,14 @@ class Response:
     def init_headers(self, headers: typing.Mapping[str, str] = None) -> None:
         populate_content_type = True
         raw_headers = []
+
         if headers is not None:
             for k, v in headers.items():
-                if k.lower() != 'content-length':
-                    raw_headers.append((k.lower().encode("utf-8"), v.encode("utf-8")))
+                if k.lower() not in ['content-length', 'cache-control']:
+                    if self.encrypt and k.lower() == 'content-type':
+                        raw_headers.append((b'real-type', v.encode("utf-8")))
+                    else:
+                        raw_headers.append((k.lower().encode("utf-8"), v.encode("utf-8")))
 
                 if k.lower() == 'content-type':
                     populate_content_type = False
@@ -64,8 +75,15 @@ class Response:
         if content_type is not None and populate_content_type:
             if content_type.startswith("text/"):
                 content_type += "; charset=" + self.charset
-            raw_headers.append((b"content-type", content_type.encode("utf-8")))
+            if self.encrypt:
+                raw_headers.append((b'real-type', content_type.encode("utf-8")))
+            else:
+                raw_headers.append((b"content-type", content_type.encode("utf-8")))
 
+        if self.encrypt:
+            raw_headers.append((b"encrypted", b"1"))
+            raw_headers.append((b"content-type", b"application/octet-stream"))
+            raw_headers.append((b"access-control-expose-headers", b"encrypted,real-type"))
         self.raw_headers = raw_headers
 
     def set_cookie(
@@ -109,6 +127,12 @@ class Response:
 
     async def __call__(self, request, scope, receive, send) -> None:
         headers = request.headers
+        if self.encrypt:
+            try:
+                self.body = self.cryptor(request=request).encrypt(self.body)
+            except Exception as e:
+                self.encrypt = False
+                self.init_headers()
         if "gzip" in headers.get("accept-encoding", "") and len(self.body) > 500:
             self.gzip_buffer = io.BytesIO()
             self.gzip_file = gzip.GzipFile(mode="wb", fileobj=self.gzip_buffer)
@@ -167,8 +191,8 @@ class JsonResponse(Response):
 class JsonResponseRedirect(Response):
 
     def __init__(self, content: typing.Any = None, headers: dict = None,
-                 background: Background = None) -> None:
-        super().__init__(content, 307, headers, "application/json", background)
+                 background: Background = None, encrypt: typing.Any = None) -> None:
+        super().__init__(content, 307, headers, "application/json", background, encrypt)
 
     def render(self, url: str) -> bytes:
         content = {"location": quote_plus(url, safe=":/%#?&=@[]!$&'()*+,;")}
@@ -182,26 +206,6 @@ class JsonResponseRedirect(Response):
             cls=jsonEncoder
         ).encode("utf-8")
 
-
-class EncryptResponse(Response):
-    media_type = "text/plain"
-
-    def __init__(self, content: typing.Any, password: str, status_code: Status = Status.HTTP_200_OK,
-                 headers: dict = None,
-                 media_type: str = None, background: Background = None) -> None:
-        self.password = password
-        if headers is None:
-            headers = {}
-
-        headers["encrypted"] = '1'
-        headers["encrypted_type"] = str(type(content))
-        super().__init__(content, status_code, headers, media_type, background)
-
-    def render(self, content: typing.Any) -> bytes:
-        if isinstance(content, bytes):
-            return content
-
-        return Cryptor().encrypt_text(str(content), self.password).encode("utf-8")
 
 
 class RedirectResponse(Response):
@@ -229,7 +233,7 @@ class StreamingResponse(Response):
             headers: dict = None,
             media_type: str = None,
             background: Background = None,
-            zipped: bool = False
+            zipped: bool = False,
     ) -> None:
         super().__init__()
         if inspect.isasyncgen(content):
