@@ -94,10 +94,13 @@ class Len:
     def __call__(self, input):
         if input is None:
             return True
-        length = len(input)
-        if length == self.l:
-            return True
-        return ['len_error', [self.l, length]]
+        try:
+            length = len(input)
+            if length == self.l:
+                return True
+            return ['len_error', [self.l, length]]
+        except Exception as e:
+            return ['len_error', [self.l, 'type_error']]
 
 
 class MinLen:
@@ -107,10 +110,13 @@ class MinLen:
     def __call__(self, input):
         if input is None:
             return True
-        length = len(input)
-        if length >= self.l:
-            return True
-        return ['min_len_error', [self.l, length]]
+        try:
+            length = len(input)
+            if length >= self.l:
+                return True
+            return ['min_len_error', [self.l, length]]
+        except Exception as e:
+            return ['min_len_error', [self.l, 'type_error']]
 
 
 class MaxLen:
@@ -120,10 +126,13 @@ class MaxLen:
     def __call__(self, input):
         if input is None:
             return True
-        length = len(input)
-        if length <= self.l:
-            return True
-        return ['max_len_error', [self.l, length]]
+        try:
+            length = len(input)
+            if length <= self.l:
+                return True
+            return ['max_len_error', [self.l, length]]
+        except Exception as e:
+            return ['max_len_error', [self.l, 'type_error']]
 
 
 class Eq:
@@ -420,3 +429,145 @@ class FileSize:
                 passed = ['min_file_size_error', [item, state.st_size, self.minByte]]
 
         return passed
+
+
+class Schema:
+
+    def __init__(self, schema: dict, strict: bool = True):
+        """
+        @param schema:
+        @param strict:
+        """
+        self.schema = schema
+        self.strict = strict
+
+    def __call__(self, input):
+        if input is None:
+            return True
+
+        if not isinstance(input, dict):
+            return ['type_error', ['dict', str(type(input))]]
+
+        errors = {}
+
+        if self.strict:
+            extra_fields = set(input.keys()) - set(self.schema.keys())
+            if extra_fields:
+                return ['schema_strict_error', [list(extra_fields)]]
+
+        for field, rules in self.schema.items():
+            value = input.get(field)
+
+            if not isinstance(rules, list):
+                rules = [rules]
+
+            field_errors = []
+            for rule in rules:
+                result = rule(value)
+                if result is not True:
+                    field_errors.append(result)
+
+            if field_errors:
+                errors[field] = field_errors
+
+        if errors:
+            return ['schema_error', [errors]]
+        return True
+
+
+class Each:
+
+    def __init__(self, *rules):
+        self.rules = rules
+
+    def __call__(self, input):
+        if input is None:
+            return True
+
+        if not isinstance(input, list) and not isinstance(input, dict):
+            return ['type_error', ['list|dict', str(type(input))]]
+
+        if isinstance(input, list):
+            d=enumerate(input)
+        else:
+            d=input.items()
+        errors = {}
+        for index, item in d:
+            item_errors = []
+            for rule in self.rules:
+                result = rule(item)
+                if result is not True:
+                    item_errors.append(result)
+            if item_errors:
+                errors[str(index)] = item_errors
+
+        if errors:
+            return ['each_error', [errors]]
+        return True
+
+
+class MaxDepth:
+
+    def __init__(self, max_depth: int ):
+        self.max_depth = max_depth
+
+    def __call__(self, input):
+        if input is None:
+            return True
+
+        depth = self._calculate_depth(input)
+        if depth > self.max_depth:
+            return ['max_depth_error', [self.max_depth, depth]]
+        return True
+
+    def _calculate_depth(self, obj, current_depth=0):
+        if current_depth > self.max_depth:
+            return current_depth
+
+        if isinstance(obj, dict):
+            if not obj:
+                return current_depth
+            return max(self._calculate_depth(v, current_depth + 1) for v in obj.values())
+        elif isinstance(obj, list):
+            if not obj:
+                return current_depth
+            return max(self._calculate_depth(item, current_depth + 1) for item in obj)
+        return current_depth
+
+
+class Or:
+
+    def __init__(self, *rules):
+        self.rules = rules
+
+    def __call__(self, input):
+        if input is None:
+            return True
+
+        errors = []
+        for rule in self.rules:
+            result = rule(input)
+            if result is True:
+                return True
+            errors.append(result)
+
+        return ['or_error', [errors]]
+
+class And:
+
+    def __init__(self, *rules):
+        self.rules = rules
+
+    def __call__(self, input):
+        if input is None:
+            return True
+
+        errors = []
+        for rule in self.rules:
+            result = rule(input)
+            if result is not True:
+                errors.append(result)
+        if len(errors) == 0:
+            return True
+
+        return ['or_error', [errors]]

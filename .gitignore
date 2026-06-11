@@ -3,3 +3,4 @@ dist
 renus.egg-info
 .idea
 build
+.zed
