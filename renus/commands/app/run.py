@@ -2,6 +2,8 @@ import os
 
 from renus.commands.app.temp import controller_temp,model_temp,route_temp,vue_temp
 
+DESCRIPTION = 'Create New Package.'
+
 def to_camel_case(snake_str):
     components = snake_str.split('_')
     return ''.join(x.title() for x in components)

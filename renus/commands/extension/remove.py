@@ -1,7 +1,7 @@
 import shutil
 
 from renus.commands.extension.build import _remove_route, _remove_admin_templates, _remove_index_templates, \
-    _remove_config, _remove_component_templates
+    _remove_config, _remove_component_templates,_remove_command
 from renus.commands.help import bc
 
 
@@ -32,6 +32,10 @@ def remove(app, installed):
     if hasattr(install, 'route'):
         print(f'   remove {app} route...')
         _remove_route(install, app)
+
+    if hasattr(install, 'command'):
+        print(f'   remove {app} command...')
+        _remove_command(install, app)
 
     if hasattr(install, 'admin_templates'):
         print(f'   remove {app} admin_templates...')

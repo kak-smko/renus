@@ -1,3 +1,7 @@
+import importlib
+from pathlib import Path
+
+
 class bc:
     OKPINK = '\033[95m'
     OKBLUE = '\033[94m'
@@ -28,19 +32,35 @@ def format(header,
         for row_format, row in zip(table_format, table))
 
 
+def discover_commands():
+    """Discover all available commands from framework and project."""
+    commands = {}
+    
+    # Framework built-in commands
+    framework_dir = Path(__file__).parent
+    for item in framework_dir.iterdir():
+        if item.is_dir() and (item / 'run.py').exists() and not item.name.startswith('_'):
+            try:
+                mod = importlib.import_module(f"renus.commands.{item.name}.run")
+                desc = getattr(mod, 'DESCRIPTION', f'Run {item.name} command')
+                commands[item.name] = desc
+            except Exception:
+                commands[item.name] = f'Run {item.name} command'
+    
+    # Project-level custom commands
+    project_commands = Path.cwd() / 'commands'
+    if project_commands.exists():
+        for item in project_commands.iterdir():
+            if item.is_dir() and (item / 'run.py').exists() and not item.name.startswith('_'):
+                try:
+                    mod = importlib.import_module(f"commands.{item.name}.run")
+                    desc = getattr(mod, 'DESCRIPTION', f'[custom] Run {item.name} command')
+                    commands[item.name] = desc
+                except Exception:
+                    commands[item.name] = f'[custom] Run {item.name} command'
+    
+    return commands
+
 def Help():
-    print(format({
-        'app': 'Create New Package',
-        'extension codenus/user': 'Install App',
-        'extension --update codenus/user': 'Update App',
-        'extension --remove codenus/user': 'Remove App',
-        'backup': 'Backing up the entire project',
-        'db --drop': 'Drop the database',
-        'db --backup': 'Backup the database',
-        'db --restore': 'Restore the database',
-        'copy': 'Get a copy of the app to upload to the server',
-        'permission': 'Add All Permissions to DB',
-        'default super_admin': 'Create Super Admin',
-        'default encrypt': 'Add Encryption to App',
-    },
-        '{:<{}}', '{:<{}}', '\n\n', ' | '))
+    commands = discover_commands()
+    print(format(commands, '{:<{}}', '{:<{}}', '\n\n', ' | '))

@@ -6,10 +6,14 @@ from io import BytesIO
 import requests
 
 from renus.commands.extension.build import _add_route, _add_admin_templates, _add_index_templates, \
-    _add_cls, _add_imprt, _add_config, _add_component_templates
+    _add_cls, _add_imprt, _add_config, _add_component_templates,_add_command
 from renus.commands.extension.remove import remove_all, remove
 from renus.commands.help import bc
 
+DESCRIPTION = '''Install/update/remove extensions.
+renus extension condenus/user 
+renus extension --update condenus/user 
+renus extension --remove condenus/user'''
 
 def download(app, version, installed, isUpdate=False):
     if app in installed:
@@ -114,6 +118,13 @@ def install_app(app, installed, isUpdate):
             print(f'   add {app} imports...')
             try:
                 _add_imprt(install, app)
+            except Exception as exc:
+                print('   ' + bc.FAIL + str(exc) + bc.ENDC)
+
+        if hasattr(install, 'command'):
+            print(f'   add {app} command...')
+            try:
+                _add_command(install, app)
             except Exception as exc:
                 print('   ' + bc.FAIL + str(exc) + bc.ENDC)
 

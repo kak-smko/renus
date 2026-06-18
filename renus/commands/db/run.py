@@ -9,6 +9,9 @@ from bson import (ObjectId, Decimal128, Binary, Regex, Code, Timestamp, DBRef, I
 
 from renus.core.model import ModelBase
 
+DESCRIPTION = """db --drop => Drop the database
+db --backup => Backup the database
+db --restore => Restore the database"""
 
 class MongoJSONEncoder(json.JSONEncoder):
     def default(self, obj):

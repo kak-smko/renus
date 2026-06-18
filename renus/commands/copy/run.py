@@ -1,6 +1,8 @@
 import os
 import zipfile
 
+DESCRIPTION = 'Get a copy to upload to server'
+
 exclude_all = [
     '__pycache__',
     'frontend',

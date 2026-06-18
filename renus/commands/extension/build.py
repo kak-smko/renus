@@ -48,6 +48,16 @@ def _remove_route(install, app):
                 b.write(all)
 
 
+def _add_command(install, app):
+    if install.command:
+        name = app.replace("/", "_")
+        shutil.copytree(install.command, './commands/' + name)
+                
+def _remove_command(install, app):
+    if install.command:
+        name = app.replace("/", "_")
+        shutil.rmtree(install.command, './commands/' + name)
+                
 def _add_admin_templates(install, app):
     name = app.replace("/", "_")
     shutil.copytree(install.admin_templates, './frontend/admin/src/extension/' + app)
