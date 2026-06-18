@@ -1,11 +1,6 @@
 import os
 
-import pkg_resources
-
-controller_temp = pkg_resources.resource_filename('renus', './commands/app/controller.temp')
-model_temp = pkg_resources.resource_filename('renus', './commands/app/model.temp')
-vue_temp = pkg_resources.resource_filename('renus', './commands/app/vue.temp')
-route_temp = pkg_resources.resource_filename('renus', './commands/app/route.temp')
+from renus.commands.app.temp import controller_temp,model_temp,route_temp,vue_temp
 
 def to_camel_case(snake_str):
     components = snake_str.split('_')
@@ -21,40 +16,40 @@ def add_temp(name,names, name_camel,names_camel, name_db,folder:list):
         pname = '.'.join(folder) + '.'
         vname = '/'+'/'.join(folder)+'/'
     pth += name + '/'
-    with open(controller_temp,'r') as file:
-        os.makedirs(pth,exist_ok=True)
-        all=file.read()
-        all=all.replace('{name}',pname+name)
-        all = all.replace('{name_camel}', name_camel)
-        all = all.replace('{names_camel}', names_camel)
-        with open(pth+'controller.py','w') as controller:
-            controller.write(all)
+    os.makedirs(pth,exist_ok=True)
+    all=controller_temp
+    all=all.replace('{name}',pname+name)
+    all = all.replace('{name_camel}', name_camel)
+    all = all.replace('{names_camel}', names_camel)
+    with open(pth+'controller.py','w') as controller:
+        controller.write(all)
+        
 
-    with open(model_temp,'r') as file:
-        all=file.read()
-        all=all.replace('{names_camel}',names_camel)
-        all=all.replace('{name_camel}',name_camel)
-        all=all.replace('{name_db}',name_db)
-        with open(pth+'model.py','w') as controller:
-            controller.write(all)
+    all=model_temp
+    all=all.replace('{names_camel}',names_camel)
+    all=all.replace('{name_camel}',name_camel)
+    all=all.replace('{name_db}',name_db)
+    with open(pth+'model.py','w') as controller:
+        controller.write(all)
+        
 
-    with open(vue_temp,'r') as file:
-        os.makedirs('./frontend/admin/src/views/' + vname.lstrip('/'), exist_ok=True)
-        all=file.read()
-        all=all.replace('{name}',name)
-        all=all.replace('{names}',names)
-        all = all.replace('{folder}', vname.lstrip('/'))
-        with open('./frontend/admin/src/views/' + vname.lstrip('/') + name + '.vue', 'w') as controller:
-            controller.write(all)
+    os.makedirs('./frontend/admin/src/views/' + vname.lstrip('/'), exist_ok=True)
+    all=vue_temp
+    all=all.replace('{name}',name)
+    all=all.replace('{names}',names)
+    all = all.replace('{folder}', vname.lstrip('/'))
+    with open('./frontend/admin/src/views/' + vname.lstrip('/') + name + '.vue', 'w') as controller:
+        controller.write(all)
+        
 
-    with open(route_temp,'r') as file:
-        all=file.read()
-        all=all.replace('{name}',pname+name)
-        all=all.replace('{names}',names)
-        all = all.replace('{name_camel}', name_camel)
-        all = all.replace('{folder}', vname.rstrip('/'))
-        with open(pth+'route.py','w') as controller:
-            controller.write(all)
+    all=route_temp
+    all=all.replace('{name}',pname+name)
+    all=all.replace('{names}',names)
+    all = all.replace('{name_camel}', name_camel)
+    all = all.replace('{folder}', vname.rstrip('/'))
+    with open(pth+'route.py','w') as controller:
+        controller.write(all)
+        
 
 def to_plural(word):
     slice = list(word)
