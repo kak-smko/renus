@@ -1,186 +1,278 @@
+from collections.abc import Callable
 import re
-import typing
+import threading
 
 try:
     from bson import ObjectId
-except:
-    def ObjectId(s):
-        return s
+except ImportError:
+    ObjectId = str
 
 
-def full_path_builder(app_prefix: str, path: str):
-    app_prefix = app_prefix.strip(' /')
-    path = path.strip(' /')
-    full = ''
-    if app_prefix != '':
-        full += '/' + app_prefix
-    full = full.strip(' /')
-    full = full.strip(' /')
-    if path != '':
-        full += '/' + path
-    return '/' + full.strip(' /')
+def full_path_builder(app_prefix: str, path: str) -> str:
+    parts = [p.strip("/") for p in [app_prefix, path] if p.strip("/")]
+    return "/" + "/".join(parts) if parts else "/"
 
+def is_safe_path(path: str) -> bool:
+    if '\0' in path:
+        return False
+    for segment in path.split('/'):
+        if segment == '..':
+            return False
+    
+    return True
 
-class BaseRoute:
-    _routes = {}
-    _route_store = {}
+class RouteRegistry:
+    _instance = None
+    _lock = threading.Lock()
 
-    def __init__(self, scope, prefix: str = '', middlewares=None, subdomain=None) -> None:
-        if middlewares is None:
-            middlewares = []
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._routes = {}
+                    cls._instance._subdomains_cache = None
+        return cls._instance
 
-        if subdomain == '_':
-            raise "subdomain cannot be '_'"
+    def register(self, subdomain: str, method: str, route_entry: dict):
+        sub = subdomain or "_"
+        with self._lock:
+            if sub not in self._routes:
+                self._routes[sub] = {}
+            if method not in self._routes[sub]:
+                self._routes[sub][method] = []
+            self._routes[sub][method].append(route_entry)
+            self._subdomains_cache = None
+        
+    def resolve(self, request, scope) -> dict|None:
+        method = request.method
+        if method not in ("GET", "POST", "PUT", "DELETE", "OPTIONS", "WS", "HEAD"):
+            return None
 
-        self._scope = scope
-        self._app_prefix = prefix
-        self._middlewares = middlewares
-        self._subdomain = subdomain or '_'
+        path = scope.get("path", "/")
+        if path != "/":
+            path = path.rstrip("/")
 
-        if self._subdomain not in self._routes:
-            self._routes[self._subdomain] = {}
+        if not is_safe_path(path):
+            raise RuntimeError( 'Invalid path: path traversal detected')
 
-        for m in ['POST', 'GET', 'PUT', 'OPTIONS', 'DELETE', 'WS']:
-            if m not in self._routes[self._subdomain]:
-                self._routes[self._subdomain][m] = []
+        subdomain = getattr(request, "subdomain", "_")
 
-    def _add(self, path: str, controller: typing.Callable, func: typing.Union[str, typing.Callable], method: str,
-             middlewares=None, cache=None):
-        if middlewares is None:
-            middlewares = []
-        full_path = full_path_builder(self._app_prefix, path)
-        middlwrs = self._middlewares.copy()
+        for sub in [subdomain, "_"]:
+            if sub in self._routes and method in self._routes[sub]:
+                for route in self._routes[sub][method]:
+                    regex, params = route["regex"]
+                    match = regex.fullmatch(path)
+                    if match:
+                        args = {k: v.convert(match.group(k)) for k, v in params.items()}
+                        return _build_result(route, args)
 
-        r = {
-            'path': full_path,
-            'controller': controller,
-            'func': func,
-            'middlewares': middlwrs + middlewares,
-            'regex': build_path(full_path)
-        }
-        if cache:
-            r['cache'] = cache
-        self._routes[self._subdomain][method].append(r)
+        return None
 
     @property
-    def all(self):
+    def all(self) -> dict:
         return self._routes
 
     @property
-    def subdomains(self):
-        if self._route_store.get('_subdomains', False) is False:
-            self._route_store['_subdomains'] = list(self._routes.keys())
+    def subdomains(self) -> list:
+        if self._subdomains_cache is None:
+            with self._lock:
+                self._subdomains_cache = list(self._routes.keys())
+        return self._subdomains_cache
 
-        return self._route_store['_subdomains']
+    def summary(self) -> str:
+        lines = []
+        total = 0
+        for sub, methods in sorted(self._routes.items()):
+            for method, routes in sorted(methods.items()):
+                for r in routes:
+                    lines.append(
+                        f"  {method:7s} {r['path']:40s} → {r.get('func', '?')}"
+                    )
+                    total += 1
+        header = f"╔══ Route Registry: {total} routes registered ══╗"
+        return header + "\n" + "\n".join(lines)
 
-    def __request_subdomain(self, request):
-        if len(self.subdomains) == 1:
-            return self.subdomains[0]
+    def clear(self):
+        with self._lock:
+            self._routes.clear()
+            self._subdomains_cache = None
 
-        return request.subdomain
-
-    def response(self, request):
-        method = request.method
-        if method not in ['POST', 'GET', 'PUT', 'OPTIONS', 'DELETE', 'WS']:
-            return False
-
-        if self._scope['path'] != '/':
-            self._scope['path'] = self._scope['path'].rstrip(' /')
-
-        path = self._scope['path']
-
-        subdomain = self.__request_subdomain(request)
-
-        for sub in [subdomain, "_"]:
-            if sub in self._routes:
-                for route in self._routes[sub][method]:
-                    regex, params = route['regex']
-                    find = regex.search(path)
-                    if find:
-                        args = {}
-                        for key, value in params.items():
-                            args[key] = value.convert(find.group(key))
-                        return build(route, args)
-
-        return False
+    @classmethod
+    def reset(cls):
+        """Just for Test"""
+        cls._instance = None
 
 
-class Router(BaseRoute):
-    def __init__(self, scope=None, prefix: str = '', middlewares: typing.List[typing.Callable] = None,
-                 subdomain: str = None) -> None:
+class Router:
+    def __init__(
+        self,
+        prefix: str = "",
+        middlewares: list[Callable]|None = None,
+        subdomain:str|None = None,
+    ) -> None:
         if middlewares is None:
             middlewares = []
-        super().__init__(scope, prefix, middlewares, subdomain)
 
-    def get(self, path, controller: typing.Callable = None, func: typing.Union[str, typing.Callable] = None,
-            middlewares: typing.List[typing.Callable] = None, cache=None):
-        self._add(path, controller, func, 'GET', middlewares, cache)
+        if subdomain == "_":
+            raise ValueError("subdomain cannot be '_'")
+
+        self._prefix = prefix
+        self._middlewares = middlewares
+        self._subdomain = subdomain or "_"
+        self._registry = RouteRegistry()
+
+    def _add(
+        self, path: str, controller, func, method: str, middlewares=None, cache=None
+    ):
+        if middlewares is None:
+            middlewares = []
+
+        full_path = full_path_builder(self._prefix, path)
+        all_middlewares = self._middlewares.copy() + middlewares
+
+        entry = {
+            "path": full_path,
+            "controller": controller,
+            "func": func,
+            "middlewares": all_middlewares,
+            "regex": build_path(full_path),
+        }
+        if cache:
+            entry["cache"] = cache
+
+        self._registry.register(self._subdomain, method, entry)
+
+    def get(
+        self,
+        path: str,
+        controller:Callable | None= None,
+        func:Callable|str|None=None,
+        middlewares: list[Callable]|None = None,
+        cache: int|None = None,
+    ):
+        self._add(path, controller, func, "GET", middlewares, cache)
         return self
 
-    def post(self, path, controller: typing.Callable = None, func: typing.Union[str, typing.Callable] = None,
-             middlewares: typing.List[typing.Callable] = None):
-        self._add(path, controller, func, 'POST', middlewares)
+    def head(
+        self,
+        path: str,
+        controller:Callable | None= None,
+        func:Callable|str|None=None,
+        middlewares: list[Callable]|None = None,
+        cache: int|None = None,
+    ):
+        self._add(path, controller, func, "HEAD", middlewares, cache)
         return self
 
-    def put(self, path, controller: typing.Callable = None, func: typing.Union[str, typing.Callable] = None,
-            middlewares: typing.List[typing.Callable] = None):
-        self._add(path, controller, func, 'PUT', middlewares)
+    def post(
+        self,
+        path: str,
+        controller:Callable | None= None,
+        func:Callable|str|None=None,
+        middlewares: list[Callable]|None = None,
+    ):
+        self._add(path, controller, func, "POST", middlewares)
         return self
 
-    def option(self, path, controller: typing.Callable = None, func: typing.Union[str, typing.Callable] = None,
-               middlewares: typing.List[typing.Callable] = None):
-        self._add(path, controller, func, 'OPTIONS', middlewares)
+    def put(
+        self,
+        path: str,
+        controller:Callable | None= None,
+        func:Callable|str|None=None,
+        middlewares: list[Callable]|None = None,
+    ):
+        self._add(path, controller, func, "PUT", middlewares)
         return self
 
-    def delete(self, path, controller: typing.Callable = None, func: typing.Union[str, typing.Callable] = None,
-               middlewares: typing.List[typing.Callable] = None):
-        self._add(path, controller, func, 'DELETE', middlewares)
+    def delete(
+        self,
+        path: str,
+        controller:Callable | None= None,
+        func:Callable|str|None=None,
+        middlewares: list[Callable]|None = None,
+    ):
+        self._add(path, controller, func, "DELETE", middlewares)
         return self
 
-    def ws(self, path, controller: typing.Callable = None, func: typing.Union[str, typing.Callable] = None,
-           middlewares: typing.List[typing.Callable] = None):
-        self._add(path, controller, func, 'WS', middlewares)
+    def option(
+        self,
+        path: str,
+        controller:Callable | None= None,
+        func:Callable|str|None=None,
+        middlewares: list[Callable]|None = None,
+    ):
+        self._add(path, controller, func, "OPTIONS", middlewares)
         return self
 
-    def crud(self, path, controller: typing.Callable = None, middlewares: typing.List[typing.Callable] = None,
-             func_prefix=''):
-        self._add(path, controller, f'{func_prefix}index', 'GET', middlewares)
-        self._add(path, controller, f'{func_prefix}store', 'POST', middlewares)
-        self._add(path + '/{id:oid}', controller, f'{func_prefix}update', 'PUT', middlewares)
-        self._add(path + '/{id:oid}', controller, f'{func_prefix}delete', 'DELETE', middlewares)
+    def ws(
+        self,
+        path: str,
+        controller:Callable | None= None,
+        func:Callable|str|None=None,
+        middlewares: list[Callable]|None = None,
+    ):
+        self._add(path, controller, func, "WS", middlewares)
         return self
 
-    def mcud(self, path, controller: typing.Callable = None, middlewares: typing.List[typing.Callable] = None,
-             func_prefix=''):
-        self._add(path, controller, f'{func_prefix}m_store', 'POST', middlewares)
-        self._add(path, controller, f'{func_prefix}m_update', 'PUT', middlewares)
-        self._add(path, controller, f'{func_prefix}m_delete', 'DELETE', middlewares)
+    def crud(
+        self,
+        path: str,
+        controller:Callable | None= None,
+        middlewares: list[Callable]|None = None,
+        func_prefix: str = "",
+    ):
+        self._add(path, controller, f"{func_prefix}index", "GET", middlewares)
+        self._add(path, controller, f"{func_prefix}store", "POST", middlewares)
+        self._add(
+            path + "/{id:oid}", controller, f"{func_prefix}update", "PUT", middlewares
+        )
+        self._add(
+            path + "/{id:oid}",
+            controller,
+            f"{func_prefix}delete",
+            "DELETE",
+            middlewares,
+        )
+        return self
+
+    def mcud(
+        self,
+        path: str,
+        controller:Callable | None= None,
+        middlewares: list[Callable]|None = None,
+        func_prefix: str = "",
+    ):
+        self._add(path, controller, f"{func_prefix}m_store", "POST", middlewares)
+        self._add(path, controller, f"{func_prefix}m_update", "PUT", middlewares)
+        self._add(path, controller, f"{func_prefix}m_delete", "DELETE", middlewares)
         return self
 
 
-def build(route, args):
-    res = {}
-    res['path'] = route['path']
-    res['args'] = args
-    res['controller'] = route['controller']
-    res['func'] = route['func']
-    res['middlewares'] = route['middlewares']
-    res['cache'] = route.get('cache', None)
-    return res
+def _build_result(route: dict, args: dict) -> dict:
+    """ساخت نتیجه route match شده"""
+    return {
+        "path": route["path"],
+        "args": args,
+        "controller": route["controller"],
+        "func": route["func"],
+        "middlewares": route["middlewares"],
+        "cache": route.get("cache", None),
+    }
 
 
-PARAM_REGEX = re.compile("{([a-zA-Z_][a-zA-Z0-9_]*)(:[^/{]*)?}")
+PARAM_REGEX = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)(:[^/\{]*)?\}")
 
 
 class StringConvertor:
     regex = r"[^/]+"
 
     def convert(self, value: str) -> str:
-        return value
+        return str(value)
 
 
 class PathConvertor:
-    regex = r".*"
+    regex = r"[^/]+(?:/[^/]+)*"
 
     def convert(self, value: str) -> str:
         return str(value)
@@ -194,16 +286,16 @@ class IntegerConvertor:
 
 
 class FloatConvertor:
-    regex = r"[0-9]+(.[0-9]+)?"
+    regex = r"[0-9]+(\.[0-9]+)?"
 
     def convert(self, value: str) -> float:
         return float(value)
 
 
 class OIdConvertor:
-    regex = r"[a-f\d]{24}"
+    regex = r"[a-f0-9]{24}"
 
-    def convert(self, value: str) -> ObjectId:
+    def convert(self, value: str):
         return ObjectId(value)
 
 
@@ -211,7 +303,7 @@ class BoolConvertor:
     regex = r"(true)|(false)"
 
     def convert(self, value: str) -> bool:
-        return bool(value)
+        return value == "true"
 
 
 CONVERTOR_TYPES = {
@@ -220,30 +312,29 @@ CONVERTOR_TYPES = {
     "float": FloatConvertor(),
     "path": PathConvertor(),
     "oid": OIdConvertor(),
-    "bool": BoolConvertor()
+    "bool": BoolConvertor(),
 }
 
 
-def build_path(
-        path: str,
-):
-    path_regex = "^"
+def build_path(path: str):
+    path_regex = ""
     idx = 0
     param_convertors = {}
+
     for match in PARAM_REGEX.finditer(path):
         param_name, convertor_type = match.groups("str")
         convertor_type = convertor_type.lstrip(":")
-        path_regex += re.escape(path[idx: match.start()])
+        path_regex += re.escape(path[idx : match.start()])
+
         if convertor_type in CONVERTOR_TYPES:
             convertor = CONVERTOR_TYPES[convertor_type]
             path_regex += f"(?P<{param_name}>{convertor.regex})"
             param_convertors[param_name] = convertor
         else:
             path_regex += f"(?P<{param_name}>{convertor_type})"
-            param_convertors[param_name] = CONVERTOR_TYPES['str']
+            param_convertors[param_name] = CONVERTOR_TYPES["str"]
 
         idx = match.end()
 
-    path_regex += re.escape(path[idx:]) + "$"
-
+    path_regex += re.escape(path[idx:]) + ""
     return re.compile(path_regex), param_convertors

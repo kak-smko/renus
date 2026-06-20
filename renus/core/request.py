@@ -1,9 +1,7 @@
 import copy
-import html
 import json
 import re
 import typing
-from http import cookies as http_cookies
 from urllib.parse import parse_qsl
 
 from multipart.multipart import parse_options_header
@@ -12,7 +10,12 @@ from renus.core.config import Config
 from renus.core.formparsers import FormParser, MultiPartParser
 from renus.core.injection import Injection
 
-
+MAX_BODY_SIZE=Config('app').get('max_body_size',10 * 1024 * 1024)
+MAX_HEADERS=Config('app').get('max_headers',100)
+MAX_HEADER_SIZE=Config('app').get('max_headers_size',8192)
+MAX_COOKIES=Config('app').get('max_cookies',50)
+MAX_COOKIE_SIZE=Config('app').get('max_cookies_size',4096)
+MAX_QUERY_SIZE=Config('app').get('max_query_size',1024)
 class Request:
     cryptor = None
 
@@ -170,7 +173,12 @@ class Request:
     async def body(self) -> bytes:
         if not hasattr(self, "_body"):
             chunks = []
+            total_size = 0
             async for chunk in self.stream():
+                total_size += len(chunk)
+                if total_size > MAX_BODY_SIZE:
+                    raise RuntimeError("Request body too large")
+                           
                 chunks.append(chunk)
             self._body = b"".join(chunks)
 
@@ -202,39 +210,104 @@ class Request:
     async def form_safe(self):
         if not hasattr(self, "_form_safe"):
             self._form_safe = await self.form()
-            if type(self._form_safe) == dict:
+            if isinstance(self._form_safe, dict):
                 self._form_safe = Injection().protect(copy.deepcopy(self._form_safe))
             self.inputs = self._form_safe
         return self._form_safe
 
 
+_VALID_HEADER_NAME_RE = re.compile(r'^[a-zA-Z0-9!#$%&\'*+\-.^_`|~]+$')
+
+def _sanitize_header_value(value: str) -> str:
+    return value.translate(_HEADER_CLEAN_TRANS)
+
+
+def _build_header_clean_trans() -> dict:
+    trans = {}
+    for c in range(0x00, 0x09):
+        trans[c] = None   
+
+    for c in range(0x0A, 0x20):
+        trans[c] = None      
+    trans[0x7F] = None      
+    return {k: None for k in range(0x00, 0x20)} | {0x7F: None} | {0x09: 0x09}
+
+
+_HEADER_CLEAN_TRANS = _build_header_clean_trans()
+
+
 def headers_parser(headers: list) -> typing.Dict[str, str]:
+    if len(headers) > MAX_HEADERS:
+        raise RuntimeError("Too many headers")
     headers_dict: typing.Dict[str, str] = {}
     for header in headers:
-        headers_dict[html.escape(str(header[0].decode("utf-8")).lower())] = html.escape(header[1].decode("utf-8"))
+        try:
+            name = header[0].decode("utf-8").lower()
+        except UnicodeDecodeError:
+            continue
+            
+        if not _VALID_HEADER_NAME_RE.match(name):
+            continue
+            
+        try:
+            raw_value = header[1].decode("utf-8")
+        except UnicodeDecodeError:
+            raw_value = header[1].decode("utf-8", errors="replace")
+        if len(raw_value) > MAX_HEADER_SIZE:
+            raise RuntimeError("Header too large")
+                    
+        value = raw_value.translate(_HEADER_CLEAN_TRANS)
+
+        headers_dict[name] = value
 
     return headers_dict
 
 
+
+def _unquote_cookie_value(value: str) -> str:
+    if len(value) < 2:
+        return value
+    if value.startswith('"') and value.endswith('"'):
+        value = value[1:-1]
+        value = value.replace('\\\\', '\\').replace('\\"', '"')
+    return value
+
+
 def cookie_parser(cookie_string: str) -> typing.Dict[str, str]:
+    if len(cookie_string) > MAX_COOKIE_SIZE:
+        raise RuntimeError("Cookie too large")
     cookie_dict: typing.Dict[str, str] = {}
-    cookie_string = html.escape(cookie_string)
-    for chunk in cookie_string.split(";"):
+    chunks=cookie_string.split(";")
+    if len(chunks) > MAX_COOKIES:
+        chunks = chunks[:MAX_COOKIES]
+    for chunk in chunks:
+        chunk = chunk.strip()
+        if not chunk:
+            continue
         if "=" in chunk:
             key, val = chunk.split("=", 1)
         else:
             key, val = "", chunk
-        key, val = key.strip(), val.strip()
-        if key or val:
-            cookie_dict[key] = http_cookies._unquote(val)
+        key = key.strip().translate(_HEADER_CLEAN_TRANS)
+        val = val.strip().translate(_HEADER_CLEAN_TRANS)
+        if key:
+            cookie_dict[key] = _unquote_cookie_value(val)
     return cookie_dict
 
 
 def query_parser(query_string: str):
+    if len(query_string) > MAX_QUERY_SIZE:
+        raise RuntimeError("Query too large")
     params = parse_qsl(query_string.decode("utf-8"), keep_blank_values=True)
-    params = {k: v for k, v in params}
-    params = Injection().protect(params)
-    return params
+    cleaned = {}
+    for k, v in params:
+        name = k.translate(_HEADER_CLEAN_TRANS)
+        if not name:
+            continue
+        value = v.translate(_HEADER_CLEAN_TRANS)
+        cleaned[name] = value
+    return cleaned
+
 
 
 class ClientDisconnect(Exception):

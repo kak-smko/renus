@@ -5,8 +5,8 @@ from io import BytesIO
 
 import requests
 
-from renus.commands.extension.build import _add_route, _add_admin_templates, _add_index_templates, \
-    _add_cls, _add_imprt, _add_config, _add_component_templates,_add_command
+from renus.commands.extension.build import (_add_route, _add_admin_templates, _add_index_templates,
+    _add_cls, _add_imprt, _add_config, _add_component_templates,_add_command)
 from renus.commands.extension.remove import remove_all, remove
 from renus.commands.help import bc
 

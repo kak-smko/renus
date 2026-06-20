@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TypeVar, Generic, Any, List, Optional, Union, Tuple, Dict, get_origin, get_args
 
 from bson import ObjectId
@@ -130,7 +130,7 @@ class ModelBase(Generic[M]):
                 self._where = {}
             for k, v in where.items():
                 if k.startswith('$') and k in self._where:
-                    if type(v) is list:
+                    if isinstance(v,list):
                         self._where[k] += v
                     else:
                         self._where[k] = {**self._where[k], **v}
@@ -177,16 +177,16 @@ class ModelBase(Generic[M]):
         return self
 
     def sort(self, key_or_list: Union[str, List[Tuple]], asc: bool = True):
-        if type(key_or_list) is dict:
+        if isinstance(key_or_list,dict):
             s = key_or_list
-        elif type(key_or_list) is list:
+        elif isinstance(key_or_list,list):
             s = []
             for f, a in key_or_list:
                 s.append((f, 1 if a else -1))
         else:
             s = [(key_or_list, 1 if asc else -1)]
         if self._steps is not None:
-            if type(s) is list:
+            if isinstance(s,list):
                 s = {i[0]: i[1] for i in s}
             self._steps.append({"$sort": s})
         else:
@@ -195,11 +195,11 @@ class ModelBase(Generic[M]):
 
     def select(self, *select: [str, Dict]):
         s = {}
-        if len(select) == 1 and type(select[0]) is dict:
+        if len(select) == 1 and isinstance(select[0],dict):
             s = select[0]
         else:
             for key in select:
-                if type(key) is dict:
+                if isinstance(key,dict):
                     s = key
                 else:
                     s[key] = 1
@@ -264,10 +264,10 @@ class ModelBase(Generic[M]):
 
     def create(self, document: dict, session=None) -> dict:
         if self.add_time_fields and "updated_at" not in document:
-            document["updated_at"] = datetime.utcnow()
+            document["updated_at"] = datetime.now(timezone.utc)
 
         if self.add_time_fields and "created_at" not in document:
-            document["created_at"] = datetime.utcnow()
+            document["created_at"] = datetime.now(timezone.utc)
 
         id = self.collection().insert_one(document, session=session).inserted_id
         document['_id'] = id
@@ -279,10 +279,10 @@ class ModelBase(Generic[M]):
         if self.add_time_fields:
             for document in documents:
                 if "updated_at" not in document:
-                    document["updated_at"] = datetime.utcnow()
+                    document["updated_at"] = datetime.now(timezone.utc)
 
                 if "created_at" not in document:
-                    document["created_at"] = datetime.utcnow()
+                    document["created_at"] = datetime.now(timezone.utc)
 
         ids = self.collection().insert_many(documents, session=session).inserted_ids
         self.boot_event('create_many', {}, ids, session)
@@ -292,10 +292,10 @@ class ModelBase(Generic[M]):
     def update(self, new: dict, upsert=False, get_old=False, session=None) -> bool:
         where = self.__ud_gate('update')
         if self.add_time_fields:
-            new["updated_at"] = datetime.utcnow()
+            new["updated_at"] = datetime.now(timezone.utc)
         d = {"$set": new}
         if self.add_time_fields and "created_at" not in new:
-            d["$setOnInsert"] = {'created_at': datetime.utcnow()}
+            d["$setOnInsert"] = {'created_at': datetime.now(timezone.utc)}
         old = self.collection().find_one_and_update(where, d, upsert=upsert, session=session)
         self.boot_event('update', old, new, session)
         if old is None:
@@ -312,8 +312,8 @@ class ModelBase(Generic[M]):
         if '$setOnInsert' not in new:
             new['$setOnInsert'] = {}
         if self.add_time_fields:
-            new['$set']["updated_at"] = datetime.utcnow()
-            new['$setOnInsert']['created_at'] = datetime.utcnow()
+            new['$set']["updated_at"] = datetime.now(timezone.utc)
+            new['$setOnInsert']['created_at'] = datetime.now(timezone.utc)
         old = self.collection().find_one_and_update(where, new, upsert=upsert, session=session)
         self.boot_event('update', old, {k[1:]: v for k, v in new.items()}, session)
         if old is None:
@@ -330,8 +330,8 @@ class ModelBase(Generic[M]):
         if '$setOnInsert' not in new:
             new['$setOnInsert'] = {}
         if self.add_time_fields:
-            new['$set']["updated_at"] = datetime.utcnow()
-            new['$setOnInsert']['created_at'] = datetime.utcnow()
+            new['$set']["updated_at"] = datetime.now(timezone.utc)
+            new['$setOnInsert']['created_at'] = datetime.now(timezone.utc)
         old = self.collection().update_many(where, new, upsert=upsert, session=session).raw_result
         self.boot_event('update_many', old, {k[1:]: v for k, v in new.items()}, session)
         self._attach_file({'_id': 'update_opt_many', 'documents': new}, session)
@@ -340,7 +340,7 @@ class ModelBase(Generic[M]):
     def update_many(self, new: dict, session=None) -> bool:
         where = self.__ud_gate('update')
         if self.add_time_fields:
-            new["updated_at"] = datetime.utcnow()
+            new["updated_at"] = datetime.now(timezone.utc)
         old = self.collection().update_many(where, {"$set": new}, session=session).raw_result
         self.boot_event('update_many', old, str(new), session)
         self._attach_file({'_id': 'update_many', 'documents': new}, session)
@@ -372,7 +372,7 @@ class ModelBase(Generic[M]):
 
     @staticmethod
     def convert_id(id):
-        if type(id) is str:
+        if isinstance(id,str):
             try:
                 return ObjectId(id)
             except Exception:
@@ -407,11 +407,11 @@ class ModelBase(Generic[M]):
         if documents is None:
             return None
         res = []
-        if type(documents) is dict:
+        if isinstance(documents,dict):
             return self.__cleaner(documents)
         else:
             for document in documents:
-                if type(document) is dict:
+                if isinstance(document,dict):
                     res.append(self.__cleaner(document))
         return res
 
@@ -434,7 +434,7 @@ class ModelBase(Generic[M]):
 
             for item in all:
                 for field, db in self.metro.items():
-                    if type(db) is not list:
+                    if not isinstance(db,list):
                         raise RuntimeError(
                             "metro format not true. ex: '_id':[{'collection':'test','field': 'test_id'}]")
                     for d in db:
@@ -457,7 +457,7 @@ class ModelBase(Generic[M]):
         p = field.split('.')
         r = None
         for i in p:
-            if type(item) is list:
+            if isinstance(item,list):
                 res = []
                 for f in item:
                     if i not in f:
@@ -494,7 +494,7 @@ class ModelBase(Generic[M]):
     def _links_extractor(self, item) -> list:
         s = []
         for field, db in self.metro.items():
-            if type(db) is not list:
+            if not isinstance(db,list):
                 raise RuntimeError(
                     "metro format not true. ex: '_id':[{'collection':'test','field': 'test_id'}]")
             for d in db:

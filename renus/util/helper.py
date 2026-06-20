@@ -1,7 +1,8 @@
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 from hashlib import sha3_512
 from json import dumps as json_dump, loads as json_loads
-from random import choice as random_choice
+import secrets
+import string
 
 from renus.core.serialize import jsonEncoder
 
@@ -13,16 +14,16 @@ def hash_new_password(password: str, salt: str = 'renus') -> str:
     return sha3_512(p + r.digest()).hexdigest()
 
 
-def is_correct_password(pw_hash: bytes, password: str, salt: str = 'renus') -> bool:
+def is_correct_password(pw_hash: str, password: str, salt: str = 'renus') -> bool:
     p = password.encode("utf-8")
     s = salt.encode("utf-8")
     r = sha3_512(s + p)
-    return sha3_512(p + r.digest()).hexdigest() == pw_hash
+    computed_hash = sha3_512(p + r.digest()).hexdigest()
+    return secrets.compare_digest(computed_hash, pw_hash)
 
 
 def get_random_string(length):
-    letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-    return ''.join(random_choice(letters) for i in range(length))
+    return ''.join(secrets.choice(string.ascii_letters) for _ in range(length))
 
 
 def encode64(value):

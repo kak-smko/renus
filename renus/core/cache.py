@@ -1,6 +1,6 @@
 import os
 import pickle
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta,timezone
 from hashlib import sha3_256
 
 from renus.core.config import Config
@@ -37,7 +37,7 @@ class Cache:
             v=pickle.dumps(value,pickle.HIGHEST_PROTOCOL)
             self.rd.set(self._prefix+key,v,expire)
             return
-        expire = datetime.utcnow() + timedelta(seconds=expire)
+        expire =  int((datetime.now(timezone.utc) + timedelta(seconds=expire)).timestamp())
         path = self._build_name(key, self.depth)
         self._create_if_not_exist(path, value, expire)
 
@@ -55,7 +55,7 @@ class Cache:
         t= self._read_key(path, default)['expire']
         if t==-1:
             return -1
-        return max(-1,int(t.timestamp()-datetime.utcnow().timestamp()))
+        return max(-1,int(t.timestamp()- datetime.now(timezone.utc).timestamp()))
 
     def delete(self, key):
         if self.rd:
@@ -126,7 +126,7 @@ class Cache:
             else:
                 return {'value': default, 'expire': -1}
 
-        if expire.timestamp() < datetime.utcnow().timestamp():
+        if expire.timestamp() < datetime.now(timezone.utc).timestamp():
             self._delete_file(filename)
             return {'value': default, 'expire': -1}
         return {'value': value, 'expire': expire}

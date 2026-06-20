@@ -151,7 +151,7 @@ class MultiPartParser:
         # Parse the Content-Type header to get the multipart boundary.
         content_type, params = parse_options_header(self.headers["content-type"])
         charset = params.get(b"charset", "utf-8")
-        if type(charset) == bytes:
+        if isinstance(charset,bytes):
             charset = charset.decode("utf-8")
         boundary = params.get(b"boundary")
 

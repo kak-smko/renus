@@ -56,7 +56,7 @@ def _add_command(install, app):
 def _remove_command(install, app):
     if install.command:
         name = app.replace("/", "_")
-        shutil.rmtree(install.command, './commands/' + name)
+        shutil.rmtree('./commands/' + name)
                 
 def _add_admin_templates(install, app):
     name = app.replace("/", "_")

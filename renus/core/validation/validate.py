@@ -62,7 +62,7 @@ class Validate:
 
     def has_required(self, rules):
         for item in rules:
-            if type(item) == type(vr.Required):
+            if isinstance(vr.Required,item):
                 return True
         return False
 

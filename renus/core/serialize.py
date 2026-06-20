@@ -2,6 +2,7 @@ import datetime
 import decimal
 import json
 import uuid
+import re
 
 try:
     from bson import ObjectId
@@ -9,6 +10,12 @@ except:
     def ObjectId(s):
         raise
 
+_ISOFORMAT_RE = re.compile(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}')
+_OBJECTID_RE = re.compile(r'^[a-fA-F0-9]{24}$')
+_UUID_RE = re.compile(
+    r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$'
+)
+_DECIMAL_RE = re.compile(r'^-?\d+\.\d+$')
 
 class jsonEncoder(json.JSONEncoder):
     def default(self, o):
@@ -32,24 +39,44 @@ class jsonEncoder(json.JSONEncoder):
 
 def json_decoder(value):
     if isinstance(value, dict):
-        for k, v in value.items():
-            value[k] = json_decoder(v)
+        return {k: json_decoder(v) for k, v in value.items()}
     elif isinstance(value, list):
-        for index, row in enumerate(value):
-            value[index] = json_decoder(row)
+        return [json_decoder(item) for item in value]
     elif isinstance(value, str) and value:
+        return _decode_string(value)
+    return value
+
+def _decode_string(value: str):
+    length = len(value)
+
+    # Check datetime (min length for ISO format is 19: "2024-01-01T00:00:00")
+    if length >= 19 and _ISOFORMAT_RE.match(value):
         try:
-            value = datetime.datetime.fromisoformat(value)
-        except:
+            clean = value.rstrip('Z')
+            return datetime.datetime.fromisoformat(clean)
+        except (ValueError, TypeError):
+            pass
+
+    # Check ObjectId (exactly 24 hex chars)
+    if length == 24 and _OBJECTID_RE.match(value):
+        if ObjectId is not None:
             try:
-                value = ObjectId(value)
-            except:
-                try:
-                    value = decimal.Decimal(value)
-                except:
-                    try:
-                        value = uuid.UUID(value)
-                    except:
-                        pass
+                return ObjectId(value)
+            except Exception:
+                pass
+
+    # Check UUID (exactly 36 chars: 8-4-4-4-12)
+    if length == 36 and _UUID_RE.match(value):
+        try:
+            return uuid.UUID(value)
+        except (ValueError, TypeError):
+            pass
+
+    # Check Decimal (only for numeric-looking strings with decimal point)
+    if length >= 3 and _DECIMAL_RE.match(value):
+        try:
+            return decimal.Decimal(value)
+        except (decimal.InvalidOperation, ValueError):
+            pass
 
     return value

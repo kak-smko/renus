@@ -8,7 +8,7 @@ from renus.core.exception import debug_response
 from renus.core.middleware import Middleware
 from renus.core.request import Request
 from renus.core.response import Response, TextResponse, JsonResponse
-from renus.core.routing import Router
+from renus.core.routing import RouteRegistry
 from renus.core.status import Status
 from renus.core.websockets import WebSocket
 
@@ -198,4 +198,4 @@ class App:
         await response(request, scope, receive, send)
 
     def load_routes(self, req, scope):
-        return Router(scope).response(req)
+        return RouteRegistry().resolve(req, scope)

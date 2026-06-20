@@ -82,7 +82,7 @@ class Schedule:
         return self
 
     def do(self, key: str, func, *args, **kwargs):
-        now = datetime.datetime.utcnow() + datetime.timedelta(minutes=self._timedelta)
+        now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=self._timedelta)
 
         job_func = functools.partial(func, *args, **kwargs)
         try:
@@ -185,7 +185,7 @@ class Schedule:
             self._job_list[key] = job_func
 
     def job(self,key, func,logged=False,multi=True,n=0):
-        now = datetime.datetime.utcnow() + datetime.timedelta(hours=3, minutes=30)
+        now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=3, minutes=30)
         self._last_run[key] = now
         Cache().put('schedule_last_run',self._last_run,24*60*60)
         try:

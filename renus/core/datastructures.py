@@ -3,6 +3,7 @@ import tempfile
 import typing
 
 from renus.core.concurrency import run_in_threadpool
+from renus.core.config import Config
 
 
 class Background:
@@ -99,7 +100,7 @@ class MultiDict(typing.Mapping):
         items = self.multi_items()
         return f"{class_name}({items!r})"
 
-
+MAX_UPLOAD_SIZE=Config('app').get('max_upload_size',50 * 1024 * 1024)
 class UploadFile:
 
     spool_max_size = 1024 * 1024

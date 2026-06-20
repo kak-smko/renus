@@ -338,7 +338,7 @@ class FileResponse(Response):
                 )
             else:
                 content_disposition = 'attachment; filename="{}"'.format(self.filename)
-            self.raw_headers.append((b"content-disposition", content_disposition.lower().encode("utf-8")))
+            self.raw_headers.append((b"content-disposition", content_disposition.encode("utf-8")))
 
         self.stat_result = stat_result
         if stat_result is not None:
@@ -393,8 +393,7 @@ class FileResponse(Response):
                     more_body = len(chunk) == self.chunk_size
                     if is_zip:
                         self.gzip_file.write(chunk)
-                        if not more_body:
-                            self.gzip_file.close()
+                        self.gzip_file.flush()
                         chunk = self.gzip_buffer.getvalue()
                         self.gzip_buffer.seek(0)
                         self.gzip_buffer.truncate()

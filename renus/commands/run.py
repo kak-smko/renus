@@ -50,4 +50,7 @@ def run():
 
 
 def main():
+    cwd = os.getcwd()
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
     run()

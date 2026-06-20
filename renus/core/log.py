@@ -1,9 +1,9 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 class Log:
     def __init__(self) -> None:
-        self.filename='storage/logs/Renus-'+datetime.utcnow().strftime('%Y-%m-%d')+'.log'
+        self.filename='storage/logs/Renus-'+datetime.now(timezone.utc).strftime('%Y-%m-%d')+'.log'
 
     def info(self,msg):
         create(self.filename, msg, 'info')
@@ -19,4 +19,4 @@ class Log:
 def create(filename, value,typ):
     os.makedirs(os.path.dirname(filename), exist_ok=True)
     with open(filename, 'a') as output:
-        output.write(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {typ.upper()}: {str(value)}\n")
+        output.write(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}] {typ.upper()}: {str(value)}\n")

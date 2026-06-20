@@ -570,4 +570,4 @@ class And:
         if len(errors) == 0:
             return True
 
-        return ['or_error', [errors]]
+        return ['and_error', [errors]]

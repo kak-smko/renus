@@ -7,27 +7,27 @@ from renus.core.log import Log
 
 
 def abort(msg, status_code: Status = Status.HTTP_400_BAD_REQUEST):
-    if type(msg).__name__=='str':
+    if isinstance(msg,str):
         msg={'msg':msg}
     raise RuntimeError(msg, status_code)
 
 
 def abort_if(condition: bool, msg, status_code: Status = Status.HTTP_400_BAD_REQUEST):
     if condition:
-        if type(msg).__name__ == 'str':
+        if isinstance(msg,str):
             msg = {'msg': msg}
         raise RuntimeError(msg, status_code)
 
 
 def abort_unless(condition: bool, msg, status_code: Status = Status.HTTP_400_BAD_REQUEST):
     if not condition:
-        if type(msg).__name__ == 'str':
+        if isinstance(msg,str):
             msg = {'msg': msg}
         raise RuntimeError(msg, status_code)
 
 
 def debug_response(exc: Exception,debug=False):
-    if type(exc).__name__=='RuntimeError' and type(exc.args[0]).__name__=='dict' and len(exc.args)==2 and 'msg' in exc.args[0]:
+    if isinstance(exc,RuntimeError) and isinstance(exc.args[0],dict) and len(exc.args)==2 and 'msg' in exc.args[0]:
         return exc.args[0],exc.args[1]
 
     status_code = Status.HTTP_500_INTERNAL_SERVER_ERROR

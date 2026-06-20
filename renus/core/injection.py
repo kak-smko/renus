@@ -39,7 +39,16 @@ class Injection:
 
 class Xss(HTMLParser):
     block_tags = {
-        'script': 'scrlpt',
+        'script': 'scripts',
+        'iframe':'iframes',
+        'object':'objects',
+        'embed':'embeds',
+        'form':'forms',
+        'style':'styles',
+        'base':'bases',
+        'link':'links', 
+        'applet':'applets', 
+        'meta':'metas'
     }
     allow_protocol=['http','https']
     allow_attr = {'class':1,
