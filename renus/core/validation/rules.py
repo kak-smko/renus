@@ -448,30 +448,14 @@ class Schema:
         if not isinstance(input, dict):
             return ['type_error', ['dict', str(type(input))]]
 
-        errors = {}
 
         if self.strict:
             extra_fields = set(input.keys()) - set(self.schema.keys())
             if extra_fields:
                 return ['schema_strict_error', [list(extra_fields)]]
+        from renus.core.validation.validate import Validate
+        Validate(input).rules(self.schema)
 
-        for field, rules in self.schema.items():
-            value = input.get(field)
-
-            if not isinstance(rules, list):
-                rules = [rules]
-
-            field_errors = []
-            for rule in rules:
-                result = rule(value)
-                if result is not True:
-                    field_errors.append(result)
-
-            if field_errors:
-                errors[field] = field_errors
-
-        if errors:
-            return ['schema_error', [errors]]
         return True
 
 
@@ -488,21 +472,11 @@ class Each:
             return ['type_error', ['list|dict', str(type(input))]]
 
         if isinstance(input, list):
-            d=enumerate(input)
+            d={str(k):v for k,v in enumerate(input)}
         else:
             d=input.items()
-        errors = {}
-        for index, item in d:
-            item_errors = []
-            for rule in self.rules:
-                result = rule(item)
-                if result is not True:
-                    item_errors.append(result)
-            if item_errors:
-                errors[str(index)] = item_errors
-
-        if errors:
-            return ['each_error', [errors]]
+        from renus.core.validation.validate import Validate
+        Validate(d).rules(self.rules)
         return True
 
 

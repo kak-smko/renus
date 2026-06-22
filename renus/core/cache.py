@@ -55,7 +55,7 @@ class Cache:
         t= self._read_key(path, default)['expire']
         if t==-1:
             return -1
-        return max(-1,int(t.timestamp()- datetime.now(timezone.utc).timestamp()))
+        return max(-1,int(t- datetime.now(timezone.utc).timestamp()))
 
     def delete(self, key):
         if self.rd:
@@ -126,7 +126,7 @@ class Cache:
             else:
                 return {'value': default, 'expire': -1}
 
-        if expire.timestamp() < datetime.now(timezone.utc).timestamp():
+        if expire < datetime.now(timezone.utc).timestamp():
             self._delete_file(filename)
             return {'value': default, 'expire': -1}
         return {'value': value, 'expire': expire}

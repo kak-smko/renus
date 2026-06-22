@@ -1,7 +1,6 @@
-import os, sys,importlib
-
-def clear_screen():
-    os.system('cls' if os.name == 'nt' else 'clear')
+import importlib
+import os
+import sys
 
 
 def find_command(name):
@@ -20,7 +19,6 @@ def find_command(name):
     return None
     
 def run():
-    clear_screen()
     arg = sys.argv
     
     if len(arg) < 2:
