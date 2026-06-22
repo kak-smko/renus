@@ -454,7 +454,7 @@ class Schema:
             if extra_fields:
                 return ['schema_strict_error', [list(extra_fields)]]
         from renus.core.validation.validate import Validate
-        Validate(input).rules(self.schema)
+        input.update(Validate(input).rules(self.schema))
 
         return True
 
@@ -476,7 +476,7 @@ class Each:
         else:
             d=input.items()
         from renus.core.validation.validate import Validate
-        Validate(d).rules(self.rules)
+        input.update(Validate(d).rules(self.rules))
         return True
 
 
