@@ -453,6 +453,7 @@ class Schema:
             extra_fields = set(input.keys()) - set(self.schema.keys())
             if extra_fields:
                 return ['schema_strict_error', [list(extra_fields)]]
+        #todo
         from renus.core.validation.validate import Validate
         input.update(Validate(input).rules(self.schema))
 
@@ -472,11 +473,21 @@ class Each:
             return ['type_error', ['list|dict', str(type(input))]]
 
         if isinstance(input, list):
-            d={str(k):v for k,v in enumerate(input)}
+            d=enumerate(input)
         else:
             d=input.items()
-        from renus.core.validation.validate import Validate
-        input.update(Validate(d).rules(self.rules))
+        errors = {}
+        for index, item in d:
+            item_errors = []
+            for rule in self.rules:
+                result = rule(item)
+                if result is not True:
+                    item_errors.append(result)
+            if item_errors:
+                errors[str(index)] = item_errors
+
+        if errors:
+            return ['each_error', [errors]]
         return True
 
 
