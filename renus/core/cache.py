@@ -1,6 +1,8 @@
 import os
+import threading
+import fcntl
 import pickle
-from datetime import datetime, timedelta,timezone
+from datetime import UTC, datetime, timedelta
 from hashlib import sha3_256
 
 from renus.core.config import Config
@@ -17,6 +19,7 @@ class Cache:
     depth = 1
     folder_path = 'cache'
     typ = Config('app').get('cacheDriver', 'file')
+    _lock = threading.RLock()
     if typ=='redis':
         assert rds is not None, "'redis' must be installed for Cache"
         rd=rds
@@ -33,36 +36,52 @@ class Cache:
         :param value: value that save by key
         :param expire: seconds to expire from now
         """
-        if self.rd:
-            v=pickle.dumps(value,pickle.HIGHEST_PROTOCOL)
-            self.rd.set(self._prefix+key,v,expire)
-            return
-        expire =  int((datetime.now(timezone.utc) + timedelta(seconds=expire)).timestamp())
-        path = self._build_name(key, self.depth)
-        self._create_if_not_exist(path, value, expire)
+        with self._lock:
+            if self.rd:
+                v=pickle.dumps(value,pickle.HIGHEST_PROTOCOL)
+                self.rd.set(self._prefix+key,v,expire)
+                return
+            expire = datetime.now(UTC) + timedelta(seconds=expire)
+            path = self._build_name(key, self.depth)
+            self._create_if_not_exist(path, value, expire)
+
+    def increment(self, key: str, value, expire: int = 60):
+        with self._lock:
+            if self.rd:
+                r=self.rd.get(self._prefix+key)
+                value= value if r is None else (pickle.loads(r)+value)
+                v=pickle.dumps(value,pickle.HIGHEST_PROTOCOL)
+                self.rd.set(self._prefix+key,v,expire)
+                return
+            expire = datetime.now(UTC) + timedelta(seconds=expire)
+            value=self.get(key,value-1)+1
+            path = self._build_name(key, self.depth)
+            self._create_if_not_exist(path, value, expire)
 
     def get(self, key: str, default=None):
-        if self.rd:
-            r=self.rd.get(self._prefix+key)
-            return default if r is None else pickle.loads(r)
-        path = self._build_name(key, self.depth)
-        return self._read_key(path, default)['value']
+        with self._lock:
+            if self.rd:
+                r=self.rd.get(self._prefix+key)
+                return default if r is None else pickle.loads(r)
+            path = self._build_name(key, self.depth)
+            return self._read_key(path, default)['value']
 
     def expire(self, key, default=None):
-        if self.rd:
-            return max(-1,self.rd.ttl(self._prefix+key))
-        path = self._build_name(key, self.depth)
-        t= self._read_key(path, default)['expire']
-        if t==-1:
-            return -1
-        return max(-1,int(t- datetime.now(timezone.utc).timestamp()))
+        with self._lock:
+            if self.rd:
+                return max(-1,self.rd.ttl(self._prefix+key))
+            path = self._build_name(key, self.depth)
+            t= self._read_key(path, default)['expire']
+            if t==-1:
+                return -1
+            return max(-1,int(t.timestamp()-datetime.now(UTC).timestamp()))
 
     def delete(self, key):
-        if self.rd:
-            return self.rd.delete(self._prefix+key)
-
-        path = self._build_name(key, self.depth)
-        return self._delete_file(f"storage/{self.folder_path}{path}")
+        with self._lock:
+            if self.rd:
+                return self.rd.delete(self._prefix+key)
+            path = self._build_name(key, self.depth)
+            return self._delete_file(f"storage/{self.folder_path}{path}")
 
     def delete_expired(self):
         filename = f'./storage/{self.folder_path}/'
@@ -86,7 +105,8 @@ class Cache:
         except Exception as exc:
             if n < 3:
                 return self._delete_file(path, n + 1)
-            Log().info(f'cache delete_file: {exc}')
+            else:
+                raise exc
         return True
 
     def _check_pass(self, line):
@@ -94,7 +114,7 @@ class Cache:
         if len(res) < 2:
             return True
         expired, path = res
-        if (datetime.strptime(expired, '%Y-%m-%d %H:%M:%S').timestamp() < datetime.utcnow().timestamp()):
+        if (datetime.strptime(expired, '%Y-%m-%d %H:%M:%S').timestamp() < datetime.now(UTC).timestamp()):
             self._delete_file(f'storage/{self.folder_path}{path}')
             return False
         return True
@@ -105,11 +125,15 @@ class Cache:
         try:
             os.makedirs(os.path.dirname(filename), exist_ok=True)
             with open(filename, 'wb') as output:
+                fcntl.flock(output.fileno(), fcntl.LOCK_EX)
                 pickle.dump(expire, output, pickle.HIGHEST_PROTOCOL)
                 pickle.dump(value, output, pickle.HIGHEST_PROTOCOL)
-        except:
+                fcntl.flock(output.fileno(), fcntl.LOCK_UN)
+        except Exception as e:
             if n < 3:
                 self._create_if_not_exist(path, value, expire, n + 1)
+            else:
+                raise e
 
     def _read_key(self, path, default=None, n=0):
         filename = f'storage/{self.folder_path}{path}'
@@ -120,13 +144,13 @@ class Cache:
             with open(filename, 'rb') as input:
                 expire = pickle.load(input)
                 value = pickle.load(input)
-        except Exception:
+        except Exception as e:
             if n < 3:
                 return self._read_key(path, default, n + 1)
             else:
-                return {'value': default, 'expire': -1}
+                raise e
 
-        if expire < datetime.now(timezone.utc).timestamp():
+        if expire.timestamp() < datetime.now(UTC).timestamp():
             self._delete_file(filename)
             return {'value': default, 'expire': -1}
         return {'value': value, 'expire': expire}
