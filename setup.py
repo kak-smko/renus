@@ -4,7 +4,7 @@ setup(
     name='renus',
     version='2.7.2',
     description='Renus Core Framework',
-    url='https://github.com/smkoBa/renus',
+    url='https://github.com/kak-smko/renus',
     author='Smko Bayazidi',
     author_email='ba.smko@gmail.com',
     license='BSD',

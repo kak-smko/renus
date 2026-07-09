@@ -4,3 +4,4 @@ renus.egg-info
 .idea
 build
 .zed
+.pytest_cache/
