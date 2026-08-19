@@ -19,10 +19,8 @@ _DECIMAL_RE = re.compile(r'^-?\d+\.\d+$')
 
 class jsonEncoder(json.JSONEncoder):
     def default(self, o):
-        if isinstance(o, datetime.datetime):
-            return o.isoformat()+'Z'
-        elif isinstance(o, datetime.date):
-            return o.isoformat() + 'T00:00:00Z'
+        if isinstance(o, (datetime.datetime, datetime.date)):
+            return o.isoformat()
         elif isinstance(o, datetime.time):
             r = o.isoformat()
             if o.microsecond:

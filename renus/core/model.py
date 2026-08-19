@@ -25,6 +25,9 @@ class ReModel:
             elif isinstance(v, list):
                 v = self._process_list_items(v, field_type)
 
+            elif isinstance(v, datetime):
+                v = v.replace(tzinfo=timezone.utc)
+
             setattr(self, k, v)
 
     def _process_list_items(self, items, field_type):
@@ -366,8 +369,7 @@ class ModelBase(Generic[M]):
         self.visible_fields = fields
         return self
 
-    @staticmethod
-    def boot_event(typ: str, old, new, session):
+    def boot_event(self,typ: str, old, new, session):
         pass
 
     @staticmethod
