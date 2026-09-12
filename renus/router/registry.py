@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+import threading
+
+from renus.router.path import is_safe_path
+
+_SUPPORTED_METHODS = ("GET", "POST", "PUT", "DELETE", "OPTIONS", "WS", "HEAD")
+
+RouteEntry = dict
+
+RouteResult = dict
+
+def _build_result(route: RouteEntry, args: dict[str, object]) -> RouteResult:
+    return {
+        "path": route["path"],
+        "args": args,
+        "controller": route["controller"],
+        "func": route["func"],
+        "middlewares": route["middlewares"],
+        "cache": route.get("cache", None),
+    }
+
+class RouteRegistry:
+    """Singleton registry that stores and resolves registered routes."""
+
+    _instance: "RouteRegistry | None" = None
+    _lock = threading.Lock()
+
+    def __new__(cls) -> "RouteRegistry":
+        """Create or return the shared registry singleton."""
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    instance = super().__new__(cls)
+                    instance._routes: dict[str, dict[str, list[RouteEntry]]] = {}
+                    instance._subdomains_cache: list[str] | None = None
+                    instance._matcher_cache: dict | None = None
+                    instance._has_subdomains: bool = False
+                    cls._instance = instance
+        return cls._instance
+
+    def register(self, subdomain: str, method: str, route_entry: RouteEntry) -> None:
+        """Register a route entry for a subdomain and HTTP method."""
+        sub = subdomain or "_"
+        with self._lock:
+            if sub not in self._routes:
+                self._routes[sub] = {}
+            if method not in self._routes[sub]:
+                self._routes[sub][method] = []
+            self._routes[sub][method].append(route_entry)
+            self._subdomains_cache = None
+            self._matcher_cache = None
+
+    def _matcher(self) -> dict:
+        matcher = self._matcher_cache
+        if matcher is None:
+            with self._lock:
+                matcher = self._matcher_cache
+                if matcher is None:
+                    matcher = {}
+                    has_subdomains = False
+                    for sub, methods in self._routes.items():
+                        if sub != "_":
+                            has_subdomains = True
+                        buckets: dict = {}
+                        for method, routes in methods.items():
+                            static: dict = {}
+                            regexes: list = []
+                            for entry in routes:
+                                regex, params = entry["regex"]
+                                if params:
+                                    regexes.append((regex, params, entry))
+                                else:
+                                    static[entry["path"]] = entry
+                            buckets[method] = (static, regexes)
+                        matcher[sub] = buckets
+                    self._has_subdomains = has_subdomains
+                    self._matcher_cache = matcher
+        return matcher
+
+    def resolve(self, request, scope) -> RouteResult | None:
+        """Resolve a request to a matching route result, or ``None``."""
+        method = request.method
+        if method not in _SUPPORTED_METHODS:
+            return None
+
+        path = scope.get("path", "/")
+        if path != "/":
+            path = path.rstrip("/")
+
+        if not is_safe_path(path):
+            raise RuntimeError("Invalid path: path traversal detected")
+
+        routes = self._matcher()
+
+        subs = (getattr(request, "subdomain", "_"), "_") if self._has_subdomains else ("_",)
+        for sub in subs:
+            buckets = routes.get(sub)
+            if buckets is None:
+                continue
+            spec = buckets.get(method)
+            if spec is None:
+                continue
+            static, regexes = spec
+            entry = static.get(path)
+            if entry is not None:
+                return _build_result(entry, {})
+            for regex, params, route in regexes:
+                match = regex.fullmatch(path)
+                if match:
+                    args = {
+                        name: convertor.convert(match.group(name))
+                        for name, convertor in params.items()
+                    }
+                    return _build_result(route, args)
+
+        return None
+
+    @property
+    def all(self) -> dict:
+        """All registered routes grouped by subdomain and method."""
+        return self._routes
+
+    @property
+    def subdomains(self) -> list:
+        """The list of registered subdomains."""
+        if self._subdomains_cache is None:
+            with self._lock:
+                self._subdomains_cache = list(self._routes.keys())
+        return self._subdomains_cache
+
+    def summary(self) -> str:
+        """Return a human-readable summary of registered routes."""
+        lines = []
+        total = 0
+        for sub, methods in sorted(self._routes.items()):
+            for method, routes in sorted(methods.items()):
+                for route in routes:
+                    lines.append(
+                        f"  {method:7s} {route['path']:40s} → {route.get('func', '?')}"
+                    )
+                    total += 1
+        header = f"╔══ Route Registry: {total} routes registered ══╗"
+        return header + "\n" + "\n".join(lines)
+
+    def clear(self) -> None:
+        """Clear all registered routes and caches."""
+        with self._lock:
+            self._routes.clear()
+            self._subdomains_cache = None
+            self._matcher_cache = None
+            self._has_subdomains = False
+
+    @classmethod
+    def reset(cls) -> None:
+        """Reset the singleton so a new registry is created on next access."""
+        cls._instance = None
+
+__all__ = ["RouteRegistry", "RouteEntry", "RouteResult"]
