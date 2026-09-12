@@ -1,7 +1,21 @@
 __pycache__
+*.py[cod]
+*.so
 dist
 renus.egg-info
-.idea
+*.egg-info
 build
+*.egg
+.idea
 .zed
-.pytest_cache/
+.gitignore
+memory.md
+publish.md
+storage
+*.log
+.coverage
+htmlcov
+example
+# Cython build artifact (generated from renus/_speedup.pyx)
+renus/_speedup.c
+_stripdocs.py

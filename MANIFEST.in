@@ -1,1 +1,7 @@
-recursive-include renus *.json *.temp
+# Ensure the Cython source is bundled so the wheel can be compiled everywhere.
+include renus/_speedup.pyx
+
+# Launcher + package data
+include LICENSE
+include README.md
+include pytest.ini
