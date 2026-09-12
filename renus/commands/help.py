@@ -1,66 +1,84 @@
+from __future__ import annotations
+
+import ast
 import importlib
 from pathlib import Path
+from typing import Any
 
+from renus.rich import Terminal
 
-class bc:
-    OKPINK = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+def _extract_description_from_file(file_path: Path) -> str | None:
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        tree = ast.parse(content, filename=str(file_path))
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "DESCRIPTION":
+                        if isinstance(node.value, ast.Constant) and isinstance(
+                            node.value.value, str
+                        ):
+                            return node.value.value
+    except Exception:
+        pass
+    return None
 
+def _get_command_desc(module_path: str, dir_path: Path, custom: bool = False) -> str:
+    for entry_file in (dir_path / "run.py", dir_path / "__init__.py"):
+        if entry_file.exists():
+            desc = _extract_description_from_file(entry_file)
+            if desc:
+                return f"[custom] {desc}" if custom and not desc.startswith("[custom]") else desc
 
-def format(header,
-                  left_format, cell_format, row_delim, col_delim):
-    table = [[bc.OKPINK + 'command name' + bc.ENDC, bc.WARNING + 'description' + bc.ENDC]] + [
-        [bc.OKGREEN + name + bc.ENDC, bc.OKCYAN + row + bc.ENDC] for name, row in header.items()]
+    for sub in (".run", ""):
+        try:
+            mod = importlib.import_module(module_path + sub)
+            desc = getattr(mod, "DESCRIPTION", None)
+            if desc:
+                return f"[custom] {desc}" if custom and not str(desc).startswith("[custom]") else str(desc)
+            if mod.__doc__:
+                return mod.__doc__.strip().split("\n")[0]
+        except Exception:
+            continue
 
-    table_format = (len(header) + 1) * [[left_format] + len(header) * [cell_format]]
+    name = dir_path.name
+    return f"[custom] Run {name} command" if custom else f"Run {name} command"
 
-    col_widths = [max(
-        len(format.format(cell, 0))
-        for format, cell in zip(col_format, col))
-        for col_format, col in zip(zip(*table_format), zip(*table))]
-    return row_delim.join(
-        col_delim.join(
-            format.format(cell, width)
-            for format, cell, width in zip(row_format, row, col_widths))
-        for row_format, row in zip(table_format, table))
+def discover_commands(project_dir: Path | str | None = None) -> dict[str, str]:
+    """Discover available framework and project commands."""
+    commands: dict[str, str] = {}
 
-
-def discover_commands():
-    """Discover all available commands from framework and project."""
-    commands = {}
-    
-    # Framework built-in commands
     framework_dir = Path(__file__).parent
-    for item in framework_dir.iterdir():
-        if item.is_dir() and (item / 'run.py').exists() and not item.name.startswith('_'):
-            try:
-                mod = importlib.import_module(f"renus.commands.{item.name}.run")
-                desc = getattr(mod, 'DESCRIPTION', f'Run {item.name} command')
-                commands[item.name] = desc
-            except Exception:
-                commands[item.name] = f'Run {item.name} command'
-    
-    # Project-level custom commands
-    project_commands = Path.cwd() / 'commands'
-    if project_commands.exists():
-        for item in project_commands.iterdir():
-            if item.is_dir() and (item / 'run.py').exists() and not item.name.startswith('_'):
-                try:
-                    mod = importlib.import_module(f"commands.{item.name}.run")
-                    desc = getattr(mod, 'DESCRIPTION', f'[custom] Run {item.name} command')
-                    commands[item.name] = desc
-                except Exception:
-                    commands[item.name] = f'[custom] Run {item.name} command'
-    
+    for item in sorted(framework_dir.iterdir()):
+        if item.is_dir() and not item.name.startswith(("_", ".")):
+            if (item / "run.py").exists() or (item / "__init__.py").exists():
+                commands[item.name] = _get_command_desc(f"renus.commands.{item.name}", item)
+
+    proj_path = Path(project_dir) if project_dir else Path.cwd()
+    project_commands = proj_path / "commands"
+    if project_commands.exists() and project_commands.is_dir():
+        for item in sorted(project_commands.iterdir()):
+            if item.is_dir() and not item.name.startswith(("_", ".")):
+                if (item / "run.py").exists() or (item / "__init__.py").exists():
+                    commands[item.name] = _get_command_desc(
+                        f"commands.{item.name}", item, custom=True
+                    )
+
     return commands
 
-def Help():
-    commands = discover_commands()
-    print(format(commands, '{:<{}}', '{:<{}}', '\n\n', ' | '))
+def Help(commands: dict[str, str] | None = None) -> None:
+    """Print the CLI help menu."""
+    if commands is None:
+        commands = discover_commands()
+
+    print()
+    Terminal.cyan.print(Terminal.bold("Renus Framework CLI"))
+    Terminal.dim.print("Usage: renus <command> [arguments]\n")
+
+    rows = []
+    for name, desc in commands.items():
+        first_line = desc.strip().split("\n")[0]
+        rows.append([Terminal.green(name), Terminal.white(first_line)])
+
+    Terminal.table(headers=["Command", "Description"]).print(rows)
+    print()
