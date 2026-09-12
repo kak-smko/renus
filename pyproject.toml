@@ -1,0 +1,90 @@
+[build-system]
+requires = [
+    "setuptools>=68",
+    "wheel",
+    "Cython>=3.0",
+]
+build-backend = "setuptools.build_meta"
+
+# Metadata ------------------------------------------------------------------
+[project]
+name = "renus"
+description = "Renus Core Framework - a lightweight ASGI web framework and toolkit."
+readme = "README.md"
+requires-python = ">=3.10"
+# Version is read dynamically from renus/__init__.py (single source of truth).
+dynamic = ["version"]
+license = { text = "BSD-3-Clause" }
+authors = [
+    { name = "Smko Bayazidi", email = "ba.smko@gmail.com" },
+]
+keywords = ["asgi", "web", "framework", "async", "websocket", "http", "microlib"]
+classifiers = [
+    # Trove classifiers: https://pypi.org/classifiers/
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Web Environment",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "anyio>=3.7",
+    "orjson>=3.10"
+]
+
+[project.urls]
+Documentation = "https://codenus.com/renus"
+Source = "https://github.com/kak-smko/renus"
+
+[project.optional-dependencies]
+mongo = ["pymongo>=4.7"]
+mysql = ["aiomysql>=0.3"]
+redis = ["redis>=5.0"]
+server = ["uvicorn>=0.29"]
+all = [
+    "pymongo>=4.7",
+    "aiomysql>=0.3",
+    "redis>=5.0",
+    "uvicorn>=0.29",
+]
+dev = [
+    "uvicorn>=0.29",
+    "fastapi",
+    "litestar",
+    "blacksheep",
+    "sanic",
+    "robyn",
+    "flask",
+    "waitress",
+]
+
+[project.scripts]
+renus = "renus.commands.cli:main"
+
+# Version: keep a single source of truth in renus/__init__.py ---------------
+[tool.setuptools.dynamic]
+version = { attr = "renus.__version__" }
+
+[tool.setuptools]
+packages = { find = { where = ["."], exclude = ["tests*","example*", "venv*", "benchmarks*", "storage*"] } }
+
+[[tool.setuptools.ext-modules]]
+name = "renus._speedup"
+sources = ["renus/_speedup.pyx"]
+
+[tool.cibuildwheel]
+# The wheel depends only on the Cython extension, so there is no per-platform
+# dependency re-resolution needed. Run the same test command on every build.
+test-command = "python -c \"import renus; print('renus', renus.__version__)\""
+# Use the modern pip frontend for a reproducible PEP 517 build.
+build-frontend = "pip"

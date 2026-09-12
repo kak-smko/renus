@@ -1,0 +1,91 @@
+name: Release
+
+# Builds wheels and an sdist, then publishes them to PyPI on version tags.
+# Wheels are built for Linux (x86_64 + aarch64), macOS (x86_64 + arm64),
+# and Windows (AMD64) across cp310, cp311 and cp312 (Renus supports >=3.10).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: # allow manual trigger for testing
+
+permissions:
+  contents: read
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-latest
+          - os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for Linux aarch64 wheels)
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.22.0
+        env:
+          # Build every supported Python on Linux/macOS; Windows default already
+          # covers cp310/cp311/cp312. Include arm64 for Apple Silicon + aarch64
+          # for manylinux/linux aarch64.
+          CIBW_ARCHS_LINUX: auto aarch64
+          CIBW_ARCHS_MACOS: x86_64 arm64
+          # Test the installed wheels before upload.
+          CIBW_TEST_COMMAND: "python -c \"import renus; print('renus', renus.__version__)\""
+
+      - name: Upload wheel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist
+        run: |
+          python -m pip install --upgrade build
+          python -m build --sdist
+
+      - name: Upload sdist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish:
+    name: Publish to PyPI
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    # Trusted publishing requires a "pypi" environment with the trusted
+    # publisher configured in the PyPI project settings.
+    environment: pypi
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Make the dist/ root an artifact so the wheelhouse/ nesting is dropped.
+          packages-dir: dist/
