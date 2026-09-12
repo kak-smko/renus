@@ -1,222 +1,403 @@
+from __future__ import annotations
+
+import importlib
+import os
 import shutil
+import urllib.error
+import urllib.request
 import zipfile
-from importlib.metadata import version as md_version
 from io import BytesIO
+from typing import Any
 
-import requests
+from renus.commands.extension.build import (
+    _add_admin_templates,
+    _add_cls,
+    _add_command,
+    _add_component_templates,
+    _add_config,
+    _add_imprt,
+    _add_index_templates,
+    _add_route,
+)
+from renus.commands.extension.remove import remove, remove_all
+from renus.rich import Terminal
+from renus.util.codec import json_decode, json_encode
 
-from renus.commands.extension.build import (_add_route, _add_admin_templates, _add_index_templates,
-    _add_cls, _add_imprt, _add_config, _add_component_templates,_add_command)
-from renus.commands.extension.remove import remove_all, remove
-from renus.commands.help import bc
+DESCRIPTION = """Install/update/remove extensions.
+  renus extension codenus/user
+  renus extension codenus/user==1.2.*
+  renus extension --update codenus/user
+  renus extension --upgrade codenus/user
+  renus extension --remove codenus/user"""
 
-DESCRIPTION = '''Install/update/remove extensions.
-renus extension condenus/user 
-renus extension --update condenus/user 
-renus extension --remove condenus/user'''
+EXTENSION_CONFIG = "extension.json"
+EXTENSION_LOCK = "extension-lock.json"
 
-def download(app, version, installed, isUpdate=False):
-    if app in installed:
-        if isUpdate and installed[app] == version:
-            return version
-        elif not isUpdate:
-            return version
+def http_get(url: str, timeout: int = 30) -> tuple[int, dict[str, str], bytes]:
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "renus-extension-installer",
+            "Accept": "application/json, */*",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status_code = resp.status
+            headers = {k.lower(): v for k, v in resp.headers.items()}
+            content = resp.read()
+            return status_code, headers, content
+    except urllib.error.HTTPError as exc:
+        headers = {k.lower(): v for k, v in exc.headers.items()}
+        return exc.code, headers, exc.read()
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Network request failed for '{url}': {exc.reason}") from exc
 
-    print(f'{bc.OKGREEN}downloading {app}/{version}{bc.ENDC}')
+def parse_version_tuple(v: str) -> tuple[int, ...]:
+    cleaned = v.strip().lstrip("v")
+    parts: list[int] = []
+    for seg in cleaned.split("."):
+        digits = "".join(ch for ch in seg if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
 
-    res = requests.get(f'https://codenus.com/app/{app}/{version}')
+def get_available_versions(app: str) -> list[str]:
+    versions: list[str] = []
+    url = f"https://codenus.com/app/{app}/versions"
 
-    if res.status_code != 200:
-        print(f'{bc.FAIL}download error{bc.ENDC}')
+    try:
+        status, headers, content = http_get(url)
+        if status == 200 and content:
+            try:
+                data = json_decode(content)
+                if isinstance(data, list):
+                    versions = [str(v) for v in data]
+                elif isinstance(data, dict) and "versions" in data:
+                    versions = [str(v) for v in data["versions"]]
+            except Exception:
+                pass
+
+        if not versions and "versions" in headers:
+            versions = [v.strip() for v in headers["versions"].split(",") if v.strip()]
+    except Exception:
+        pass
+
+    return versions
+
+def match_version(spec: str, available_versions: list[str]) -> str:
+    spec = spec.strip()
+
+    if not available_versions:
+        return "latest" if spec == "*" else spec.rstrip(".*")
+
+    sorted_versions = sorted(available_versions, key=parse_version_tuple, reverse=True)
+
+    if spec in ("*", "", "latest"):
+        return sorted_versions[0]
+
+    if spec.endswith(".*"):
+        prefix = spec[:-2] + "."
+        matching = [v for v in sorted_versions if v.startswith(prefix) or v == spec[:-2]]
+        if matching:
+            return matching[0]
+
+    if spec in sorted_versions:
+        return spec
+
+    for v in sorted_versions:
+        if v.startswith(spec):
+            return v
+
+    return spec
+
+def is_upgrade(target_version: str, current_version: str) -> bool:
+    if not current_version:
+        return False
+    return parse_version_tuple(target_version) > parse_version_tuple(current_version)
+
+def get_renus_version() -> str:
+    try:
+        import renus
+
+        if hasattr(renus, "__version__") and renus.__version__:
+            return str(renus.__version__)
+    except Exception:
+        pass
+
+    try:
+        from importlib.metadata import version
+
+        return version("renus")
+    except Exception:
+        return "2.7.1"
+
+def download(
+    app: str,
+    version_spec: str,
+    installed: dict[str, str],
+    mode: str = "install",
+    base_dir: str = "./",
+) -> str | None:
+    available_versions = get_available_versions(app)
+    target_version = match_version(version_spec, available_versions)
+
+    current_installed = installed.get(app)
+    effective_mode = mode
+
+    if current_installed:
+        if mode == "install" and is_upgrade(target_version, current_installed):
+            effective_mode = "upgrade"
+            Terminal.cyan.print(
+                f"Upgrading '{app}' from {current_installed} to {target_version}..."
+            )
+        elif mode == "install" and current_installed == target_version:
+            Terminal.yellow.print(f"'{app}' is already installed at version {current_installed}.")
+            return current_installed
+
+    Terminal.green.print(f"Downloading {app}/{target_version}...")
+
+    url = f"https://codenus.com/app/{app}/{target_version}"
+    try:
+        status_code, headers, content = http_get(url)
+    except Exception as exc:
+        Terminal.red.print(f"Download error: {exc}")
+        return None
+
+    if status_code != 200:
+        Terminal.red.print(f"Download error: HTTP {status_code}")
+        return None
+
+    resolved_version = headers.get("version", target_version)
+    installed[app] = resolved_version
+
+    dest_dir = os.path.join(base_dir, "extension", app)
+    shutil.rmtree(dest_dir, ignore_errors=True)
+    os.makedirs(dest_dir, exist_ok=True)
+
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as zip_file:
+            zip_file.extractall(dest_dir)
+    except zipfile.BadZipFile:
+        Terminal.red.print("Download error: received invalid zip archive.")
+        return None
+
+    install_app(app, installed, mode=effective_mode, base_dir=base_dir)
+
+    if effective_mode == "upgrade":
+        Terminal.green.print(
+            f"Successfully upgraded '{app}' to version {resolved_version}."
+        )
+    elif effective_mode == "update":
+        Terminal.blue.print(f"Updated '{app}' to version {resolved_version}.")
+    else:
+        Terminal.green.print(f"Installed '{app}' version {resolved_version}.")
+
+    return resolved_version
+
+def _read_json(path: str) -> dict[str, Any]:
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json_decode(f.read())
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+def load_apps(base_dir: str = "./") -> dict[str, str]:
+    apps = _read_json(os.path.join(base_dir, EXTENSION_CONFIG)).get("apps", {})
+    if not isinstance(apps, dict):
+        return {}
+    return {str(app): str(ver) for app, ver in apps.items()}
+
+def load_installed(base_dir: str = "./") -> dict[str, str]:
+    installed = _read_json(os.path.join(base_dir, EXTENSION_LOCK)).get("installed", {})
+    if not isinstance(installed, dict):
+        return {}
+    return {str(app): str(ver) for app, ver in installed.items()}
+
+
+def write_lock(installed: dict[str, str], base_dir: str = "./") -> None:
+
+    with open(os.path.join(base_dir, EXTENSION_LOCK), "w", encoding="utf-8") as f:
+        f.write(json_encode({"installed": dict(installed)}, indent=True))
+        f.write("\n")
+
+def check_version(install: Any, app: str) -> None:
+    renus_requires = getattr(install, "renus_requires", None)
+    if not renus_requires:
         return
 
-    if app in installed:
-        if isUpdate and installed[app] == res.headers['version']:
-            print('   same version', res.headers['version'])
-            return res.headers['version']
-        elif not isUpdate:
-            print('   currently installed version', installed[app])
-            return res.headers['version']
+    current_ver = get_renus_version()
+    current_tuple = parse_version_tuple(current_ver)
 
-    installed[app] = res.headers['version']
-    f = zipfile.ZipFile(BytesIO(res.content))
-    shutil.rmtree(f"extension/{app}", True)
-    f.extractall(f"extension/{app}")
+    if "min" in renus_requires:
+        min_tuple = parse_version_tuple(renus_requires["min"])
+        if current_tuple < min_tuple:
+            raise RuntimeError(
+                f"{app}: renus version too low. {current_ver} < {renus_requires['min']}"
+            )
 
-    install_app(app, installed, isUpdate)
-    if isUpdate:
-        print(f'{bc.OKBLUE}   updated to version {res.headers["version"]}{bc.ENDC}')
-    return res.headers['version']
+    if "max" in renus_requires:
+        max_tuple = parse_version_tuple(renus_requires["max"])
+        if current_tuple >= max_tuple:
+            raise RuntimeError(
+                f"{app}: renus version too high. {current_ver} >= {renus_requires['max']}"
+            )
 
-
-def rewrite(installed):
-    print('   rewrite installed')
-    pre_line = ''
-    with open('extension/install.py', 'r') as f:
-        lines = f.readlines()
-        for line in lines:
-            if line.find('installed') != -1:
-                break
-            pre_line += line
-    with open('extension/install.py', 'w') as f:
-        f.write(pre_line)
-        f.write('installed = {\n')
-        for app, version in installed.items():
-            f.write(f'  "{app}":"{version}",\n')
-        f.write('}')
-
-
-def check_version(install, app):
-    renus_requires = install.renus_requires
-    renus_version = md_version('renus').split('.')
-    min = renus_requires['min'].split('.')
-    max = renus_requires['max'].split('.')
-    re_version = 0
-    min_version = 0
-    max_version = 0
-    for i in range(len(renus_version)):
-        re_version += int(renus_version[i]) * (10000 ** (len(renus_version) - i))
-
-    for i in range(len(min)):
-        min_version += int(min[i]) * (10000 ** (len(renus_version) - i))
-
-    for i in range(len(max)):
-        max_version += int(max[i]) * (10000 ** (len(renus_version) - i))
-    if re_version < min_version or re_version >= max_version:
-        raise RuntimeError(f"{app}: renus version too high. {renus_version} >= {renus_requires['max']}")
-
-
-def install_app(app, installed, isUpdate):
-    print(f'   install {app}')
+def install_app(
+    app: str,
+    installed: dict[str, str],
+    mode: str = "install",
+    base_dir: str = "./",
+) -> None:
+    Terminal.cyan.print(f"Configuring extension: {app} (mode: {mode})")
+    install: Any = None
     try:
-        install = __import__(f"extension.{app.replace('/', '.')}.install", fromlist=[''])
-
+        install = importlib.import_module(f"extension.{app.replace('/', '.')}.install")
     except Exception as exc:
-        print('   ' + bc.WARNING + str(exc) + bc.ENDC)
+        Terminal.yellow.print(f"Notice: {exc}")
         return
 
     check_version(install, app)
 
-    if hasattr(install, 'dependencies'):
-        print(f'   install {app} dependencies...')
+    if hasattr(install, "dependencies") and install.dependencies:
+        Terminal.cyan.print(f"Installing dependencies for '{app}'...")
         for dep in install.dependencies:
-            download(dep, '*', installed)
+            download(dep, "*", installed, mode=mode, base_dir=base_dir)
 
-    if not isUpdate:
-        if hasattr(install, 'cls'):
-            print(f'   add {app} class...')
+    if mode == "update":
+        update_fn = getattr(install, "update", None) or getattr(install, "setup_update", None)
+        if update_fn and callable(update_fn):
+            Terminal.cyan.print(f"  Calling update() for {app}...")
             try:
-                _add_cls(install, app)
+                update_fn()
             except Exception as exc:
-                print('   ' + bc.FAIL + str(exc) + bc.ENDC)
+                Terminal.red.print(f"  Update error: {exc}")
+        return
 
-        if hasattr(install, 'route'):
-            print(f'   add {app} route...')
-            _add_route(install, app)
+    if hasattr(install, "cls") and install.cls:
+        Terminal.dim.print(f"  Registering classes for {app}...")
+        try:
+            _add_cls(install, app, base_dir=base_dir)
+        except Exception as exc:
+            Terminal.red.print(f"  Failed registering classes: {exc}")
 
-        if hasattr(install, 'imprt'):
-            print(f'   add {app} imports...')
+    if hasattr(install, "route") and install.route:
+        Terminal.dim.print(f"  Registering routes for {app}...")
+        _add_route(install, app, base_dir=base_dir)
+
+    if hasattr(install, "imprt") and install.imprt:
+        Terminal.dim.print(f"  Registering imports for {app}...")
+        try:
+            _add_imprt(install, app, base_dir=base_dir)
+        except Exception as exc:
+            Terminal.red.print(f"  Failed registering imports: {exc}")
+
+    if hasattr(install, "command") and install.command:
+        Terminal.dim.print(f"  Registering commands for {app}...")
+        try:
+            _add_command(install, app, base_dir=base_dir)
+        except Exception as exc:
+            Terminal.red.print(f"  Failed registering commands: {exc}")
+
+    if hasattr(install, "admin_templates") and install.admin_templates:
+        Terminal.dim.print(f"  Registering admin templates for {app}...")
+        try:
+            _add_admin_templates(install, app, base_dir=base_dir)
+        except Exception as exc:
+            Terminal.red.print(f"  Failed registering admin templates: {exc}")
+
+    if hasattr(install, "index_templates") and install.index_templates:
+        Terminal.dim.print(f"  Registering index templates for {app}...")
+        try:
+            _add_index_templates(install, app, base_dir=base_dir)
+        except Exception as exc:
+            Terminal.red.print(f"  Failed registering index templates: {exc}")
+
+    if hasattr(install, "component_templates") and install.component_templates:
+        Terminal.dim.print(f"  Registering component templates for {app}...")
+        try:
+            _add_component_templates(install, app, base_dir=base_dir)
+        except Exception as exc:
+            Terminal.red.print(f"  Failed registering component templates: {exc}")
+
+    if hasattr(install, "config") and install.config:
+        Terminal.dim.print(f"  Registering config for {app}...")
+        try:
+            _add_config(install, base_dir=base_dir)
+        except Exception as exc:
+            Terminal.red.print(f"  Failed registering config: {exc}")
+
+    if mode == "upgrade":
+        upgrade_fn = getattr(install, "upgrade", None) or getattr(install, "setup_upgrade", None)
+        if upgrade_fn and callable(upgrade_fn):
+            Terminal.cyan.print(f"  Calling upgrade() for {app}...")
             try:
-                _add_imprt(install, app)
+                upgrade_fn()
             except Exception as exc:
-                print('   ' + bc.FAIL + str(exc) + bc.ENDC)
-
-        if hasattr(install, 'command'):
-            print(f'   add {app} command...')
-            try:
-                _add_command(install, app)
-            except Exception as exc:
-                print('   ' + bc.FAIL + str(exc) + bc.ENDC)
-
-        if hasattr(install, 'admin_templates'):
-            print(f'   add {app} admin_templates...')
-            try:
-                if install.admin_templates:
-                    _add_admin_templates(install, app)
-            except Exception as exc:
-                print('   ' + bc.FAIL + str(exc) + bc.ENDC)
-
-        if hasattr(install, 'index_templates'):
-            print(f'   add {app} index_templates...')
-            try:
-                if install.index_templates:
-                    _add_index_templates(install, app)
-            except Exception as exc:
-                print('   ' + bc.FAIL + str(exc) + bc.ENDC)
-
-        if hasattr(install, 'component_templates'):
-            print(f'   add {app} component_templates...')
-            try:
-                if install.component_templates:
-                    _add_component_templates(install, app)
-            except Exception as exc:
-                print('   ' + bc.FAIL + str(exc) + bc.ENDC)
-
-        if hasattr(install, 'config'):
-            print(f'   add {app} config...')
-            try:
-                _add_config(install)
-            except Exception as exc:
-                print('   ' + bc.FAIL + str(exc) + bc.ENDC)
-
-        if hasattr(install, 'setup'):
-            print(f'   setup {app}...')
+                Terminal.red.print(f"  Upgrade error: {exc}")
+    else:
+        if hasattr(install, "setup") and callable(install.setup):
+            Terminal.cyan.print(f"  Calling setup() for {app}...")
             try:
                 install.setup()
             except Exception as exc:
-                print('   ' + bc.FAIL + str(exc) + bc.ENDC)
-    else:
-        if hasattr(install, 'setup_update'):
-            print(f'   setup update {app}...')
-            try:
-                install.setup_update()
-            except Exception as exc:
-                print('   ' + bc.FAIL + str(exc) + bc.ENDC)
+                Terminal.red.print(f"  Setup error: {exc}")
 
+def install_all(
+    apps: dict[str, str],
+    installed: dict[str, str],
+    mode: str = "install",
+    base_dir: str = "./",
+) -> None:
+    targets = installed if mode in ("update", "upgrade") else apps
+    for app, ver in targets.items():
+        download(app, "*" if mode in ("update", "upgrade") else ver, installed, mode=mode, base_dir=base_dir)
 
-def install_all(apps, installed, isUpdate):
-    d = apps
-    if isUpdate:
-        d = installed
-    for app, version in d.items():
-        download(app, '*' if isUpdate else version, installed, isUpdate)
+def run(args: list[str] | None = None, base_dir: str = "./") -> int:
+    """Install, update, upgrade, or remove extensions."""
+    Terminal.bold.print("Renus Extension Manager")
+    apps = load_apps(base_dir)
+    installed = load_installed(base_dir)
 
+    mode = "install"
+    is_remove = False
 
-def run(args=None):
-    print('start...')
-    try:
-        from extension.install import apps, installed
-    except:
-        apps = {}
-        installed = {}
+    cmd_args = list(args) if args is not None else []
 
-    isUpdate = False
-    isRemove = False
+    if "--update" in cmd_args:
+        mode = "update"
+        cmd_args.remove("--update")
+    if "--upgrade" in cmd_args:
+        mode = "upgrade"
+        cmd_args.remove("--upgrade")
+    if "--remove" in cmd_args:
+        is_remove = True
+        cmd_args.remove("--remove")
 
-    if args and '--update' in args:
-        isUpdate = True
-        args.remove('--update')
-    if args and '--remove' in args:
-        isRemove = True
-        args.remove('--remove')
-    if isUpdate and isRemove:
-        raise RuntimeError("use one of '--update' or '--remove'")
+    if is_remove and mode in ("update", "upgrade"):
+        Terminal.red.print("Error: cannot combine '--remove' with '--update' or '--upgrade'")
+        return 1
 
-    if args is None or len(args) == 0:
-        if isRemove:
-            remove_all(installed)
+    if not cmd_args:
+        if is_remove:
+            remove_all(installed, base_dir=base_dir)
         else:
-            install_all(apps, installed, isUpdate)
+            install_all(apps, installed, mode=mode, base_dir=base_dir)
     else:
-        s = args[0].split('==')
+        target = cmd_args[0]
         version = "*"
-        if len(s) > 1:
-            version = s[1]
-        if isRemove:
-            remove(s[0], installed)
+        if "==" in target:
+            app_name, version = target.split("==", 1)
         else:
-            download(s[0], version, installed, isUpdate)
+            app_name = target
 
-    rewrite(installed)
+        if is_remove:
+            remove(app_name, installed, base_dir=base_dir)
+        else:
+            download(app_name, version, installed, mode=mode, base_dir=base_dir)
 
-    print(f'{bc.OKBLUE}finished{bc.ENDC}')
+    write_lock(installed, base_dir=base_dir)
+    Terminal.green.print("Operation completed.")
+    return 0
