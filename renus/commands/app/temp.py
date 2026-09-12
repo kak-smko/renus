@@ -1,103 +1,115 @@
-controller_temp='''from renus.core.request import Request
-from app.{name}.model import {names_camel}
-from renus.core.response import JsonResponse
-from renus.core.validation.validate import Validate,vr
-from app.extension.codenus.table.model import Table
+controller_temp = '''from renus.request import Request
+from renus.response import JsonResponse
+from app.{name}.model import {name_camel}
 
 class {name_camel}Controller:
-    def __init__(self,request:Request) -> None:
-        self.request=request
+    def __init__(self, request: Request) -> None:
+        self.request = request
+
+    @property
+    def repo(self):
+        """Repository bound to the request-scoped database.
+
+        ``db`` is placed on ``app.state`` at startup and exposed on each
+        request, so controllers reach it generically via ``self.request.db``.
+        """
+        db = self.request.db
+        return db.repository({name_camel})
 
     @property
     def __inputs(self):
-        return Validate(self.request.inputs).rules({})
+        return {name_camel}.validate(self.request.inputs).to_dict()
 
-    def index(self):
-        """
-        Get {name_camel} Records
+    async def index(self):
+        """Get {name_camel} Records.
         :method: get
-        :return: JsonResponse of CRUD table
+        :return: JsonResponse
         """
-        m=Table({names_camel}(self.request))
-        m.fields = {
-            "_id": {"type": "r-text-input", "formInput": False},
-            "updated_at": {"type": "r-time-ago", "formInput": False},
-            "created_at": {"type": "r-date-input", "formInput": False, "sortable": False, }
-            }
-        m.search_fields = []
-        return JsonResponse(m.index())
+        records = await self.repo.query().all()
+        return JsonResponse([dict(r) for r in records])
 
-    def store(self):
-        """
-        Add new {name_camel} Item
+    async def store(self):
+        """Add new {name_camel} Item.
         :method: post
         :return: JsonResponse
         """
-
-        {names_camel}(self.request).create(self.__inputs)
+        await self.repo.create({name_camel}(**self.__inputs))
         return JsonResponse({"msg": "stored"})
 
-    def update(self, id):
-        """
-        Update {name_camel} where _id is id
+    async def update(self, id):
+        """Update {name_camel} by primary key.
         :method: put
-        :param id: {name_camel} _id
+        :param id: {name_camel} primary key
         :return: JsonResponse
         """
-
-        {names_camel}(self.request).where({"_id": id}).update(self.__inputs)
+        values = {k: v for k, v in self.__inputs.items() if k != "id"}
+        await self.repo.update({name_camel}.id == id, values=values)
         return JsonResponse({"msg": "updated"})
 
-    def delete(self, id):
-        """
-        Delete {name_camel} where _id is id
+    async def delete(self, id):
+        """Delete {name_camel} by primary key.
         :method: delete
-        :param id: {name_camel} _id
+        :param id: {name_camel} primary key
         :return: JsonResponse
         """
-        {names_camel}(self.request).where({"_id": id}).delete()
+        await self.repo.delete({name_camel}.id == id)
         return JsonResponse({"msg": "deleted"})
 '''
 
-model_temp='''from datetime import datetime
-from bson import ObjectId
-from renus.core.model import ModelBase, ReModel
-from app.extension.codenus.activity.service import ActivityService
+model_temp = '''from __future__ import annotations
+
+from renus.db import DatabaseField, Field, ReModel
 
 class {name_camel}(ReModel):
-    _id: ObjectId
-    created_at: datetime
-    updated_at: datetime
+    """Domain model for {name}.
 
+    Field rules run during :meth:`validate` and on instantiation; metadata is
+    inferred for schema creation (``db.create_schema``). A natural string
+    primary key keeps the model portable across SQL and MongoDB backends.
+    """
 
-class {names_camel}(ModelBase[{name_camel}]):
-    collection_name="{name_db}"
-    document_model={name_camel}
+    id: str = Field(database=DatabaseField(primary_key=True))
 
-    def __init__(self, request) -> None:
-        super().__init__()
-        self.request=request
+    # --- Example fields; customize for your domain. ---
+    name: str = Field(max_len=120)
+    payload: dict | None = None
 
-    def boot_event(self, typ: str, old, new, session=None):
-        ActivityService().handle(typ, old, new, self.request, self.collection_name, session)
+    class Meta:
+        soft_delete = True
+        timestamps = True
 '''
 
-route_temp='''from renus.core.routing import Router
-from renus.core.config import Config
+route_temp = '''from renus.router import Router
+from renus.config import Config
 from app.{name}.controller import {name_camel}Controller
-from app.extension.codenus.permission.middleware import PermissionMiddleware
-from app.extension.codenus.user.middleware import AuthMiddleware
 
-r=Router(subdomain=Config("app").get("admin_subdomain","admin"),
-         prefix="api/admin{folder}", middlewares=[AuthMiddleware, PermissionMiddleware("admin")])
-r.crud("/{names}",{name_camel}Controller, middlewares=[PermissionMiddleware("{names}")])
+r = Router(
+    subdomain=Config("app").get("admin_subdomain", "admin"),
+    prefix="api/admin{folder}",
+)
+r.crud("/{names}", {name_camel}Controller)
 
-u=Router(prefix="api/user", middlewares=[AuthMiddleware])
-
-h=Router(prefix="api/home")
+h = Router(prefix="api/home")
 '''
 
-vue_temp='''<template>
+route_user_temp = '''from renus.router import Router
+from renus.config import Config
+from app.{name}.controller import {name_camel}Controller
+from app.extension.codenus.user.middleware import AuthMiddleware
+from app.extension.codenus.user.middleware import PermissionMiddleware
+
+r = Router(
+    subdomain=Config("app").get("admin_subdomain", "admin"),
+    prefix="api/admin{folder}",
+    middlewares=[AuthMiddleware, PermissionMiddleware("admin")],
+)
+r.crud("/{names}", {name_camel}Controller, middlewares=[PermissionMiddleware("{names}")])
+
+u = Router(prefix="api/user", middlewares=[AuthMiddleware])
+h = Router(prefix="api/home")
+'''
+
+vue_temp = '''<template>
   <r-container class="container-fluid">
     <r-table-crud link="admin/{folder}{names}"></r-table-crud>
   </r-container>
