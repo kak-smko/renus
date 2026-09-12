@@ -1,0 +1,402 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+import pytest
+
+from renus.db import Embedded, EmbeddedOne
+from renus.db.validation import (
+    Convert,
+    Default,
+    Email,
+    Field,
+    ReModel,
+    Required,
+    Validate,
+    ValidationError,
+)
+
+def custom_username_validator(val: str) -> str:
+    return val.strip().lower()
+
+class Address(ReModel):
+    street: str
+    city: str
+    country: str = "Test"
+    postal_code: str | None = None
+
+class User(ReModel):
+    id: int
+    username: str = Field(custom_username_validator, min_length=3, max_length=50)
+    email: str = Field(Email("gmail"))
+    age: int = Field(ge=18, le=120)
+
+    is_active: bool = Field(Default(True))
+    birth_date: date | None = Field(Convert(datetime))
+
+    address:Address
+
+def test_user_model_creation_and_dict_conversion():
+    user = User(
+        id=1,
+        username="  JohnDoe  ",
+        email="john@example.com",
+        age=25,
+        address={
+            "street": "123 Main Street",
+            "city": "tee",
+        },
+    )
+
+    assert str(user).startswith("User(")
+
+    assert user.username == "johndoe"
+    assert user.email == "john@example.com"
+    assert user.age == 25
+
+    assert isinstance(user.address, Address)
+    assert user.address.city == "tee"
+    assert user.address.street == "123 Main Street"
+    assert user.address.country == "Test"
+    assert user.address.postal_code is None
+
+    assert user.is_active is True
+    assert user.birth_date is None
+
+    user_dict = dict(user)
+    assert user_dict == {
+        "id": 1,
+        "username": "johndoe",
+        "email": "john@example.com",
+        "age": 25,
+        "is_active": True,
+        "birth_date": None,
+        "address": {
+            "street": "123 Main Street",
+            "city": "tee",
+            "country": "Test",
+            "postal_code": None,
+            "id": None,
+        },
+    }
+
+    assert user.to_dict() == user_dict
+    assert user.dict() == user_dict
+
+def test_validation_error_on_invalid_user_data():
+    with pytest.raises(ValidationError) as exc_info:
+        User(
+            id=1,
+            username="ab",
+            email="not-an-email",
+            age=15,
+            address={
+                "street": "123 Main Street",
+                "city": "Baku",
+            },
+        )
+
+    err = exc_info.value
+    assert "username" in err.errors
+    assert "email" in err.errors
+    assert "age" in err.errors
+    assert "Validation failed:" in str(err)
+
+def test_user_validate_classmethod():
+    json_data = (
+        '{"id": 1, "username": "  JohnDoe  ", "email": "john@example.com", '
+        '"age": 25, "address": {"street": "123 Main Street", "city": "Baku"}}'
+    )
+    user = User.validate(json_data)
+    assert user.id == 1
+    assert user.username == "johndoe"
+    assert user.email == "john@example.com"
+    assert user.address.city == "Baku"
+
+    user_from_dict = User.validate({
+        "id": 2,
+        "username": "Alice",
+        "email": "alice@example.com",
+        "age": 30,
+        "address": {"street": "Center 1", "city": "Baku"},
+    })
+    assert user_from_dict.id == 2
+    assert user_from_dict.username == "alice"
+
+def test_updating_a_model_with_runtime_validation():
+    user = User(
+        id=1,
+        username="  JohnDoe  ",
+        email="john@example.com",
+        age=25,
+        address={
+            "street": "123 Main Street",
+            "city": "Baku",
+        },
+    )
+
+    user.age = 35
+    assert user.age == 35
+
+    with pytest.raises(ValidationError) as exc_info:
+        user.age = 10
+    assert "age" in exc_info.value.errors
+
+    assert user.age == 35
+
+    user.username = "  SuperAdmin  "
+    assert user.username == "superadmin"
+
+    with pytest.raises(ValidationError) as exc_info:
+        user.username = "x"
+    assert "username" in exc_info.value.errors
+
+def test_nested_models_simple():
+    class SimpleAddress(ReModel):
+        street: str
+        city: str
+
+    class SimpleUser(ReModel):
+        id: int
+        username: str
+        email: str
+        age: int
+        address: SimpleAddress
+
+    user = SimpleUser(
+        id=1,
+        username="Bob",
+        email="bob@example.com",
+        age=40,
+        address={
+            "street": "Some Street",
+            "city": "Baku",
+        },
+    )
+
+    assert isinstance(user.address, SimpleAddress)
+    assert user.address.street == "Some Street"
+    assert user.address.city == "Baku"
+    assert dict(user)["address"] == {"street": "Some Street", "city": "Baku", "id": None}
+
+def test_field_keyword_validator():
+    class Profile(ReModel):
+        handle: str = Field(validator=lambda s: s.strip().lower(), min_length=3)
+
+    p = Profile(handle="  CoolGuy  ")
+    assert p.handle == "coolguy"
+
+    with pytest.raises(ValidationError):
+        Profile(handle="hi")
+
+def test_field_constraints():
+    class Product(ReModel):
+        title: str = Field(min_length=2, max_length=10)
+        price: float = Field(ge=0.01, le=1000.0)
+        category: str = Field(in_=["books", "electronics"])
+        sku: str = Field(regex=r"^[A-Z]{3}-\d{3}$")
+
+    p = Product(title="Laptop", price=999.99, category="electronics", sku="ABC-123")
+    assert p.title == "Laptop"
+
+    with pytest.raises(ValidationError) as exc_info:
+        Product(title="A", price=-5, category="groceries", sku="invalid")
+
+    err = exc_info.value.errors
+    assert "title" in err
+    assert "price" in err
+    assert "category" in err
+    assert "sku" in err
+
+def test_nested_list_of_models():
+    class Item(ReModel):
+        name: str
+        quantity: int
+
+    class Order(ReModel):
+        id: int
+        items: list[Item]
+
+    order = Order(id=100, items=[{"name": "Apple", "quantity": 3}, {"name": "Banana", "quantity": 5}])
+    assert len(order.items) == 2
+    assert isinstance(order.items[0], Item)
+    assert order.items[0].name == "Apple"
+
+    order_dict = dict(order)
+    assert order_dict["items"] == [
+        {"name": "Apple", "quantity": 3, "id": None},
+        {"name": "Banana", "quantity": 5, "id": None},
+    ]
+
+def test_remodel_dict_access_and_membership():
+    user = User(
+        id=1,
+        username="John",
+        email="john@example.com",
+        age=25,
+        address={"street": "Main", "city": "Baku"},
+    )
+
+    assert user["id"] == 1
+    assert user["username"] == "john"
+    with pytest.raises(KeyError):
+        _ = user["non_existent"]
+
+    user["age"] = 26
+    assert user.age == 26
+
+    assert "id" in user
+    assert "non_existent" not in user
+
+def test_remodel_equality():
+    u1 = User(id=1, username="John", email="john@example.com", age=25, address={"street": "Main", "city": "Baku"})
+    u2 = User(id=1, username="John", email="john@example.com", age=25, address={"street": "Main", "city": "Baku"})
+    assert u1 == u2
+    assert u1 == dict(u2)
+
+def test_legacy_validate_rules_still_works():
+    form = {"username": "admin", "age": 25}
+    rules = {
+        "username": [Required],
+    }
+    v = Validate(form)
+    res = v.rules(rules)
+    assert res == {"username": "admin"}
+
+def test_email_with_domain_restrictions():
+    class RestrictedUser(ReModel):
+        email: str = Field(Email(["gmail.com", "google.com"]))
+
+    u = RestrictedUser(email="test@gmail.com")
+    assert u.email == "test@gmail.com"
+
+    with pytest.raises(ValidationError):
+        RestrictedUser(email="test@yahoo.com")
+
+def test_convert_datetime_string():
+    class Event(ReModel):
+        title: str
+        event_time: datetime = Field(Convert(datetime))
+
+    e = Event(title="Launch", event_time="2025-06-15T10:30:00")
+    assert isinstance(e.event_time, datetime)
+    assert e.event_time.year == 2025
+    assert e.event_time.month == 6
+    assert e.event_time.day == 15
+
+def test_required_derived_from_type_optionality():
+
+    user = User(
+        username="John",
+        email="john@example.com",
+        age=25,
+        address={"street": "Main St", "city": "Baku"},
+    )
+    assert user.id is None
+
+    with pytest.raises(ValidationError) as exc_info:
+        User(
+            id=1,
+            email="john@example.com",
+            age=25,
+            address={"street": "Main St", "city": "Baku"},
+        )
+    assert "username" in exc_info.value.errors
+
+    with pytest.raises(ValidationError) as exc_info:
+        User(
+            id=1,
+            username="John",
+            email="john@example.com",
+            age=25,
+        )
+    assert "address" in exc_info.value.errors
+
+    user = User(
+        id=1,
+        username="John",
+        email="john@example.com",
+        age=25,
+        address={"street": "Main St", "city": "Baku"},
+    )
+    assert user.birth_date is None
+    assert user.is_active is True
+    assert user.address.country == "Test"
+
+    user.birth_date = None
+    assert user.birth_date is None
+
+class RequiredModel(ReModel):
+    alpha: int
+    beta: int | None = None
+    gamma: str = "fallback"
+
+def test_required_flags_with_defaults_and_nullable():
+    fields = RequiredModel._model_fields
+    assert fields["alpha"].required is True
+    assert fields["beta"].required is False
+    assert fields["gamma"].required is False
+
+def test_field_has_no_required_parameter():
+
+    import inspect
+
+    sig = inspect.signature(Field.__init__)
+    assert "required" not in sig.parameters
+
+def test_field_numeric_comparison_constraints():
+    class Stats(ReModel):
+        a: int = Field(gt=0)
+        b: int = Field(ge=10)
+        c: int = Field(lt=100)
+        d: int = Field(le=50)
+
+    s = Stats(a=1, b=10, c=99, d=50)
+    assert (s.a, s.b, s.c, s.d) == (1, 10, 99, 50)
+
+    with pytest.raises(ValidationError) as exc_info:
+        Stats(a=0, b=9, c=100, d=51)
+    errors = exc_info.value.errors
+    assert "a" in errors
+    assert "b" in errors
+    assert "c" in errors
+    assert "d" in errors
+
+def test_field_max_digits_and_decimal_places():
+    class Money(ReModel):
+        amount: float = Field(max_digits=5, decimal_places=2)
+
+    ok = Money(amount=123.45)
+    assert ok.amount == 123.45
+
+    with pytest.raises(ValidationError) as exc_info:
+        Money(amount=1234.567)
+    errors = exc_info.value.errors
+    assert "amount" in errors
+    assert any("digits" in err for err in errors["amount"])
+    assert any("decimal" in err for err in errors["amount"])
+
+    with pytest.raises(ValidationError) as exc_info:
+        Money(amount=1234.56)
+    assert any("digits" in err for err in exc_info.value.errors["amount"])
+
+    with pytest.raises(ValidationError) as exc_info:
+        Money(amount=12.345)
+    assert any("decimal" in err for err in exc_info.value.errors["amount"])
+
+def test_field_custom_error_template():
+    class Score(ReModel):
+        value: int = Field(ge=10, error="{0} error {1} msg {2}.")
+
+    with pytest.raises(ValidationError) as exc:
+        Score(value=5)
+    assert "value error 10 msg 5." in exc.value.errors["value"][0]
+
+def test_field_lists_no_min_max_parameters():
+    import inspect
+
+    sig = inspect.signature(Field.__init__)
+    params = sig.parameters
+    assert "min" not in params
+    assert "max" not in params
+    for name in ("gt", "ge", "lt", "le", "max_digits", "decimal_places", "error"):
+        assert name in params
