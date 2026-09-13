@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from renus.cache import Cache, FileCache, RedisCache, cache_func, get_backend
+from renus.cache import Cache, FileCache, RedisCache, cache, get_backend
 
 class _FakeRedis:
 
@@ -221,7 +221,7 @@ class TestCacheFunc:
     def test_caches_result_across_calls(self):
         calls = []
 
-        @cache_func(60)
+        @cache(60)
         def add(a, b):
             calls.append((a, b))
             return a + b
@@ -233,7 +233,7 @@ class TestCacheFunc:
     def test_distinct_args_are_not_cached_together(self):
         calls = []
 
-        @cache_func(60)
+        @cache(60)
         def double(x):
             calls.append(x)
             return x * 2

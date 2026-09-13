@@ -122,7 +122,7 @@ class Cache:
         """Async variant of :meth:`delete_expired`."""
         return await self._backend.adelete_expired()
 
-def cache_func(time: int, prefix: str = ""):
+def cache(time: int, prefix: str = ""):
     """Decorate a function to cache its result for a set number of seconds.
 
     Parameters
