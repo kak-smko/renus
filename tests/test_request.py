@@ -162,12 +162,13 @@ class TestBodyAndForm:
         assert await req.form() == {}
 
     @pytest.mark.asyncio
-    async def test_form_bad_json_falls_back_empty(self):
+    async def test_form_bad_json_raises(self):
         req = _make_request(
             [{"type": "http.request", "body": b"not json", "more_body": False}],
             headers=[(b"host", b"example.com"), (b"content-type", b"application/json")],
         )
-        assert await req.form() == {}
+        with pytest.raises(ValueError):
+            await req.form()
 
     @pytest.mark.asyncio
     async def test_form_urlencoded(self):
@@ -240,12 +241,13 @@ class TestBodyAndForm:
         assert raw["x"] == "<script>alert(1)</script>"
 
     @pytest.mark.asyncio
-    async def test_form_non_dict_returns_empty(self):
+    async def test_form_non_dict_raises(self):
         req = _make_request(
             [{"type": "http.request", "body": b"plain", "more_body": False}],
             headers=[(b"host", b"example.com"), (b"content-type", b"application/json")],
         )
-        assert await req.form() == {}
+        with pytest.raises(ValueError):
+            await req.form()
 
 class TestEncryptedBody:
 

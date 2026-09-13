@@ -7,6 +7,7 @@ import typing
 from urllib.parse import parse_qsl
 
 from renus.config import Config
+from renus.datastructures import FormData, UploadFile
 from renus.request.exceptions import ClientDisconnect
 from renus.request.formparsers import FormParser, MultiPartParser
 from renus.request.injection import Injection
@@ -50,8 +51,8 @@ class Request:
         self._full_path: str | object = _UNSET
         self._query_params: dict[str, str] | object = _UNSET
         self._body: bytes | object = _UNSET
-        self._form: typing.Any | object = _UNSET
-        self._form_safe: typing.Any | object = _UNSET
+        self._form: FormData | object = _UNSET
+        self._form_safe: FormData | object = _UNSET
         self.route: dict = {}
         self.state: dict = {'app': scope.get('app')}
 
@@ -199,38 +200,51 @@ class Request:
 
         return typing.cast(bytes, self._body)
 
-    async def form_unsafe(self) -> typing.Any:
-        """Parse and return the request body as form or JSON data."""
+    async def form_unsafe(self) -> FormData:
+        """Parse and return the request body as form data."""
         if self._form is _UNSET:
             content_type_value = self._headers.get("content-type", "")
             content_type, _ = parse_options_header(content_type_value)
 
             if self._is_encrypted():
                 raw_body = await self.body()
-                self._form = self._decrypt_body(raw_body)
+                self._form = self._to_form_data(self._decrypt_body(raw_body))
             elif content_type == "multipart/form-data":
                 parser = MultiPartParser(self._headers, self.stream())
                 self._form = await parser.parse()
             elif content_type in ("app/x-www-form-urlencoded", "application/x-www-form-urlencoded"):
                 parser = FormParser(self._headers, self.stream())
-                self._form = dict(await parser.parse())
+                self._form = await parser.parse()
             else:
                 body = await self.body()
-                try:
-                    self._form = {} if body == b"" else json_decode(body)
-                except (ValueError, TypeError):
-                    self._form = {}
+                data = {} if body == b"" else json_decode(body)
+                self._form = self._to_form_data(data)
 
-        return self._form
+        return typing.cast(FormData, self._form)
 
-    async def form(self) -> typing.Any:
-        """Parse the form and return XSS-sanitized data."""
+    async def form(self) -> FormData:
+        """Parse the form and return XSS-sanitized form data."""
         if self._form_safe is _UNSET:
-            form = await self.form_unsafe()
-            self._form_safe = (
-                self._injection.protect(dict(form)) if isinstance(form, dict) else form
-            )
-        return self._form_safe
+            unsafe = await self.form_unsafe()
+            items = [
+                (
+                    key,
+                    value
+                    if isinstance(value, UploadFile)
+                    else self._injection.protect(value),
+                )
+                for key, value in unsafe.multi_items()
+            ]
+            self._form_safe = FormData(typing.cast(typing.Any, items))
+        return typing.cast(FormData, self._form_safe)
+
+    def _to_form_data(self, data: typing.Any) -> FormData:
+        """Coerce parsed body data into a ``FormData`` mapping."""
+        if isinstance(data, FormData):
+            return data
+        if isinstance(data, dict):
+            return FormData(data)
+        return FormData([])
 
     def _is_encrypted(self) -> bool:
         return self._headers.get("encrypted", "") == "1"
