@@ -54,7 +54,7 @@ class TestBuilder:
         assert s.days() is s
         assert s.hours() is s
         assert s.minutes() is s
-        assert s.secounds() is s
+        assert s.seconds() is s
         assert s.at(day="Monday") is s
         assert s.forget(hours=[3]) is s
         assert s.max_try(5) is s
@@ -138,13 +138,13 @@ class TestMatcher:
         assert matches(spec, _now(minute=0)) is True
 
     def test_forget_second(self):
-        spec = Spec(unit="secounds")
+        spec = Spec(unit="seconds")
         spec.forget.second = [5]
         assert matches(spec, _now(second=5)) is False
         assert matches(spec, _now(second=6)) is True
 
     def test_interval_delta_per_unit(self):
-        assert interval_delta("secounds", 5) == datetime.timedelta(seconds=5)
+        assert interval_delta("seconds", 5) == datetime.timedelta(seconds=5)
         assert interval_delta("minutes", 2) == datetime.timedelta(minutes=2)
         assert interval_delta("hours", 3) == datetime.timedelta(hours=3)
         assert interval_delta("days", 1) == datetime.timedelta(days=1)
@@ -327,7 +327,7 @@ class TestSchedule:
         def boom():
             raise RuntimeError("x")
 
-        sched = Schedule().secounds()
+        sched = Schedule().seconds()
         sched._job_list["k"] = boom
         sched.job("k", boom, parallel=False)
         assert "k" not in sched._job_list

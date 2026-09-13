@@ -8,7 +8,7 @@ from typing import Final
 DEFAULT_INTERVAL: Final[int] = 1
 DEFAULT_MAX_TRY: Final[int] = 3
 
-DEFAULT_TIMEDELTA: Final[int] = 210
+DEFAULT_TIMEDELTA: Final[int] = 0
 
 TZ_OFFSET: Final[datetime.timedelta] = datetime.timedelta(hours=3, minutes=30)
 
@@ -17,7 +17,7 @@ _INTERVAL_DELTAS: Final[dict[str, Callable[[int], datetime.timedelta]]] = {
     "days": lambda n: datetime.timedelta(days=n),
     "hours": lambda n: datetime.timedelta(hours=n),
     "minutes": lambda n: datetime.timedelta(minutes=n),
-    "secounds": lambda n: datetime.timedelta(seconds=n),
+    "seconds": lambda n: datetime.timedelta(seconds=n),
 }
 
 def interval_delta(unit: str, interval: int) -> datetime.timedelta:

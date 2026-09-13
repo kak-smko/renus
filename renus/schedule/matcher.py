@@ -10,14 +10,14 @@ _AT_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
     "days": ("hour", "minute", "second"),
     "hours": ("minute", "second"),
     "minutes": ("second",),
-    "secounds": (),
+    "seconds": (),
 }
 
 _FORGET_COLUMN: Final[dict[str, str]] = {
     "days": "day",
     "hours": "hour",
     "minutes": "minute",
-    "secounds": "second",
+    "seconds": "second",
 }
 
 def _now_fields(now: datetime.datetime) -> dict[str, object]:

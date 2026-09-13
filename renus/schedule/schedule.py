@@ -56,9 +56,9 @@ class Schedule:
         self._spec.unit = "minutes"
         return self
 
-    def secounds(self) -> Schedule:
+    def seconds(self) -> Schedule:
         """Schedule jobs to run on a per-second basis."""
-        self._spec.unit = "secounds"
+        self._spec.unit = "seconds"
         return self
 
     def max_try(self, n: int) -> Schedule:
@@ -85,13 +85,13 @@ class Schedule:
         days: list | None = None,
         hours: list | None = None,
         minutes: list | None = None,
-        secounds: list | None = None,
+        seconds: list | None = None,
     ) -> Schedule:
         """Skip the job on the given days, hours, minutes, or seconds."""
         self._spec.forget.day = days
         self._spec.forget.hour = hours
         self._spec.forget.minute = minutes
-        self._spec.forget.second = secounds
+        self._spec.forget.second = seconds
         return self
 
     def do(self, key: str, func: Callable, *args: Any, **kwargs: Any) -> None:
