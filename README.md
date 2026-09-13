@@ -30,7 +30,7 @@ Here is a simple example to get you started with Renus:
 ```python
 from renus.app import App
 from renus.core.response import TextResponse, JsonResponse
-from renus.core.routing import Router
+from renus.router import Router
 
 # 1. Define route handlers
 def home():
