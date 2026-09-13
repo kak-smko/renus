@@ -179,25 +179,6 @@ def test_uploadfile_repr():
 def test_max_upload_size_config_default():
     assert MAX_UPLOAD_SIZE == 50 * 1024 * 1024
 
-def test_background_detects_sync():
-    assert Background(lambda: None).is_async is False
-
-def test_background_detects_async():
-    async def fn():
-        return None
-
-    assert Background(fn).is_async is True
-
-@pytest.mark.asyncio
-async def test_background_runs_sync_callable():
-    calls = []
-
-    def fn(x):
-        calls.append(x)
-
-    bg = Background(fn, 5)
-    await bg()
-    assert calls == [5]
 
 @pytest.mark.asyncio
 async def test_background_runs_async_callable():
@@ -214,7 +195,7 @@ async def test_background_run_returns_result():
     async def afn(x):
         return x * 2
 
-    def sfn(x):
+    async def sfn(x):
         return x + 1
 
     assert await Background(afn, 21).run() == 42

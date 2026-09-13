@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Callable
 
-from renus.util.concurrency import run_in_threadpool
 
 BgFunc = Callable[..., Any]
 
@@ -27,14 +25,11 @@ class Background:
         self.func = func
         self._args = args
         self._kwargs = kwargs
-        self.is_async: bool = asyncio.iscoroutinefunction(func)
 
     async def run(self) -> Any:
         """Execute the wrapped callable, awaiting coroutines."""
-        if self.is_async:
-            return await self.func(*self._args, **self._kwargs)
-        return await run_in_threadpool(self.func, *self._args, **self._kwargs)
-
+        return await self.func(*self._args, **self._kwargs)
+        
     async def __call__(self) -> None:
         """Run the wrapped callable when invoked directly."""
         await self.run()
