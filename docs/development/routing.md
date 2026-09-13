@@ -17,7 +17,7 @@ from renus.response import TextResponse
 app = App()
 
 @app.get('/')
-def home():
+async def home():
     return TextResponse('Hello, world!')
 ```
 
@@ -57,7 +57,7 @@ Use `{name}` in a path to capture a segment, optionally typed with a colon:
 
 ```python
 @app.get('/user/{id:oid}')
-def show_user(id):
+async def show_user(id):
     return JsonResponse({'id': str(id)})
 ```
 
