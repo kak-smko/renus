@@ -355,7 +355,7 @@ class TestWebSocket:
 
     @pytest.mark.asyncio
     async def test_short_circuiting_middleware_closes_1003(self):
-        def gate(ws):
+        async def gate(ws):
             return None
 
         async def ws_handler(ws):
@@ -388,7 +388,7 @@ class TestMiddleware:
 
     @pytest.mark.asyncio
     async def test_legacy_gate_middleware_can_short_circuit(self):
-        def deny(request):
+        async def deny(request):
             return TextResponse("blocked", Status.HTTP_401_UNAUTHORIZED)
 
         app = App(middlewares=[deny])

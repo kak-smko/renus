@@ -6,6 +6,7 @@ import json
 import math
 import re
 import uuid
+from collections.abc import Mapping
 from typing import Any
 
 try:
@@ -70,6 +71,8 @@ def _encode_default_value(o: Any) -> Any:
         return str(o)
     if isinstance(o, (str, int, float, bool, type(None))):
         return o
+    if isinstance(o, Mapping):
+        return dict(o)
     if hasattr(o, "__dict__"):
         return dict(vars(o))
     return str(o)

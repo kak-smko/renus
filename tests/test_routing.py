@@ -10,6 +10,7 @@ except ImportError:
 
 from renus.router import (
     CONVERTOR_TYPES,
+    Middleware,
     Router,
     RouteRegistry,
     build_path,
@@ -775,15 +776,15 @@ class TestMiddlewareChain:
 
     @pytest.mark.asyncio
     async def test_legacy_middleware_still_short_circuits(self):
-        from renus.router import Middleware, run_middleware_chain
+        from renus.router import run_middleware_chain
 
         calls = []
 
-        def legacy(request):
+        async def legacy(request):
             calls.append("gate")
             return True
 
-        def blocker(request):
+        async def blocker(request):
             return "blocked"
 
         async def handler(**kwargs):
@@ -791,7 +792,7 @@ class TestMiddlewareChain:
             return "ok"
 
         middleware = Middleware(None, middlewares=[legacy, blocker])
-        assert middleware.next() == "blocked"
+        assert await middleware.next() == "blocked"
         calls.clear()
 
         result = await run_middleware_chain(None, [legacy], {"args": {}}, handler)
@@ -804,7 +805,7 @@ class TestMiddlewareChain:
 
         log = []
 
-        def gate(request):
+        async def gate(request):
             log.append("gate")
             return True
 

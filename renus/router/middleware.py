@@ -32,10 +32,10 @@ class Middleware:
         )
         self.request: Any = request
 
-    def next(self) -> Any:
+    async def next(self) -> Any:
         """Return the first non-``True`` middleware result, or ``True``."""
         for middleware in self.middlewares:
-            handle = middleware(self.request)
+            handle = await middleware(self.request)
             if handle is True:
                 continue
             return handle

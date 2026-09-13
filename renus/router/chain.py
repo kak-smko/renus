@@ -67,9 +67,7 @@ def _wrap_legacy(
 ) -> EndpointFunc:
 
     async def legacy_handle(**kwargs: Any) -> Any:
-        result = middleware(request)
-        if inspect.isawaitable(result):
-            result = await result
+        result = await middleware(request)
         if result is not True:
             return result
         return await handler(**kwargs)
