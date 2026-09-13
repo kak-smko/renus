@@ -1,0 +1,136 @@
+from __future__ import annotations
+
+from typing import Any
+
+from renus.db.mutation.ast import (
+    Delete,
+    DeleteMany,
+    Insert,
+    InsertMany,
+    MutationAST,
+    Update,
+    UpdateMany,
+    Upsert,
+)
+from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
+from renus.db.sql.dialect.base import SQLDialect
+
+__all__ = ["SQLMutationCompiler"]
+
+class SQLMutationCompiler:
+
+    def __init__(self, dialect: SQLDialect) -> None:
+        """Bind a dialect and prepare the query compiler.
+
+        Parameters
+        ----------
+        dialect:
+            SQL dialect used for quoting, placeholders, and upsert generation.
+        """
+        self.dialect = dialect
+        self.qc = SQLCompiler(dialect)
+
+    def compile(self, m: MutationAST) -> SQLCompiled:
+        """Compile a mutation AST into SQL."""
+        source = m.source
+        meta = getattr(source, "__db_metadata__", None)
+        table_name = meta.table if meta else getattr(source, "table", source.__name__.lower())
+        quoted_table = self.dialect.quote(table_name)
+
+        if isinstance(m, Insert):
+            return self._compile_insert(quoted_table, m)
+
+        if isinstance(m, InsertMany):
+            return self._compile_insert_many(quoted_table, m)
+
+        if isinstance(m, (Update, UpdateMany)):
+            return self._compile_update(quoted_table, m)
+
+        if isinstance(m, (Delete, DeleteMany)):
+            return self._compile_delete(quoted_table, m)
+
+        if isinstance(m, Upsert):
+            return self._compile_upsert(quoted_table, m)
+
+        raise NotImplementedError(f"Unsupported mutation type: {type(m).__name__}")
+
+    def _compile_insert(self, table: str, m: Insert) -> SQLCompiled:
+        cols = list(m.values.keys())
+        col_names = ", ".join(self.dialect.quote(c) for c in cols)
+        val_placeholders = self.dialect.placeholders(len(cols))
+        sql = f"INSERT INTO {table} ({col_names}) VALUES ({val_placeholders})"
+        sql += self.dialect.returning_clause(m.returning)
+        params = [m.values[c] for c in cols]
+        return SQLCompiled(sql, tuple(params))
+
+    def _compile_insert_many(self, table: str, m: InsertMany) -> SQLCompiled:
+        if not m.records:
+            return SQLCompiled("", ())
+
+        cols = list(m.records[0].keys())
+        col_names = ", ".join(self.dialect.quote(c) for c in cols)
+        single_row_placeholders = f"({self.dialect.placeholders(len(cols))})"
+        all_placeholders = ", ".join(single_row_placeholders for _ in m.records)
+
+        sql = f"INSERT INTO {table} ({col_names}) VALUES {all_placeholders}"
+        sql += self.dialect.returning_clause(m.returning)
+
+        params: list[Any] = []
+        for rec in m.records:
+            for c in cols:
+                params.append(rec.get(c))
+
+        return SQLCompiled(sql, tuple(params))
+
+    def _compile_update(self, table: str, m: Update | UpdateMany) -> SQLCompiled:
+        set_clauses = [
+            f"{self.dialect.quote(k)} = {self.dialect.placeholder}" for k in m.values
+        ]
+        params: list[Any] = list(m.values.values())
+
+        where_clauses: list[str] = []
+        for cond in m.filters:
+            s, p = self.qc._condition(cond)
+            where_clauses.append(s)
+            params.extend(p)
+
+        sql = f"UPDATE {table} SET {', '.join(set_clauses)}"
+        if where_clauses:
+            sql += f" WHERE {' AND '.join(where_clauses)}"
+
+        if isinstance(m, UpdateMany) and m.limit is not None:
+            sql += f" LIMIT {m.limit}"
+
+        sql += self.dialect.returning_clause(m.returning)
+        return SQLCompiled(sql, tuple(params))
+
+    def _compile_delete(self, table: str, m: Delete | DeleteMany) -> SQLCompiled:
+        where_clauses: list[str] = []
+        params: list[Any] = []
+
+        for cond in m.filters:
+            s, p = self.qc._condition(cond)
+            where_clauses.append(s)
+            params.extend(p)
+
+        sql = f"DELETE FROM {table}"
+        if where_clauses:
+            sql += f" WHERE {' AND '.join(where_clauses)}"
+
+        if isinstance(m, DeleteMany) and m.limit is not None:
+            sql += f" LIMIT {m.limit}"
+
+        if isinstance(m, Delete):
+            sql += self.dialect.returning_clause(m.returning)
+
+        return SQLCompiled(sql, tuple(params))
+
+    def _compile_upsert(self, table: str, m: Upsert) -> SQLCompiled:
+        sql, params = self.dialect.upsert_sql(
+            table=table,
+            conflict_target=m.conflict_target,
+            create_values=m.create_values,
+            update_values=m.update_values,
+            returning=m.returning,
+        )
+        return SQLCompiled(sql, tuple(params))
