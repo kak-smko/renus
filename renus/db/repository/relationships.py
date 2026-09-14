@@ -567,7 +567,10 @@ class RelationshipCoordinator:
             target_repo = self.repo.__class__(
                 self.adapter, target_cls, self.repo.connection_name
             )
-            q = target_repo.query(Path(target_cls, (target_pk,)).in_(all_target_ids))
+            filter_cond: Condition = Path(target_cls, (target_pk,)).in_(all_target_ids)
+            if inc.filter is not None:
+                filter_cond = filter_cond & inc.filter
+            q = target_repo.query(filter_cond)
             if inc.nested:
                 q = q.include(*inc.nested)
             targets = await q.all()

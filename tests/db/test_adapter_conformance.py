@@ -739,6 +739,81 @@ async def test_many_to_many_relationship(kind):
         await db.disconnect()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_many_to_many_filter_sort_limit_skip(kind):
+    db = await database_for(kind, [Employee, Role])
+    try:
+        emp_repo = db.repository(Employee)
+        role_repo = db.repository(Role)
+
+        await role_repo.create_many(
+            [
+                Role(id="r1", name="admin"),
+                Role(id="r2", name="editor"),
+                Role(id="r3", name="viewer"),
+                Role(id="r4", name="owner"),
+                Role(id="r5", name="guest"),
+            ]
+        )
+        await emp_repo.create_many(
+            [
+                Employee(
+                    id="e1",
+                    name="alice",
+                    roles=[Role(id="r1", name="admin"), Role(id="r2", name="editor")],
+                ),
+                Employee(
+                    id="e2",
+                    name="bob",
+                    roles=[Role(id="r1", name="admin"), Role(id="r3", name="viewer")],
+                ),
+                Employee(
+                    id="e3",
+                    name="carol",
+                    roles=[Role(id="r5", name="guest")],
+                ),
+            ]
+        )
+
+        # Sort the parent query, skip one, limit to two; roles stay attached.
+        rows = await (
+            emp_repo.query()
+            .order_by(Employee.name)
+            .offset(1)
+            .limit(2)
+            .include(Employee.roles)
+            .all()
+        )
+        assert [r.name for r in rows] == ["bob", "carol"]
+        assert sorted(r.name for r in rows[0].roles) == ["admin", "viewer"]
+        assert [r.name for r in rows[1].roles] == ["guest"]
+
+        # Filter the parent query; each returned employee keeps its roles.
+        rows = await (
+            emp_repo.query(Employee.name == "alice").include(Employee.roles).all()
+        )
+        assert len(rows) == 1
+        assert rows[0].id == "e1"
+        assert sorted(r.name for r in rows[0].roles) == ["admin", "editor"]
+
+        # The include filter narrows the loaded roles per employee.
+        rows = await emp_repo.query(Employee.name == "alice").include(
+            Include(Employee.roles, filter=Role.name == "editor")
+        ).all()
+        assert len(rows) == 1
+        assert [r.name for r in rows[0].roles] == ["editor"]
+
+        # Combine a parent filter with an include filter across employees.
+        rows = await emp_repo.query(Employee.name.in_(["alice", "bob"])).order_by(
+            Employee.name
+        ).include(Include(Employee.roles, filter=Role.name == "admin")).all()
+        assert [r.name for r in rows] == ["alice", "bob"]
+        assert all([r.name for r in row.roles] == ["admin"] for row in rows)
+    finally:
+        await db.disconnect()
+
+
 
 # ---------------------------------------------------------------------------
 # Soft delete
