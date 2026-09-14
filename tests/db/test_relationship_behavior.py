@@ -140,6 +140,10 @@ async def test_embedded_one_cascade_load_and_data(kind):
         )
         await _assert_tables(kind, db, _embedded_tables(kind, table, sub), "after seed")
 
+        loaded = await repo.query(EOneParent.address.city == "tehran").first()
+        assert loaded.name == "acme"
+        loaded = await repo.query(EOneParent.address.city == "fake").first()
+        assert loaded == None
         loaded = (await repo.query().include(EOneParent.address).all())[0]
         assert loaded.address.city == "tehran"
         assert loaded.address.zip == "12345"

@@ -20,7 +20,14 @@ from renus.db.mutation.ast import (
     UpdateMany,
     Upsert,
 )
-from renus.db.query.ast import Condition, Path, QueryAST
+from renus.db.query.ast import (
+    Condition,
+    Logical,
+    Operator,
+    Path,
+    QueryAST,
+    RelationAny,
+)
 from renus.db.query.builder import Count, Query
 from renus.db.serialization.core import from_dict
 from renus.db.transaction.core import Transaction
@@ -88,6 +95,14 @@ class Repository(Generic[T]):
         if conditions:
             return q.where(*conditions)
         return q
+
+    def where(self, *conditions: Condition) -> Query[T]:
+        """Start a new query, optionally filtered by the given conditions.
+
+        Alias of :meth:`query`, provided so queries read naturally off the
+        repository (e.g. ``users.where(User.name == "Ali").first()``).
+        """
+        return self.query(*conditions)
 
     async def create(self, obj: T) -> T:
         """Insert a single model and return it with generated keys."""
@@ -161,11 +176,7 @@ class Repository(Generic[T]):
             await self._rel_coordinator.persist_relationships(obj)
         return obj
 
-    async def update(
-        self,
-        *conditions: Condition,
-        values: dict[Any, Any] | None = None,
-    ) -> int:
+    async def update(self,*conditions: Condition,values: dict[Any, Any] | None = None,) -> int:
         """Update matching rows with the given values and return rows affected."""
         if values is None:
             if not conditions:
@@ -187,11 +198,7 @@ class Repository(Generic[T]):
         return result.rows_affected
 
     async def update_many(
-        self,
-        *conditions: Condition,
-        values: dict[Any, Any] | None = None,
-        limit: int | None = None,
-    ) -> int:
+        self,*conditions: Condition,values: dict[Any, Any] | None = None,limit: int | None = None,) -> int:
         """Bulk-update matching rows (up to a limit) and return rows affected."""
         if values is None:
             if not conditions:
@@ -212,11 +219,7 @@ class Repository(Generic[T]):
         result = await self._execute_mutation(update_many_ast)
         return result.rows_affected
 
-    async def delete(
-        self,
-        target_or_condition: T | Condition,
-        *conditions: Condition,
-    ) -> int:
+    async def delete(self,target_or_condition: T | Condition,*conditions: Condition,) -> int:
         """Delete a single model or matching rows, honoring soft deletes."""
         meta = getattr(self.model, "__db_metadata__", None)
 
@@ -267,11 +270,7 @@ class Repository(Generic[T]):
         res = await self._execute_mutation(del_ast)
         return res.rows_affected
 
-    async def delete_many(
-        self,
-        *conditions: Condition,
-        limit: int | None = None,
-    ) -> int:
+    async def delete_many(self,*conditions: Condition,limit: int | None = None,) -> int:
         """Bulk-delete matching rows (up to a limit) and return rows affected."""
         meta = getattr(self.model, "__db_metadata__", None)
 
@@ -300,17 +299,7 @@ class Repository(Generic[T]):
             res = await self._execute_mutation(del_many_ast)
             return res.rows_affected
 
-    async def delete_many_ast(self, ast: QueryAST) -> int:
-        """Delete rows matching the filters described by the given AST."""
-        return await self.delete_many(*ast.filters, limit=ast.limit)
-
-    async def upsert(
-        self,
-        conflict_target: Iterable[Path | str] | None = None,
-        create_values: dict[Any, Any] | None = None,
-        update_values: dict[Any, Any] | None = None,
-        target: T | None = None,
-    ) -> int:
+    async def upsert(self,conflict_target: Iterable[Path | str] | None = None,create_values: dict[Any, Any] | None = None,update_values: dict[Any, Any] | None = None,target: T | None = None,) -> int:
         """Insert or update a row on conflict for the target and return rows affected."""
         if target is not None:
             upsert_ast = Upsert.from_model(target, conflict_target=conflict_target)
@@ -326,6 +315,52 @@ class Repository(Generic[T]):
                 update_values=update_values,
             )
 
+        res = await self._execute_mutation(upsert_ast)
+        return res.rows_affected
+
+    async def _upsert_where(
+        self,
+        filters: tuple[Condition, ...],
+        values: dict[Any, Any],
+    ) -> int:
+        """Perform an upsert keyed on the query's equality filters.
+
+        Equality conditions in ``filters`` become the conflict target and are
+        merged into the create values, so that ``repo.where(field == value)``
+        inserted-or-updates the row matching that field. Returns rows affected.
+        """
+        conflict_target: list[Path | str] = []
+        create_values: dict[Any, Any] = dict(values)
+        update_values: dict[Any, Any] = dict(values)
+
+        for cond in filters:
+            if (
+                isinstance(cond, Condition)
+                and not isinstance(cond, (Logical, RelationAny))
+                and cond.operator == Operator.EQ
+                and cond.path is not None
+                and cond.value is not None
+            ):
+                conflict_target.append(cond.path)
+                create_values[cond.path.parts[-1]] = cond.value
+
+        if not conflict_target:
+            meta = getattr(self.model, "__db_metadata__", None)
+            pk_fields = tuple(getattr(meta, "primary_key_fields", ()) or ())
+            if pk_fields:
+                conflict_target = list(pk_fields)
+            else:
+                raise ValueError(
+                    "upsert requires an equality where() condition or a primary key"
+                )
+
+        upsert_ast = Upsert(
+            source=self.model,
+            conflict_target=conflict_target,
+            create_values=create_values,
+            update_values=update_values,
+            filters=filters,
+        )
         res = await self._execute_mutation(upsert_ast)
         return res.rows_affected
 

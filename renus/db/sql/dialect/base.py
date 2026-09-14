@@ -36,6 +36,8 @@ class SQLDialect(ABC):
         """Append LIMIT and OFFSET clauses to ``sql``."""
         if limit is not None:
             sql += f" LIMIT {limit}"
+        elif offset is not None:
+            sql += " LIMIT -1"
         if offset is not None:
             sql += f" OFFSET {offset}"
         return sql
