@@ -17,6 +17,7 @@ import pytest
 from renus.db import (
     Avg,
     Count,
+    Database,
     DuplicateKeyError,
     Include,
     Max,
@@ -895,6 +896,122 @@ async def test_many_to_many_filter_sort_limit_skip(kind):
 
 
 # ---------------------------------------------------------------------------
+# Cascades: on update & on delete
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_cascade_on_update_one_to_many(kind):
+    db = await database_for(kind, [User, Post])
+    try:
+        await db.repository(User).create(
+            _u("u1", "owner", age=1, posts=[_p("p1", "x", "u1"), _p("p2", "y", "u1")])
+        )
+
+        owner = (await db.repository(User).query().include(User.posts).all())[0]
+        owner.id = "u2"
+        await db.repository(User).save(owner)
+
+        posts = await db.repository(Post).query().order_by(Post.title).all()
+        assert {p.id for p in posts} == {"p1", "p2"}
+        assert all(p.user_id == "u2" for p in posts)
+        assert await db.repository(Post).query().count() == 2
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_cascade_on_update_one_to_one(kind):
+    db = await database_for(kind, [Citizen, Passport])
+    try:
+        await db.repository(Citizen).create(
+            Citizen(id="c1", name="alice", passport=Passport(id="p1", number="X123"))
+        )
+
+        # Changing the parent id cascades to the one-to-one child foreign key.
+        citizen = (await db.repository(Citizen).query().include(Citizen.passport).all())[0]
+        assert await _row_counts(db, "citizens", "passports") == {
+            "citizens": 1,
+            "passports": 1,
+        }
+
+        citizen.id = "c2"
+        await db.repository(Citizen).save(citizen)
+
+        assert await _row_counts(db, "citizens", "passports") == {
+            "citizens": 1,
+            "passports": 1,
+        }
+        passports = await db.repository(Passport).query().all()
+        assert len(passports) == 1
+        assert passports[0].citizen_id == "c2"
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_cascade_on_delete_one_to_one(kind):
+    db = await database_for(kind, [Citizen, Passport])
+    try:
+        repo = db.repository(Citizen)
+        await repo.create_many(
+            [
+                Citizen(
+                    id="c1",
+                    name="alice",
+                    passport=Passport(id="p1", number="X123"),
+                ),
+                Citizen(
+                    id="c2",
+                    name="bob",
+                    passport=Passport(id="p2", number="Y456"),
+                ),
+            ]
+        )
+
+        loaded = (await repo.query().include(Citizen.passport).all())[0]
+        await repo.delete(loaded)
+
+        # Deleting one citizen cascades only that citizen's passport.
+        assert await _row_counts(db, "citizens", "passports") == {
+            "citizens": 1,
+            "passports": 1,
+        }
+        remaining = await db.repository(Passport).query().all()
+        assert {p.id for p in remaining} in ({"p1"}, {"p2"})
+        assert await db.repository(Citizen).query().count() == 1
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_cascade_on_delete_one_to_many_isolates_siblings(kind):
+    db = await database_for(kind, [User, Post])
+    try:
+        repo = db.repository(User)
+        await repo.create_many(
+            [
+                _u("r1", "owner1", age=1, posts=[_p("p1", "x", "r1"), _p("p2", "y", "r1")]),
+                _u("r2", "owner2", age=2, posts=[_p("p3", "z", "r2")]),
+            ]
+        )
+
+        loaded = (await repo.query(User.id == "r1").include(User.posts).all())[0]
+        await repo.delete(loaded)
+
+        assert (await db.repository(Post).query().all())[0].user_id == "r2"
+        assert await db.repository(Post).query().count() == 1
+        assert await db.repository(Post).exists(Post.id == "p3") is True
+        assert await db.repository(Post).exists(Post.id == "p1") is False
+        assert await repo.query(User.id == "r2").count() == 1
+    finally:
+        await db.disconnect()
+
+
+# ---------------------------------------------------------------------------
 # Soft delete
 # ---------------------------------------------------------------------------
 
@@ -1091,6 +1208,249 @@ async def test_unit_of_work_explicit_rollback(kind):
 
 
 # ---------------------------------------------------------------------------
+# Transactions & unit of work
+#
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_uow_cross_repository_atomic_commit(kind):
+    db = await database_for(kind)
+    try:
+        async with db.unit_of_work() as uow:
+            users = uow.repository(User)
+            posts = uow.repository(Post)
+            await users.create(
+                _u("a1", "alice", name="Alice", age=30, profile=Profile(city="Tehran", street="one"))
+            )
+            await posts.create_many([_p("ap1", "Alice first post", "a1"),_p("ap2", "Alice two post", "a1")])
+            await uow.commit()
+
+        assert await db.repository(User).count() == 1
+        assert await db.repository(Post).count() == 2
+        assert await db.repository(User).exists(User.username == "alice") is True
+
+        alice = (
+            await db.repository(User).query(User.username == "alice").include(User.profile).all()
+        )[0]
+        assert alice.profile.city == "Tehran"
+        assert alice.profile.street == "one"
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_uow_cross_repository_rollback_on_error(kind):
+    db = await database_for(kind)
+    try:
+        with pytest.raises(ValueError, match="Simulated transfer failure"):
+            async with db.unit_of_work() as uow:
+                await uow.repository(User).create(
+                    _u("b1", "bob", name="Bob", age=40, profile=Profile(city="Shiraz", street="two"))
+                )
+                await uow.repository(Post).create(_p("bp1", "Bob post", "b1"))
+                raise ValueError("Simulated transfer failure")
+
+        assert await db.repository(User).count() == 0
+        assert await db.repository(Post).count() == 0
+        assert await _row_counts(db, "users", "posts") == {
+            "users": 0,
+            "posts": 0,
+        }
+    finally:
+        await db.disconnect()
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_uow_auto_rollback_on_uncommitted_exit(kind):
+    db = await database_for(kind)
+    try:
+        async with db.unit_of_work() as uow:
+            await uow.repository(User).create(
+                _u("c1", "charlie", name="Charlie", age=35, profile=Profile(city="Isfahan", street="four"))
+            )
+
+        assert uow.is_active is False
+        assert await db.repository(User).count() == 0
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_committed_row_visibility(kind):
+    db = await database_for(kind)
+    try:
+        adapter = db.adapter("primary")
+        await db.repository(User).create(
+            _u("v1", "visible", name="Visible", age=1, profile=Profile(city="Tabriz", street="five"))
+        )
+        assert await db.repository(User).count() == 1
+        rows = (
+            await db.repository(User)
+            .query(User.username == "visible")
+            .include(User.profile)
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].name == "Visible"
+        assert rows[0].profile.city == "Tabriz"
+        assert rows[0].profile.street == "five"
+        assert adapter._in_active_transaction() is False
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_uow_rollback_and_transaction_commit(kind):
+    db = await database_for(kind)
+    try:
+        async with db.unit_of_work() as uow:
+            await uow.repository(User).create(
+                _u("u1", "bob", name="Bob", age=40, profile=Profile(city="Mashhad", street="six"))
+            )
+        assert await db.repository(User).count() == 0
+
+        async with db.transaction():
+            await db.repository(User).create(
+                _u("o1", "outer", name="Outer", age=50, profile=Profile(city="Yazd", street="seven"))
+            )
+
+        rows = (
+            await db.repository(User).query(User.username == "outer").include(User.profile).all()
+        )
+        assert len(rows) == 1
+        assert rows[0].name == "Outer"
+        assert rows[0].profile.city == "Yazd"
+    finally:
+        await db.disconnect()
+
+
+# --- Nested transactions / no-transaction block ---------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_no_transaction_reports_inactive(kind):
+    from tests.db._conformance import adapter_for
+
+    adapter = adapter_for(kind)
+    assert adapter._in_active_transaction() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_marker_set_reports_active(kind):
+    from tests.db._conformance import adapter_for
+
+    adapter = adapter_for(kind)
+    adapter._tx_session = object()
+    try:
+        assert adapter._in_active_transaction() is True
+    finally:
+        adapter._tx_session = None
+    assert adapter._in_active_transaction() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_lone_mutation_auto_commits_without_transaction(kind):
+    db = await database_for(kind)
+    try:
+        adapter = db.adapter("primary")
+        assert adapter._in_active_transaction() is False
+
+        await db.repository(User).create(
+            _u("auto", "auto", name="Auto", age=1, profile=Profile(city="Kerman", street="eight"))
+        )
+        assert await db.repository(User).count() == 1
+        assert await db.repository(User).exists(User.username == "auto") is True
+        assert adapter._in_active_transaction() is False
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_nested_transaction_not_supported(kind):
+    db = await database_for(kind)
+    try:
+        adapter = db.adapter("primary")
+        repo = db.repository(User)
+
+        async with db.transaction():
+            assert adapter._in_active_transaction() is True
+            await repo.create(_u("outer", "outer", age=1, profile=Profile(city="Arak", street="nine")))
+
+            with pytest.raises(Exception):
+                async with db.transaction():
+                    await repo.create(_u("inner", "inner", age=2))
+
+            assert adapter._in_active_transaction() is True
+
+        assert adapter._in_active_transaction() is False
+        assert await repo.exists(User.username == "outer") is True
+        assert await repo.exists(User.username == "inner") is False
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_nested_transaction_outer_survives_rejection(kind):
+    db = await database_for(kind)
+    try:
+        adapter = db.adapter("primary")
+        repo = db.repository(User)
+
+        async with db.transaction():
+            await repo.create(
+                _u("persist", "persist", age=1, profile=Profile(city="Rasht", street="ten"))
+            )
+            try:
+                async with db.transaction():
+                    await repo.create(_u("inner-fail", "inner-fail", age=2))
+            except Exception:
+                pass
+
+            assert adapter._in_active_transaction() is True
+            await repo.create(_u("after-fail", "after-fail", age=3))
+
+        assert adapter._in_active_transaction() is False
+        usernames = {u.username for u in await repo.query().all()}
+        assert usernames == {"persist", "after-fail"}
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_in_transaction_read(kind):
+    db = await database_for(kind)
+    try:
+        adapter = db.adapter("primary")
+        repo = db.repository(User)
+        await repo.create(
+            _u("persist", "persist", age=1, profile=Profile(city="Rasht", street="ten"))
+        )
+        with pytest.raises(ValueError, match="Simulated transfer failure"):
+            async with db.transaction():
+                u1=await repo.query(User.profile.city=="Rasht").update({"name":"Ali"})
+                u1=await repo.query(User.profile.city=="Rasht").first()
+                assert u1.name == "Ali"
+                raise ValueError("Simulated transfer failure")
+            
+
+        assert adapter._in_active_transaction() is False
+        usernames = {u.username for u in await repo.query().all()}
+        assert usernames == {"persist"}
+    finally:
+        await db.disconnect()
+
+# ---------------------------------------------------------------------------
 # Error translation
 # ---------------------------------------------------------------------------
 
@@ -1103,6 +1463,71 @@ async def test_duplicate_key_translation(kind):
         await repo.create(_u("dup", "dup", age=1))
         with pytest.raises(DuplicateKeyError):
             await repo.create(_u("dup", "dup", age=2))
+    finally:
+        await db.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# Connection pool
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_connection_pool_connect_is_idempotent(kind):
+    """Calling ``connect()`` twice must be a safe no-op on an open pool."""
+    from tests.db._conformance import adapter_for
+
+    adapter = adapter_for(kind)
+    await adapter.connect()
+    await adapter.connect()
+    assert await adapter.health_check() is True
+    await adapter.disconnect()
+    assert await adapter.health_check() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_connection_pool_reconnect_after_disconnect(kind):
+    """A pool torn down by ``disconnect()`` can be re-established by ``connect()``."""
+    from tests.db._conformance import adapter_for
+
+    adapter = adapter_for(kind)
+    await adapter.connect()
+    assert await adapter.health_check() is True
+    await adapter.disconnect()
+    assert await adapter.health_check() is False
+
+    await adapter.connect()
+    assert await adapter.health_check() is True
+    await adapter.disconnect()
+    assert await adapter.health_check() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_connection_pool_context_manager(kind):
+    """Using ``Database`` as an async context manager releases the pool on exit."""
+    from tests.db._conformance import adapter_for
+
+    adapter = adapter_for(kind)
+    async with Database(adapter):
+        assert await adapter.health_check() is True
+    assert await adapter.health_check() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_connection_pool_shared_across_repositories(kind):
+    """Repositories on one ``Database`` share the same pooled connection."""
+    db = await database_for(kind)
+    try:
+        await db.repository(User).create(_u("cp_shared", "cp_shared", age=7))
+        observed = await db.repository(User).where(User.username == "cp_shared").all()
+        assert len(observed) == 1
+        assert observed[0].age == 7
+
+        count = await db.repository(User).where(User.username == "cp_shared").count()
+        assert count == 1
     finally:
         await db.disconnect()
 

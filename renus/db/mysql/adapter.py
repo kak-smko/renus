@@ -235,6 +235,8 @@ class MySQLAdapter(SQLAdapter):
         adapter_self = self
 
         async def _tx_generator() -> AsyncIterator[TransactionContext]:
+            if adapter_self._in_active_transaction():
+                raise ConfigurationError("Nested transactions are not supported")
             conn = await pool.acquire()
             adapter_self._tx_session = conn
             ctx = MySQLTransactionContext(conn, pool)

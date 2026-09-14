@@ -54,17 +54,19 @@ class Relationship:
         target:
             The related model class or a reference to it.
         cascade:
-            Operations to cascade to related records, such as ``"all"`` or
-            ``"delete"``. Defaults to none.
+            Operations to cascade to related records. Valid values are
+            ``"all"``, ``"save"``, and ``"delete"``. Defaults to none.
         on_delete:
-            Action taken when the related record is deleted. Defaults to
-            ``"restrict"``.
+            Action taken when the related record is deleted. One of
+            ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
+            or ``"no action"``. Defaults to ``"restrict"``.
         on_update:
-            Action taken when the related record is updated. Defaults to
-            ``"cascade"``.
+            Action taken when the related record is updated. One of
+            ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
+            or ``"no action"``. Defaults to ``"cascade"``.
         loading:
-            Strategy used to load the related records. Defaults to
-            ``"selectin"``.
+            Strategy used to load the related records. One of ``"selectin"``
+            or ``"joined"``. Defaults to ``"selectin"``.
         local_key:
             The local column used to join the relationship. Defaults to the
             owner's primary key.
@@ -129,10 +131,11 @@ class EmbeddedOne(Relationship):
         target:
             The embedded model class or a reference to it.
         cascade:
-            Operations cascaded to the embedded record. Defaults to ``"all"``.
+            Operations cascaded to the embedded record. Valid values are
+            ``"all"``, ``"save"``, and ``"delete"``. Defaults to ``"all"``.
         loading:
-            Strategy used to load the embedded record. Defaults to
-            ``"selectin"``.
+            Strategy used to load the embedded record. One of ``"selectin"``
+            or ``"joined"``. Defaults to ``"selectin"``.
         """
         super().__init__(
             kind=RelationshipKind.EMBEDDED_ONE,
@@ -163,11 +166,11 @@ class EmbeddedMany(Relationship):
         target:
             The embedded model class or a reference to it.
         cascade:
-            Operations cascaded to the embedded records. Defaults to
-            ``"all"``.
+            Operations cascaded to the embedded records. Valid values are
+            ``"all"``, ``"save"``, and ``"delete"``. Defaults to ``"all"``.
         loading:
-            Strategy used to load the embedded records. Defaults to
-            ``"selectin"``.
+            Strategy used to load the embedded records. One of ``"selectin"``
+            or ``"joined"``. Defaults to ``"selectin"``.
         """
         super().__init__(
             kind=RelationshipKind.EMBEDDED_MANY,
@@ -207,16 +210,19 @@ class Reference(Relationship):
             The column on the target used to join. Defaults to the target's
             primary key.
         cascade:
-            Operations to cascade to related records. Defaults to none.
+            Operations to cascade to related records. Valid values are
+            ``"all"``, ``"save"``, and ``"delete"``. Defaults to none.
         on_delete:
-            Action taken when the related record is deleted. Defaults to
-            ``"restrict"``.
+            Action taken when the related record is deleted. One of
+            ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
+            or ``"no action"``. Defaults to ``"restrict"``.
         on_update:
-            Action taken when the related record is updated. Defaults to
-            ``"cascade"``.
+            Action taken when the related record is updated. One of
+            ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
+            or ``"no action"``. Defaults to ``"cascade"``.
         loading:
-            Strategy used to load the related records. Defaults to
-            ``"selectin"``.
+            Strategy used to load the related records. One of ``"selectin"``
+            or ``"joined"``. Defaults to ``"selectin"``.
         kind:
             The cardinality of the relationship. Defaults to ``"reference"``.
         is_collection:
@@ -260,16 +266,19 @@ class OneToOne(Reference):
             The column on the target used to join. Defaults to the target's
             primary key.
         cascade:
-            Operations to cascade to related records. Defaults to none.
+            Operations to cascade to related records. Valid values are
+            ``"all"``, ``"save"``, and ``"delete"``. Defaults to none.
         on_delete:
-            Action taken when the related record is deleted. Defaults to
-            ``"restrict"``.
+            Action taken when the related record is deleted. One of
+            ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
+            or ``"no action"``. Defaults to ``"restrict"``.
         on_update:
-            Action taken when the related record is updated. Defaults to
-            ``"cascade"``.
+            Action taken when the related record is updated. One of
+            ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
+            or ``"no action"``. Defaults to ``"cascade"``.
         loading:
-            Strategy used to load the related record. Defaults to
-            ``"selectin"``.
+            Strategy used to load the related record. One of ``"selectin"``
+            or ``"joined"``. Defaults to ``"selectin"``.
         """
         super().__init__(
             target=target,
@@ -308,16 +317,19 @@ class OneToMany(Reference):
             The column on the target used to join. Defaults to the target's
             primary key.
         cascade:
-            Operations to cascade to related records. Defaults to none.
+            Operations to cascade to related records. Valid values are
+            ``"all"``, ``"save"``, and ``"delete"``. Defaults to none.
         on_delete:
-            Action taken when the related record is deleted. Defaults to
-            ``"restrict"``.
+            Action taken when the related record is deleted. One of
+            ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
+            or ``"no action"``. Defaults to ``"restrict"``.
         on_update:
-            Action taken when the related record is updated. Defaults to
-            ``"cascade"``.
+            Action taken when the related record is updated. One of
+            ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
+            or ``"no action"``. Defaults to ``"cascade"``.
         loading:
-            Strategy used to load the related records. Defaults to
-            ``"selectin"``.
+            Strategy used to load the related records. One of ``"selectin"``
+            or ``"joined"``. Defaults to ``"selectin"``.
         """
         super().__init__(
             target=target,
@@ -356,16 +368,19 @@ class ManyToOne(Reference):
             The column on the target used to join. Defaults to the target's
             primary key.
         cascade:
-            Operations to cascade to related records. Defaults to none.
+            Operations to cascade to related records. Valid values are
+            ``"all"``, ``"save"``, and ``"delete"``. Defaults to none.
         on_delete:
-            Action taken when the related record is deleted. Defaults to
-            ``"restrict"``.
+            Action taken when the related record is deleted. One of
+            ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
+            or ``"no action"``. Defaults to ``"restrict"``.
         on_update:
-            Action taken when the related record is updated. Defaults to
-            ``"cascade"``.
+            Action taken when the related record is updated. One of
+            ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
+            or ``"no action"``. Defaults to ``"cascade"``.
         loading:
-            Strategy used to load the related record. Defaults to
-            ``"selectin"``.
+            Strategy used to load the related record. One of ``"selectin"``
+            or ``"joined"``. Defaults to ``"selectin"``.
         """
         super().__init__(
             target=target,
@@ -407,16 +422,19 @@ class ManyToMany(Reference):
             The column on the target used to join. Defaults to the target's
             primary key.
         cascade:
-            Operations to cascade to related records. Defaults to none.
+            Operations to cascade to related records. Valid values are
+            ``"all"``, ``"save"``, and ``"delete"``. Defaults to none.
         on_delete:
-            Action taken when the related record is deleted. Defaults to
-            ``"restrict"``.
+            Action taken when the related record is deleted. One of
+            ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
+            or ``"no action"``. Defaults to ``"restrict"``.
         on_update:
-            Action taken when the related record is updated. Defaults to
-            ``"cascade"``.
+            Action taken when the related record is updated. One of
+            ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
+            or ``"no action"``. Defaults to ``"cascade"``.
         loading:
-            Strategy used to load the related records. Defaults to
-            ``"selectin"``.
+            Strategy used to load the related records. One of ``"selectin"``
+            or ``"joined"``. Defaults to ``"selectin"``.
         """
         super().__init__(
             target=target,

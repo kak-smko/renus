@@ -208,6 +208,8 @@ class SQLiteAdapter(SQLAdapter):
         adapter_self = self
 
         async def _tx_generator() -> AsyncIterator[TransactionContext]:
+            if adapter_self._in_active_transaction():
+                raise ConfigurationError("Nested transactions are not supported")
             ctx = SQLiteTransactionContext(conn, adapter_self._lock)
             adapter_self._tx_session = True
             try:

@@ -195,6 +195,8 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         adapter_self = self
 
         async def _tx_generator() -> AsyncIterator[TransactionContext]:
+            if adapter_self._in_active_transaction():
+                raise ConfigurationError("Nested transactions are not supported")
 
             session = client.start_session()
             adapter_self._tx_session = session
