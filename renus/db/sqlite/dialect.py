@@ -11,7 +11,6 @@ __all__ = ["SQLiteDialect"]
 class SQLiteDialect(SQLDialect):
 
     placeholder: str = "?"
-    supports_returning: bool = True
 
     def quote(self, name: str) -> str:
         """Quote an identifier using SQLite double quotes."""
@@ -49,7 +48,6 @@ class SQLiteDialect(SQLDialect):
         conflict_target: tuple[str, ...],
         create_values: dict[str, Any],
         update_values: dict[str, Any],
-        returning: tuple[str, ...] | None = None,
     ) -> tuple[str, list[Any]]:
         """Build an upsert SQL statement using ON CONFLICT."""
         cols = list(create_values.keys())
@@ -69,5 +67,4 @@ class SQLiteDialect(SQLDialect):
         elif conflict_target:
             sql += f"ON CONFLICT ({conflict_cols}) DO NOTHING"
 
-        sql += self.returning_clause(returning)
         return sql, params

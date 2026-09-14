@@ -59,7 +59,6 @@ class SQLMutationCompiler:
         col_names = ", ".join(self.dialect.quote(c) for c in cols)
         val_placeholders = self.dialect.placeholders(len(cols))
         sql = f"INSERT INTO {table} ({col_names}) VALUES ({val_placeholders})"
-        sql += self.dialect.returning_clause(m.returning)
         params = [m.values[c] for c in cols]
         return SQLCompiled(sql, tuple(params))
 
@@ -73,7 +72,6 @@ class SQLMutationCompiler:
         all_placeholders = ", ".join(single_row_placeholders for _ in m.records)
 
         sql = f"INSERT INTO {table} ({col_names}) VALUES {all_placeholders}"
-        sql += self.dialect.returning_clause(m.returning)
 
         params: list[Any] = []
         for rec in m.records:
@@ -101,7 +99,6 @@ class SQLMutationCompiler:
         if isinstance(m, UpdateMany) and m.limit is not None:
             sql += f" LIMIT {m.limit}"
 
-        sql += self.dialect.returning_clause(m.returning)
         return SQLCompiled(sql, tuple(params))
 
     def _compile_delete(self, table: str, m: Delete | DeleteMany) -> SQLCompiled:
@@ -120,9 +117,6 @@ class SQLMutationCompiler:
         if isinstance(m, DeleteMany) and m.limit is not None:
             sql += f" LIMIT {m.limit}"
 
-        if isinstance(m, Delete):
-            sql += self.dialect.returning_clause(m.returning)
-
         return SQLCompiled(sql, tuple(params))
 
     def _compile_upsert(self, table: str, m: Upsert) -> SQLCompiled:
@@ -131,6 +125,5 @@ class SQLMutationCompiler:
             conflict_target=m.conflict_target,
             create_values=m.create_values,
             update_values=m.update_values,
-            returning=m.returning,
         )
         return SQLCompiled(sql, tuple(params))

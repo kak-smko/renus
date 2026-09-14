@@ -17,7 +17,6 @@ __all__ = ["SQLDialect"]
 class SQLDialect(ABC):
 
     placeholder: str = "?"
-    supports_returning: bool = False
 
     @abstractmethod
     def quote(self, name: str) -> str:
@@ -53,16 +52,9 @@ class SQLDialect(ABC):
         conflict_target: tuple[str, ...],
         create_values: dict[str, Any],
         update_values: dict[str, Any],
-        returning: tuple[str, ...] | None = None,
     ) -> tuple[str, list[Any]]:
         """Build an upsert statement with conflict handling."""
         pass
-
-    def returning_clause(self, cols: tuple[str, ...] | None) -> str:
-        """Return a RETURNING clause when columns and dialect support it."""
-        if self.supports_returning and cols:
-            return f" RETURNING {', '.join(self.quote(c) for c in cols)}"
-        return ""
 
     def _resolve_sql_type(self, col: Column) -> str:
         dialect_name = type(self).__name__.lower()

@@ -11,7 +11,6 @@ __all__ = ["MySQLDialect"]
 class MySQLDialect(SQLDialect):
 
     placeholder: str = "%s"
-    supports_returning: bool = False
 
     def quote(self, name: str) -> str:
         """Quote an identifier using MySQL backticks."""
@@ -63,7 +62,6 @@ class MySQLDialect(SQLDialect):
         conflict_target: tuple[str, ...],
         create_values: dict[str, Any],
         update_values: dict[str, Any],
-        returning: tuple[str, ...] | None = None,
     ) -> tuple[str, list[Any]]:
         """Build an upsert SQL statement using ON DUPLICATE KEY UPDATE."""
         cols = list(create_values.keys())
