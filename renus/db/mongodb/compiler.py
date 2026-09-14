@@ -22,6 +22,7 @@ from renus.db.query.ast import (
     RelationAny,
 )
 from renus.db.relationships import RelationshipKind
+from renus.util.naming import to_plural_lower
 
 __all__ = ["MongoCompiledQuery", "MongoCompiler"]
 
@@ -84,7 +85,7 @@ class MongoCompiler:
             meta.table
             if meta
             else getattr(source, "table", None)
-            or source.__name__.lower() + "s"
+            or to_plural_lower(source.__name__)
         )
 
         filter_parts: list[dict[str, Any]] = []
@@ -274,7 +275,7 @@ class MongoCompiler:
             meta.table
             if meta
             else getattr(source, "table", None)
-            or source.__name__.lower() + "s"
+            or to_plural_lower(source.__name__)
         )
 
         if isinstance(m, Insert):

@@ -10,6 +10,8 @@ Run with::
     venv/bin/python -m pytest tests/db/test_adapter_conformance.py
 """
 
+import os
+
 import pytest
 
 from renus.db import (
@@ -19,6 +21,7 @@ from renus.db import (
     Include,
     Max,
     Min,
+    ReModel,
     RelationshipKind,
     Sum,
 )
@@ -50,6 +53,26 @@ def _u(uid: str, username: str, **kw):
 
 def _p(pid: str, title: str, user_id: str = ""):
     return Post(id=pid, title=title, user_id=user_id)
+
+
+_row_count_models: dict[str, type] = {}
+
+
+def _row_count_model(table: str) -> type:
+    """Return a lightweight model bound to an existing table/collection.
+    """
+    model = _row_count_models.get(table)
+    if model is None:
+        meta = type("Meta", (), {"table": table})
+        model = type(f"_RowCount_{table}", (ReModel,), {"Meta": meta})
+        _row_count_models[table] = model
+    return model
+
+
+async def _row_counts(db, *tables: str) -> dict[str, int]:
+    """Return the number of rows stored in each table/collection.
+    """
+    return {t: await db.repository(_row_count_model(t)).count() for t in tables}
 
 
 # ---------------------------------------------------------------------------
@@ -599,6 +622,10 @@ async def test_embedded_relationship(kind):
     db = await database_for(kind, [Item])
     try:
         repo = db.repository(Item)
+
+        nested = db.adapter("primary").nested_documents
+        tables = ["items"] + ([] if nested else ["items_address"])
+
         await repo.create(
             Item(
                 id="e1",
@@ -606,13 +633,21 @@ async def test_embedded_relationship(kind):
                 address=Profile(street="one", city="two"),
             )
         )
+        before = await _row_counts(db, *tables)
+        expected_before = {"items": 1}
+        if not nested:
+            expected_before["items_address"] = 1
+        assert before == expected_before, before
+
         loaded = (await repo.query().include(Item.address).all())[0]
         assert loaded.name == "widget"
         assert loaded.address.street == "one"
         assert loaded.address.city == "two"
 
-        # Deleting the parent cascades the embedded child row.
+
         await repo.delete(loaded)
+        after = await _row_counts(db, *tables)
+        assert after == {t: 0 for t in tables}, after
         assert await repo.count() == 0
     finally:
         await db.disconnect()
@@ -624,13 +659,24 @@ async def test_embedded_many_relationship(kind):
     db = await database_for(kind, [Item])
     try:
         repo = db.repository(Item)
+        nested = db.adapter("primary").nested_documents
+        tables = ["items"] + ([] if nested else ["items_tags"])
+
         await repo.create_many(
             [Item(id="m1", name="kit", tags=[Tag(name="a"), Tag(name="b")])]
         )
+        before = await _row_counts(db, *tables)
+        expected_before = {"items": 1}
+        if not nested:
+            expected_before["items_tags"] = 2
+        assert before == expected_before, before
+
         loaded = (await repo.query().include(Item.tags).all())[0]
         assert sorted(t.name for t in loaded.tags) == ["a", "b"]
 
         await repo.delete_many()
+        after = await _row_counts(db, *tables)
+        assert after == {t: 0 for t in tables}, after
         assert await repo.count() == 0
     finally:
         await db.disconnect()
@@ -645,10 +691,20 @@ async def test_one_to_one_relationship(kind):
         await repo.create(
             Citizen(id="c1", name="alice", passport=Passport(id="p1", number="X123"))
         )
+        assert await _row_counts(db, "citizens", "passports") == {
+            "citizens": 1,
+            "passports": 1,
+        }
+
         loaded = (await repo.query().include(Citizen.passport).all())[0]
         assert loaded.passport.number == "X123"
 
+        # Deleting the citizen cascades the related passport row too.
         await repo.delete(loaded)
+        assert await _row_counts(db, "citizens", "passports") == {
+            "citizens": 0,
+            "passports": 0,
+        }
         assert await db.repository(Passport).query().count() == 0
     finally:
         await db.disconnect()
@@ -663,10 +719,17 @@ async def test_one_to_many_relationship(kind):
         await repo.create(
             _u("r1", "owner", age=1, posts=[_p("rp1", "x", "r1"), _p("rp2", "y", "r1")])
         )
+        assert await _row_counts(db, "users", "posts") == {"users": 1, "posts": 2}
+
         loaded = (await repo.query().include(User.posts).all())[0]
         assert sorted(p.title for p in loaded.posts) == ["x", "y"]
 
+        # ``User`` is soft-delete: the child posts are hard-cascaded away, while
+        # the parent row is retained (marked deleted) rather than dropped. Both
+        # effects happen across every adapter.
         await repo.delete(loaded)
+        assert await _row_counts(db, "users", "posts") == {"users": 1, "posts": 0}
+        assert await repo.count() == 0  # active view hides the soft-deleted row
         assert await db.repository(Post).query().count() == 0
     finally:
         await db.disconnect()
@@ -681,6 +744,10 @@ async def test_many_to_one_relationship(kind):
         dept_repo = db.repository(Dept)
         await dept_repo.create(Dept(id="d1", name="eng"))
         await emp_repo.create(Employee(id="e1", name="bob", dept_id="d1"))
+        assert await _row_counts(db, "employees", "depts") == {
+            "employees": 1,
+            "depts": 1,
+        }
 
         loaded = (await emp_repo.query().include(Employee.dept).all())[0]
         assert loaded.dept.name == "eng"
@@ -719,15 +786,27 @@ async def test_many_to_many_relationship(kind):
             )
         )
 
+        # The junction table ``employee_roles`` captures the two links.
+        assert await _row_counts(db, "employees", "roles", "employee_roles") == {
+            "employees": 1,
+            "roles": 5,
+            "employee_roles": 2,
+        }
+
         loaded = (await emp_repo.query().include(Employee.roles).all())[0]
         assert sorted(r.name for r in loaded.roles) == ["admin", "editor"]
 
         stored = await role_repo.query().all()
         assert {r.id for r in stored} == {"r1", "r2", "r3", "r4", "r5"}
 
-        # Many-to-many is restrict: deleting an employee removes the links but
-        # leaves the related roles intact.
+        # Many-to-many is restrict: deleting an employee removes the junction
+        # links and the employee row, but leaves the related roles intact.
         await emp_repo.delete(loaded)
+        assert await _row_counts(db, "employees", "roles", "employee_roles") == {
+            "employees": 0,
+            "roles": 5,
+            "employee_roles": 0,
+        }
         assert {r.id for r in await role_repo.query().all()} == {
             "r1",
             "r2",
@@ -1024,5 +1103,152 @@ async def test_duplicate_key_translation(kind):
         await repo.create(_u("dup", "dup", age=1))
         with pytest.raises(DuplicateKeyError):
             await repo.create(_u("dup", "dup", age=2))
+    finally:
+        await db.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# Backup & restore
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_backup_and_restore_roundtrip_all_tables(kind, tmp_path):
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        await repo.create(
+            _u(
+                "b1",
+                "b1",
+                name="Backy",
+                age=31,
+                profile=Profile(city="Tehran", street="main"),
+            )
+        )
+        await repo.create(
+            _u(
+                "b2",
+                "b2",
+                name="Resty",
+                age=32,
+                profile=Profile(city="Shiraz", street="second"),
+            )
+        )
+        await db.repository(Post).create(_p("bp1", "backup post", "b1"))
+
+        backup_path = str(tmp_path / "backup")
+        counts = await db.backup(path=backup_path)
+
+        assert counts["users"] == 2
+        assert counts["posts"] == 1
+        ls=["users.json", "posts.json"]
+        if not db.adapter("primary").nested_documents:
+            ls.append("users_profile.json")
+            assert counts["users_profile"] == 2
+        for name in ls:
+            assert os.path.exists(os.path.join(backup_path, name)), f"missing backup {name}"
+       
+
+        # A stray row added after the backup must be discarded on restore
+        # because ``restore`` drops existing rows before re-importing.
+        await repo.create(_u("b_extra", "b_extra", age=99))
+
+        restored = await db.restore(path=backup_path)
+        assert restored["users"] == 2
+        assert restored["posts"] == 1
+        if not db.adapter("primary").nested_documents:
+            assert restored["users_profile"] == 2
+
+        usernames = {u.username for u in await repo.query().all()}
+        assert usernames == {"b1", "b2"}
+
+        rows = await repo.query(User.username == "b1").include(User.profile).all()
+        assert len(rows) == 1
+        b1 = rows[0]
+        assert b1.name == "Backy"
+        assert b1.age == 31
+        assert b1.profile.city == "Tehran"
+
+        posts = await db.repository(Post).where(Post.user_id == "b1").all()
+        assert len(posts) == 1
+        assert posts[0].title == "backup post"
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_backup_and_restore_selected_tables(kind, tmp_path):
+    db = await database_for(kind)
+    try:
+        await db.repository(User).create_many([_u("s1", "s1", age=1), _u("s2", "s2", age=2)])
+        await db.repository(Post).create(_p("sp1", "untouched", "s1"))
+
+        backup_path = str(tmp_path / "only_users")
+        counts = await db.backup(path=backup_path, tables=["users"])
+        assert counts == {"users": 2}
+        assert os.listdir(backup_path) == ["users.json"]
+
+        # Restoring only ``users`` must repopulate it (dropping any extras)
+        # while leaving ``posts`` alone.
+        await db.repository(User).create(_u("s_extra", "s_extra", age=99))
+        restored = await db.restore(path=backup_path, tables=["users"])
+        assert restored == {"users": 2}
+
+        usernames = {u.username for u in await db.repository(User).query().all()}
+        assert usernames == {"s1", "s2"}
+
+        posts = await db.repository(Post).where(Post.user_id == "s1").all()
+        assert len(posts) == 1
+        assert posts[0].title == "untouched"
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_restore_without_drop_existing(kind, tmp_path):
+    src = await database_for(kind)
+    try:
+        await src.repository(User).create(_u("r1", "r1", age=1))
+        backup_path = str(tmp_path / "append")
+        await src.backup(path=backup_path, tables=["users"])
+    finally:
+        await src.disconnect()
+
+    # A fresh database starts empty; restoring with ``drop_existing=False``
+    # appends the backed-up rows into it.
+    dst = await database_for(kind)
+    try:
+        restored = await dst.restore(path=backup_path, tables=["users"], drop_existing=False)
+        assert restored == {"users": 1}
+        users = await dst.repository(User).query().all()
+        assert [u.username for u in users] == ["r1"]
+    finally:
+        await dst.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_backup_and_restore_with_pagination(kind, tmp_path):
+    db = await database_for(kind)
+    try:
+        await db.repository(User).create_many(
+            [_u(f"pg{i:02d}", f"pg{i:02d}", age=i) for i in range(25)]
+        )
+
+        backup_path = str(tmp_path / "paginated")
+        counts = await db.backup(path=backup_path, tables=["users"], page_size=10)
+        assert counts == {"users": 25}
+
+        await db.repository(User).delete_many()
+        assert await db.repository(User).query().count() == 0
+
+        restored = await db.restore(path=backup_path, tables=["users"], chunk_size=10)
+        assert restored == {"users": 25}
+
+        ages = sorted(u.age for u in await db.repository(User).query().all())
+        assert ages == list(range(25))
     finally:
         await db.disconnect()

@@ -15,6 +15,7 @@ from renus.util.concurrency import (
     run_in_threadpool,
     shutdown_pool,
 )
+from renus.util.naming import to_camel_case, to_plural, to_plural_lower
 from renus.util.random import DEFAULT_ALPHABET, get_random_string, get_random_token
 from renus.util.security import DEFAULT_SALT, hash_new_password, is_correct_password
 
@@ -36,4 +37,7 @@ __all__ = [
     "run_in_processpool",
     "run_in_threadpool",
     "shutdown_pool",
+    "to_camel_case",
+    "to_plural",
+    "to_plural_lower",
 ]
