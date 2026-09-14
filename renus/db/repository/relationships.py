@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from renus.db.mutation.ast import (
-    Delete,
+    DeleteMany,
     Insert,
     InsertMany,
     Update,
@@ -28,6 +28,31 @@ def _string_parse(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+def _singular_table(name: str) -> str:
+    """Derive a singular table name for building relationship column suffixes."""
+    if name.endswith("ies"):
+        return f"{name[:-3]}y"
+    if name.endswith("ses"):
+        return name[:-2]
+    if name.endswith("s") and not name.endswith("ss") and not name.endswith("is"):
+        return name[:-1]
+    return name
+
+def _junction_columns(owner_meta: Any, rel: Any, target_meta: Any) -> tuple[str, str]:
+    """Return the (owner, target) column names of a many-to-many junction table.
+
+    Column names come from the explicit relationship keys when given, otherwise
+    they are derived from the singularised owner and target table names (e.g.
+    ``employee_id`` and ``role_id`` for employees/roles).
+    """
+    local_col = rel.local_key or f"{_singular_table(owner_meta.table)}_id"
+    foreign_col = rel.foreign_key or f"{_singular_table(target_meta.table)}_id"
+    return local_col, foreign_col
+
+def _junction_source(through_table: str) -> Any:
+    """Build a synthetic source type for a raw junction ``through`` table."""
+    return type(through_table, (), {"__db_metadata__": None, "table": through_table})
 
 class RelationshipCoordinator:
 
@@ -98,6 +123,79 @@ class RelationshipCoordinator:
             ):
                 await self._persist_one_to_one(meta, rel, parent_id, val)
 
+            elif rel.kind == RelationshipKind.MANY_TO_MANY and val:
+                await self._persist_many_to_many(meta, rel, parent_id, val)
+
+    async def _persist_many_to_many(
+        self,
+        parent_meta: Any,
+        rel: Any,
+        parent_id: Any,
+        children: Iterable[Any] | None,
+    ) -> None:
+        """Reconcile the many-to-many junction rows for a parent record.
+
+        The matching ``through`` table rows are replaced so the persisted links
+        exactly match the given collection. Related target records are NOT
+        deleted (many-to-many uses ``restrict``); only the links change.
+        """
+        through_table = rel.through
+        if not through_table:
+            return
+
+        target_meta = self._mtm_target_meta(rel)
+        if target_meta is None:
+            return
+
+        target_pk = target_meta.primary_key_field
+        local_col, foreign_col = _junction_columns(parent_meta, rel, target_meta)
+        junction_source = _junction_source(through_table)
+
+        # Clear the existing links for this parent, then re-insert the new set.
+        del_ast = DeleteMany(
+            source=junction_source,
+            filters=(Path(junction_source, (local_col,)) == parent_id,),
+        )
+        await self.adapter.execute_mutation(del_ast)
+
+        records: list[dict[str, Any]] = []
+        for child in children or []:
+            fk_val = (
+                child.get(target_pk)
+                if isinstance(child, dict)
+                else getattr(child, target_pk, None)
+            )
+            if fk_val is None:
+                # Persist a brand-new target so it has an id to link against.
+                child_repo = self.repo.__class__(
+                    self.adapter, target_cls, self.repo.connection_name
+                )
+                await child_repo.save(child)
+                fk_val = (
+                    child.get(target_pk)
+                    if isinstance(child, dict)
+                    else getattr(child, target_pk, None)
+                )
+            if fk_val is None:
+                continue
+            records.append({local_col: parent_id, foreign_col: fk_val})
+
+        if records:
+            ins = InsertMany(source=junction_source, records=records)
+            await self.adapter.execute_mutation(ins)
+
+    @staticmethod
+    def _mtm_target_meta(rel: Any) -> Any:
+        """Resolve a many-to-many target's metadata, or ``None`` if unknown.
+        """
+        target_cls = rel.target if isinstance(rel.target, type) else None
+        if target_cls is None:
+            try:
+                target_cls = rel.resolve_target()
+            except (ValueError, KeyError):
+                return None
+        return getattr(target_cls, "__db_metadata__", None)
+
     def _rel_is_raw(self, rel_name: str) -> bool:
         rel = self.model.__db_metadata__.relationships.get(rel_name)
 
@@ -165,7 +263,7 @@ class RelationshipCoordinator:
         embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
 
         async with self._atomic():
-            del_ast = Delete(
+            del_ast = DeleteMany(
                 source=embedded_source,
                 filters=(Path(embedded_source, ("parent_id",)) == parent_id,),
             )
@@ -202,7 +300,7 @@ class RelationshipCoordinator:
             records.append(d)
 
         async with self._atomic():
-            del_ast = Delete(
+            del_ast = DeleteMany(
                 source=embedded_source,
                 filters=(Path(embedded_source, ("parent_id",)) == parent_id,),
             )
@@ -223,7 +321,7 @@ class RelationshipCoordinator:
         embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
 
         async with self._atomic():
-            del_ast = Delete(
+            del_ast = DeleteMany(
                 source=embedded_source,
                 filters=(Path(embedded_source, ("parent_id",)) == parent_id,),
             )
@@ -254,7 +352,7 @@ class RelationshipCoordinator:
         ]
 
         async with self._atomic():
-            del_ast = Delete(
+            del_ast = DeleteMany(
                 source=embedded_source,
                 filters=(Path(embedded_source, ("parent_id",)) == parent_id,),
             )
@@ -294,7 +392,7 @@ class RelationshipCoordinator:
             object.__setattr__(child, fk_name, parent_id)
             await child_repo.save(child)
 
-    async def cascade_delete(self, obj: Any) -> None:
+    async def cascade_delete(self, obj: Any, hard: bool = False) -> None:
         """Cascade-delete related rows for a single model object."""
         meta = getattr(self.model, "__db_metadata__", None)
         if not meta:
@@ -305,12 +403,12 @@ class RelationshipCoordinator:
         if parent_id is None:
             return
 
-        await self._cascade_delete_for_parent_ids(meta, [parent_id])
+        await self._cascade_delete_for_parent_ids(meta, [parent_id], hard=hard)
 
     async def cascade_delete_many(
         self,
         *conditions: Condition,
-        limit: int | None = None,
+        hard: bool = False,
     ) -> None:
         """Cascade-delete related rows for all rows matching the conditions."""
         meta = getattr(self.model, "__db_metadata__", None)
@@ -319,10 +417,10 @@ class RelationshipCoordinator:
 
         parent_pk = meta.primary_key_field
         q = self.repo.query()
+        if hard:
+            q = q.with_deleted()
         if conditions:
             q = q.where(*conditions)
-        if limit is not None:
-            q = q.limit(limit)
         rows = await q.select(Path(self.model, (parent_pk,))).all()
 
         parent_ids: list[Any] = [
@@ -332,12 +430,13 @@ class RelationshipCoordinator:
         if not parent_ids:
             return
 
-        await self._cascade_delete_for_parent_ids(meta, parent_ids)
+        await self._cascade_delete_for_parent_ids(meta, parent_ids, hard=hard)
 
     async def _cascade_delete_for_parent_ids(
         self,
         meta: Any,
         parent_ids: list[Any],
+        hard: bool = False,
     ) -> None:
         if not parent_ids:
             return
@@ -348,9 +447,23 @@ class RelationshipCoordinator:
                     continue
                 table_name = f"{meta.table}_{rname}"
                 embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
-                del_ast = Delete(
+                del_ast = DeleteMany(
                     source=embedded_source,
                     filters=(Path(embedded_source, ("parent_id",)).in_(parent_ids),),
+                )
+                await self.adapter.execute_mutation(del_ast)
+
+            elif rel.kind == RelationshipKind.MANY_TO_MANY:
+                if not rel.through:
+                    continue
+                target_meta = self._mtm_target_meta(rel)
+                if target_meta is None:
+                    continue
+                local_col, _ = _junction_columns(meta, rel, target_meta)
+                junction_source = _junction_source(rel.through)
+                del_ast = DeleteMany(
+                    source=junction_source,
+                    filters=(Path(junction_source, (local_col,)).in_(parent_ids),),
                 )
                 await self.adapter.execute_mutation(del_ast)
 
@@ -358,7 +471,10 @@ class RelationshipCoordinator:
                 target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
                 fk_name = rel.foreign_key or f"{meta.table[:-1] if meta.table.endswith('s') else meta.table}_id"
                 child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
-                await child_repo.delete_many(Path(target_cls, (fk_name,)).in_(parent_ids))
+                if hard:
+                    await child_repo.hard_delete_many(Path(target_cls, (fk_name,)).in_(parent_ids))
+                else:
+                    await child_repo.delete_many(Path(target_cls, (fk_name,)).in_(parent_ids))
 
     @staticmethod
     def _row_pk_value(row: Any, pk: str) -> Any:
@@ -402,6 +518,69 @@ class RelationshipCoordinator:
 
             elif rel.kind == RelationshipKind.ONE_TO_ONE:
                 await self._load_one_to_one_batch(meta, rel_name, rel, parent_ids, objects, inc)
+
+            elif rel.kind == RelationshipKind.MANY_TO_MANY:
+                await self._load_many_to_many_batch(meta, rel_name, rel, parent_ids, objects, inc)
+
+    async def _load_many_to_many_batch(
+        self,
+        meta: Any,
+        rel_name: str,
+        rel: Any,
+        parent_ids: list[Any],
+        objects: list[Any],
+        inc: Include,
+    ) -> None:
+        """Eagerly load many-to-many targets onto the given objects.
+        """
+        through_table = rel.through
+        if not through_table:
+            return
+
+        target_meta = self._mtm_target_meta(rel)
+        if target_meta is None:
+            return
+        target_cls = target_meta.model
+
+        target_pk = target_meta.primary_key_field
+        local_col, foreign_col = _junction_columns(meta, rel, target_meta)
+        junction_source = _junction_source(through_table)
+
+        from renus.db.query.ast import QueryAST
+        q_ast = QueryAST(
+            source=junction_source,
+            filters=(Path(junction_source, (local_col,)).in_(parent_ids),),
+        )
+        rows = await self.adapter.execute_query(q_ast)
+
+        links: dict[Any, list[Any]] = {pid: [] for pid in parent_ids}
+        for r in rows:
+            row_dict = dict(r)
+            pid = row_dict.get(local_col)
+            fk_val = row_dict.get(foreign_col)
+            if pid in links and fk_val is not None:
+                links[pid].append(fk_val)
+
+        all_target_ids = list({fk for fks in links.values() for fk in fks})
+        target_map: dict[Any, Any] = {}
+        if all_target_ids:
+            target_repo = self.repo.__class__(
+                self.adapter, target_cls, self.repo.connection_name
+            )
+            q = target_repo.query(Path(target_cls, (target_pk,)).in_(all_target_ids))
+            if inc.nested:
+                q = q.include(*inc.nested)
+            targets = await q.all()
+            target_map = {getattr(t, target_pk): t for t in targets}
+
+        for obj in objects:
+            pid = getattr(obj, meta.primary_key_field, None)
+            fks = links.get(pid, [])
+            object.__setattr__(
+                obj,
+                rel_name,
+                [target_map[fk] for fk in fks if fk in target_map],
+            )
 
     async def _load_embedded_one_batch(
         self,

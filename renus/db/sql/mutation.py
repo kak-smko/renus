@@ -96,8 +96,8 @@ class SQLMutationCompiler:
         if where_clauses:
             sql += f" WHERE {' AND '.join(where_clauses)}"
 
-        if isinstance(m, UpdateMany) and m.limit is not None:
-            sql += f" LIMIT {m.limit}"
+        if isinstance(m, Update):
+            sql += " LIMIT 1"
 
         return SQLCompiled(sql, tuple(params))
 
@@ -114,8 +114,8 @@ class SQLMutationCompiler:
         if where_clauses:
             sql += f" WHERE {' AND '.join(where_clauses)}"
 
-        if isinstance(m, DeleteMany) and m.limit is not None:
-            sql += f" LIMIT {m.limit}"
+        if isinstance(m, Delete):
+            sql += " LIMIT 1"
 
         return SQLCompiled(sql, tuple(params))
 

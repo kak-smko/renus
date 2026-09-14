@@ -247,13 +247,22 @@ class Query(Generic[T]):
         """Update the matching rows with the given values and return the rows affected."""
         if self.repository is None:
             raise ConfigurationError("Cannot execute query without a bound repository")
-        return await self.repository.update_many(*self.ast.filters, values=values, limit=self.ast.limit)
+        return await self.repository.update_many(*self.ast.filters, values=values)
 
     async def delete(self) -> int:
         """Delete the matching rows and return the rows affected."""
         if self.repository is None:
             raise ConfigurationError("Cannot execute query without a bound repository")
-        return await self.repository.delete_many(*self.ast.filters, limit=self.ast.limit)
+        return await self.repository.delete_many(*self.ast.filters)
+
+    async def hard_delete(self) -> int:
+        """Physically delete the matching rows, ignoring soft deletes.
+
+        Returns the rows affected.
+        """
+        if self.repository is None:
+            raise ConfigurationError("Cannot execute query without a bound repository")
+        return await self.repository.hard_delete_many(*self.ast.filters)
 
     async def upsert(self, values: dict[Any, Any]) -> int:
         """Insert a row, or update it on conflict with the given values.

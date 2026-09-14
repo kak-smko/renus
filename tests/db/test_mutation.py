@@ -133,16 +133,13 @@ def test_update_many():
         Member,
         values={"is_active": False},
         filters=(cond,),
-        limit=50,
     )
     assert isinstance(ast, UpdateMany)
     assert ast.values == {"is_active": False}
     assert ast.filters == (cond,)
-    assert ast.limit == 50
 
     chained = ast.where(Member.points == 0)
     assert len(chained.filters) == 2
-    assert chained.limit == 50
 
 def test_delete_basic():
     cond = Member.id == 99
@@ -167,10 +164,9 @@ def test_delete_where_chaining():
 
 def test_delete_many():
     cond = Member.is_active == False
-    ast = DeleteMany(Member, filters=(cond,), limit=100)
+    ast = DeleteMany(Member, filters=(cond,))
     assert isinstance(ast, DeleteMany)
     assert ast.filters == (cond,)
-    assert ast.limit == 100
 
     chained = ast.where(Member.points == 0)
     assert len(chained.filters) == 2

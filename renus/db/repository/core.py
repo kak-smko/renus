@@ -198,8 +198,8 @@ class Repository(Generic[T]):
         return result.rows_affected
 
     async def update_many(
-        self,*conditions: Condition,values: dict[Any, Any] | None = None,limit: int | None = None,) -> int:
-        """Bulk-update matching rows (up to a limit) and return rows affected."""
+        self,*conditions: Condition,values: dict[Any, Any] | None = None,) -> int:
+        """Bulk-update matching rows and return rows affected."""
         if values is None:
             if not conditions:
                 raise ValueError("update_many requires filter conditions and values")
@@ -214,7 +214,6 @@ class Repository(Generic[T]):
             source=self.model,
             values=values,
             filters=conditions,
-            limit=limit,
         )
         result = await self._execute_mutation(update_many_ast)
         return result.rows_affected
@@ -262,6 +261,8 @@ class Repository(Generic[T]):
             soft_vals = {"deleted_at": now, "is_deleted": True}
             if meta.timestamps:
                 soft_vals["updated_at"] = now
+
+
             update_ast = Update(source=self.model, values=soft_vals, filters=all_conditions)
             res = await self._execute_mutation(update_ast)
             return res.rows_affected
@@ -270,8 +271,8 @@ class Repository(Generic[T]):
         res = await self._execute_mutation(del_ast)
         return res.rows_affected
 
-    async def delete_many(self,*conditions: Condition,limit: int | None = None,) -> int:
-        """Bulk-delete matching rows (up to a limit) and return rows affected."""
+    async def delete_many(self,*conditions: Condition,) -> int:
+        """Bulk-delete matching rows and return rows affected."""
         meta = getattr(self.model, "__db_metadata__", None)
 
         if meta and meta.soft_delete:
@@ -283,23 +284,62 @@ class Repository(Generic[T]):
                 source=self.model,
                 values=soft_vals,
                 filters=conditions,
-                limit=limit,
             )
             res = await self._execute_mutation(update_many_ast)
             return res.rows_affected
 
         async with self._atomic():
-            await self._rel_coordinator.cascade_delete_many(*conditions, limit=limit)
+            await self._rel_coordinator.cascade_delete_many(*conditions)
 
             del_many_ast = DeleteMany(
                 source=self.model,
                 filters=conditions,
-                limit=limit,
             )
             res = await self._execute_mutation(del_many_ast)
             return res.rows_affected
 
-    async def upsert(self,conflict_target: Iterable[Path | str] | None = None,create_values: dict[Any, Any] | None = None,update_values: dict[Any, Any] | None = None,target: T | None = None,) -> int:
+    async def hard_delete(
+        self,
+        target_or_condition: T | Condition,
+        *conditions: Condition,
+    ) -> int:
+        """Physically delete a single model or matching rows, ignoring soft deletes.
+        """
+        if isinstance(target_or_condition, self.model):
+            obj: Any = target_or_condition
+            async with self._atomic():
+                await self._rel_coordinator.cascade_delete(obj, hard=True)
+                del_ast = Delete.from_model(obj)
+                res = await self._execute_mutation(del_ast)
+                if hasattr(obj, "_mark_deleted"):
+                    obj._mark_deleted()
+                return res.rows_affected
+
+        hard_conditions: tuple[Condition, ...] = (target_or_condition,) + conditions
+        async with self._atomic():
+            await self._rel_coordinator.cascade_delete_many(*hard_conditions, hard=True)
+            del_ast = Delete(source=self.model, filters=hard_conditions)
+            res = await self._execute_mutation(del_ast)
+            return res.rows_affected
+
+    async def hard_delete_many(
+        self,
+        *conditions: Condition,
+    ) -> int:
+        """Physically bulk-delete matching rows, ignoring soft deletes.
+
+        Returns the number of rows physically removed.
+        """
+        async with self._atomic():
+            await self._rel_coordinator.cascade_delete_many(*conditions, hard=True)
+            del_many_ast = DeleteMany(
+                source=self.model,
+                filters=conditions,
+            )
+            res = await self._execute_mutation(del_many_ast)
+            return res.rows_affected
+
+    async def upsert(self, conflict_target: Iterable[Path | str] | None = None, create_values: dict[Any, Any] | None = None, update_values: dict[Any, Any] | None = None, target: T | None = None) -> int:
         """Insert or update a row on conflict for the target and return rows affected."""
         if target is not None:
             upsert_ast = Upsert.from_model(target, conflict_target=conflict_target)

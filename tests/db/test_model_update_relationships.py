@@ -479,7 +479,7 @@ async def test_many_to_many_update_preserves_no_junction(kind):
         await roles.create(MU_MtmRole(id="r1", name="admin"))
         await roles.create(MU_MtmRole(id="r2", name="editor"))
         user = await users.create(MU_MtmUser(id="u1", name="alice"))
-        tables = ["mu_mtmusers", "mu_mtmroles"]
+        tables = ["mu_mtmusers", "mu_mtmroles", "mu_mtm_user_roles"]
         await _assert_tables(kind, db, set(tables), "after seed")
 
         rel = MU_MtmUser.metadata().relationships["roles"]
@@ -498,11 +498,13 @@ async def test_many_to_many_update_preserves_no_junction(kind):
                     {"id": "r1", "name": "admin"},
                     {"id": "r2", "name": "editor"},
                 ],
+                "mu_mtm_user_roles": [],
             },
             "after self update",
         )
 
-        assert "mu_mtm_user_roles" not in set(await db.tables())
+
+        assert await nh.native_all(db, "mu_mtm_user_roles") == []
     finally:
         await nh.cleanup(db)
 

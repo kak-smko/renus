@@ -14,6 +14,21 @@ from renus.db.sql.mutation import SQLMutationCompiler
 
 __all__ = ["SQLAdapter"]
 
+def _singular_table(name: str) -> str:
+    """Derive a singular table name for building relationship column suffixes.
+
+    Used to turn a plural table name (e.g. ``employees``) into the conventional
+    singular form (``employee``) used when naming foreign-key columns such as
+    ``employee_id``.
+    """
+    if name.endswith("ies"):
+        return f"{name[:-3]}y"
+    if name.endswith("ses"):
+        return name[:-2]
+    if name.endswith("s") and not name.endswith("ss") and not name.endswith("is"):
+        return name[:-1]
+    return name
+
 class SQLAdapter(AsyncDatabaseAdapter):
 
     dialect: SQLDialect
@@ -182,6 +197,53 @@ class SQLAdapter(AsyncDatabaseAdapter):
             f"({', '.join(child_cols)}){self._table_options};"
         )
 
+    def _junction_table_sql(self, meta: Any, rel: Any, target_meta: Any | None = None) -> str:
+        """Return DDL for a many-to-many junction (``through``) table."""
+        through_table = rel.through
+        if not through_table:
+            raise ValueError("ManyToMany relationship requires a 'through' table")
+
+        if target_meta is None:
+            target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
+            target_meta = getattr(target_cls, "__db_metadata__", None)
+        if target_meta is None:
+            raise ValueError(
+                f"ManyToMany relationship targets a model without metadata"
+            )
+
+        quoted_table = self.dialect.quote(through_table)
+        parent_table = self.dialect.quote(meta.table)
+        parent_pk = self.dialect.quote(meta.primary_key_field)
+        target_table = self.dialect.quote(target_meta.table)
+        target_pk = self.dialect.quote(target_meta.primary_key_field)
+
+        parent_pk_type = "INTEGER"
+        pk_fmeta = meta.fields.get(meta.primary_key_field)
+        if pk_fmeta is not None:
+            parent_pk_type = self.dialect.type_to_sql(pk_fmeta).split()[0]
+
+        target_pk_type = "INTEGER"
+        tk_fmeta = target_meta.fields.get(target_meta.primary_key_field)
+        if tk_fmeta is not None:
+            target_pk_type = self.dialect.type_to_sql(tk_fmeta).split()[0]
+
+        local_col = self.dialect.quote(rel.local_key or f"{_singular_table(meta.table)}_id")
+        foreign_col = self.dialect.quote(
+            rel.foreign_key or f"{_singular_table(target_meta.table)}_id"
+        )
+
+        cols = [
+            f"{local_col} {parent_pk_type} NOT NULL",
+            f"{foreign_col} {target_pk_type} NOT NULL",
+            f"PRIMARY KEY ({local_col}, {foreign_col})",
+            f"FOREIGN KEY ({local_col}) REFERENCES {parent_table}({parent_pk}) ON DELETE CASCADE",
+            f"FOREIGN KEY ({foreign_col}) REFERENCES {target_table}({target_pk}) ON DELETE CASCADE",
+        ]
+        return (
+            f"CREATE TABLE {self._ddl_if_not_exists} {quoted_table} "
+            f"({', '.join(cols)}){self._table_options};"
+        )
+
     async def create_schema(self, models: Any) -> None:
         """Create tables, indexes, and embedded tables for the given models."""
         await self._open_schema_session()
@@ -216,6 +278,38 @@ class SQLAdapter(AsyncDatabaseAdapter):
                     await self._execute_ddl(
                         self._embedded_table_sql(meta, rel_name, rel)
                     )
+
+            created_tables = {
+                getattr(model, "__db_metadata__", None).table
+                for model in model_list
+                if getattr(model, "__db_metadata__", None) is not None
+            }
+            model_registry: dict[str, Any] = {
+                model.__name__: model
+                for model in model_list
+                if getattr(model, "__db_metadata__", None) is not None
+            }
+
+            for model in model_list:
+                meta = getattr(model, "__db_metadata__", None)
+                if not meta:
+                    continue
+                for rel_name, rel in meta.relationships.items():
+                    if rel.kind.value != "many_to_many" or not rel.through:
+                        continue
+                    if isinstance(rel.target, type):
+                        target_meta = getattr(rel.target, "__db_metadata__", None)
+                    else:
+                        target_cls = model_registry.get(rel.target)
+                        target_meta = (
+                            getattr(target_cls, "__db_metadata__", None)
+                            if target_cls is not None
+                            else None
+                        )
+                    if target_meta is not None and target_meta.table in created_tables:
+                        await self._execute_ddl(
+                            self._junction_table_sql(meta, rel, target_meta)
+                        )
 
             await self._commit_schema()
         finally:

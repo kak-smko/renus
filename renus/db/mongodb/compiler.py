@@ -80,7 +80,12 @@ class MongoCompiler:
         """Compile a query AST into a MongoCompiledQuery."""
         source = ast.source
         meta = getattr(source, "__db_metadata__", None)
-        collection_name = meta.table if meta else source.__name__.lower() + "s"
+        collection_name = (
+            meta.table
+            if meta
+            else getattr(source, "table", None)
+            or source.__name__.lower() + "s"
+        )
 
         filter_parts: list[dict[str, Any]] = []
 
@@ -265,7 +270,12 @@ class MongoCompiler:
         """Compile a mutation AST into a collection, operation, and arguments."""
         source = m.source
         meta = getattr(source, "__db_metadata__", None)
-        collection = meta.table if meta else source.__name__.lower() + "s"
+        collection = (
+            meta.table
+            if meta
+            else getattr(source, "table", None)
+            or source.__name__.lower() + "s"
+        )
 
         if isinstance(m, Insert):
             doc = self._map_doc_for_mongo(m.values, meta)
@@ -294,14 +304,22 @@ class MongoCompiler:
             return collection, "delete_many", filt, None
 
         if isinstance(m, Upsert):
-
             conflict_keys = list(m.conflict_target)
             filt = {k: m.create_values.get(k) for k in conflict_keys}
+            set_values = self._map_doc_for_mongo(m.update_values, meta)
+            create_values = self._map_doc_for_mongo(m.create_values, meta)
             update_doc: dict[str, Any] = {}
-            if m.update_values:
-                update_doc["$set"] = self._map_doc_for_mongo(m.update_values, meta)
-            if m.create_values:
-                update_doc["$setOnInsert"] = self._map_doc_for_mongo(m.create_values, meta)
+            if set_values:
+                update_doc["$set"] = set_values
+            if create_values:
+                # MongoDB forbids a path in both ``$set`` and ``$setOnInsert``
+                # in the same update (error 40). Fields already present in
+                # ``$set`` are insert-time updates, so drop them here.
+                insert_only = {
+                    k: v for k, v in create_values.items() if k not in set_values
+                }
+                if insert_only:
+                    update_doc["$setOnInsert"] = insert_only
             return collection, "upsert", filt, update_doc
 
         raise NotImplementedError(f"Unsupported mutation: {type(m).__name__}")

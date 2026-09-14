@@ -238,14 +238,12 @@ class UpdateMany(FilterableMutation):
     """Mutation AST representing a bulk update."""
 
     values: dict[str, Any] = field(default_factory=dict)
-    limit: int | None = None
 
     def __init__(
         self,
         source: type,
         values: dict[Any, Any],
         filters: tuple[Condition, ...] = (),
-        limit: int | None = None,
     ) -> None:
         """Build a bulk update AST with normalized values.
 
@@ -257,13 +255,10 @@ class UpdateMany(FilterableMutation):
             Field values to set.
         filters:
             Conditions selecting rows to update. Defaults to empty.
-        limit:
-            Optional maximum number of rows to update.
         """
         object.__setattr__(self, "source", source)
         object.__setattr__(self, "values", normalize_values(values))
         object.__setattr__(self, "filters", tuple(filters))
-        object.__setattr__(self, "limit", limit)
 
 @dataclass(frozen=True, slots=True)
 class Delete(FilterableMutation):
@@ -310,13 +305,10 @@ class Delete(FilterableMutation):
 class DeleteMany(FilterableMutation):
     """Mutation AST representing a bulk delete."""
 
-    limit: int | None = None
-
     def __init__(
         self,
         source: type,
         filters: tuple[Condition, ...] = (),
-        limit: int | None = None,
     ) -> None:
         """Build a bulk delete AST.
 
@@ -326,12 +318,9 @@ class DeleteMany(FilterableMutation):
             The model type the delete targets.
         filters:
             Conditions selecting rows to delete. Defaults to empty.
-        limit:
-            Optional maximum number of rows to delete.
         """
         object.__setattr__(self, "source", source)
         object.__setattr__(self, "filters", tuple(filters))
-        object.__setattr__(self, "limit", limit)
 
 @dataclass(frozen=True, slots=True)
 class Upsert(FilterableMutation):

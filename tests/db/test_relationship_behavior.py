@@ -490,7 +490,9 @@ async def test_many_to_many_metadata_and_data(kind):
         await roles.create(MTMRole(id="r1", name="admin"))
         await roles.create(MTMRole(id="r2", name="editor"))
         await users.create(MTMUser(id="u1", name="alice"))
-        await _assert_tables(kind, db, {"mtmusers", "mtmroles"}, "after seed")
+
+        expected = {"mtmusers", "mtmroles", "m2m_user_roles"}
+        await _assert_tables(kind, db, expected, "after seed")
 
         rel = MTMUser.metadata().relationships["roles"]
         assert rel.kind == RelationshipKind.MANY_TO_MANY
@@ -502,6 +504,6 @@ async def test_many_to_many_metadata_and_data(kind):
 
         await users.delete((await users.query().all())[0])
         assert len(await roles.query().all()) == 2
-        await _assert_tables(kind, db, {"mtmusers", "mtmroles"}, "after scenario")
+        await _assert_tables(kind, db, expected, "after scenario")
     finally:
         await nh.cleanup(db)
