@@ -6,16 +6,6 @@ from typing import Any, ClassVar
 
 from renus.db.core.adapter import AsyncDatabaseAdapter
 from renus.db.core.backup import DEFAULT_PAGE_SIZE, BackupFileWriter, load_rows_pages
-from renus.db.migrations.operations import (
-    add_column_sql,
-    create_index_sql,
-    create_table_sql,
-    drop_column_sql,
-    drop_index_sql,
-    drop_table_sql,
-    rename_column_sql,
-    rename_table_sql,
-)
 from renus.db.mutation.ast import MutationAST
 from renus.db.query.ast import QueryAST
 from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
@@ -310,7 +300,7 @@ class SQLAdapter(AsyncDatabaseAdapter):
         if_not_exists: bool = True,
     ) -> None:
         """Create a table from the given name and column definitions."""
-        ddl = create_table_sql(name, columns, self.dialect, if_not_exists=if_not_exists)
+        ddl = self.dialect.create_table_sql(name, columns, if_not_exists=if_not_exists)
         await self.execute_mutation(SQLCompiled(ddl, ()))
 
     async def drop_table(
@@ -319,7 +309,7 @@ class SQLAdapter(AsyncDatabaseAdapter):
         if_exists: bool = True,
     ) -> None:
         """Drop a table by name."""
-        ddl = drop_table_sql(name, self.dialect, if_exists=if_exists)
+        ddl = self.dialect.drop_table_sql(name, if_exists=if_exists)
         await self.execute_mutation(SQLCompiled(ddl, ()))
 
     async def add_column(
@@ -328,7 +318,7 @@ class SQLAdapter(AsyncDatabaseAdapter):
         column: Any,
     ) -> None:
         """Add a column to a table."""
-        ddl = add_column_sql(table, column, self.dialect)
+        ddl = self.dialect.add_column_sql(table, column)
         await self.execute_mutation(SQLCompiled(ddl, ()))
 
     async def drop_column(
@@ -337,7 +327,7 @@ class SQLAdapter(AsyncDatabaseAdapter):
         column_name: str,
     ) -> None:
         """Drop a column from a table."""
-        ddl = drop_column_sql(table, column_name, self.dialect)
+        ddl = self.dialect.drop_column_sql(table, column_name)
         await self.execute_mutation(SQLCompiled(ddl, ()))
 
     async def rename_column(
@@ -347,7 +337,7 @@ class SQLAdapter(AsyncDatabaseAdapter):
         new_name: str,
     ) -> None:
         """Rename a column on a table."""
-        ddl = rename_column_sql(table, old_name, new_name, self.dialect)
+        ddl = self.dialect.rename_column_sql(table, old_name, new_name)
         await self.execute_mutation(SQLCompiled(ddl, ()))
 
     async def rename_table(
@@ -356,7 +346,7 @@ class SQLAdapter(AsyncDatabaseAdapter):
         new_name: str,
     ) -> None:
         """Rename a table."""
-        ddl = rename_table_sql(old_name, new_name, self.dialect)
+        ddl = self.dialect.rename_table_sql(old_name, new_name)
         await self.execute_mutation(SQLCompiled(ddl, ()))
 
     async def create_index(
@@ -368,7 +358,7 @@ class SQLAdapter(AsyncDatabaseAdapter):
     ) -> None:
         """Create an index on the given table and fields."""
         idx_name = name or f"idx_{table}_{'_'.join(fields)}"
-        ddl = create_index_sql(table, idx_name, fields, unique, self.dialect)
+        ddl = self.dialect.create_index_sql(table, idx_name, fields, unique)
         await self.execute_mutation(SQLCompiled(ddl, ()))
 
     async def drop_index(
@@ -377,7 +367,7 @@ class SQLAdapter(AsyncDatabaseAdapter):
         name: str,
     ) -> None:
         """Drop an index by name."""
-        ddl = drop_index_sql(table, name, self.dialect)
+        ddl = self.dialect.drop_index_sql(table, name)
         await self.execute_mutation(SQLCompiled(ddl, ()))
 
     async def tables(self) -> list[str]:

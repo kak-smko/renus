@@ -11,11 +11,9 @@ from renus.db import (
     DatabaseField,
     Field,
     MigrationChecksumError,
-    MigrationContext,
     MigrationManager,
     ReModel,
     SQLiteAdapter,
-    UnsupportedOperationError,
 )
 from renus.db.mongodb.adapter import MongoDBAdapter
 
@@ -40,8 +38,8 @@ def test_migration_manager_create_sequential_files(tmp_path: Path):
     assert p1.name == "0001_create_users.py"
     assert p1.exists()
     content1 = p1.read_text(encoding="utf-8")
-    assert "async def upgrade(ctx: MigrationContext)" in content1
-    assert "async def downgrade(ctx: MigrationContext)" in content1
+    assert "async def upgrade(adapter)" in content1
+    assert "async def downgrade(adapter)" in content1
 
     p2 = mm.create("add email to users")
     assert p2.name == "0002_add_email_to_users.py"
@@ -64,15 +62,15 @@ async def test_migration_upgrade_and_status(tmp_path: Path):
     (mig_dir / "0001_create_accounts.py").write_text(
         """from renus.db.migrations import Column
 
-async def upgrade(ctx):
-    await ctx.create_table("accounts", [
+async def upgrade(adapter):
+    await adapter.create_table("accounts", [
         Column("id", "int", primary_key=True, generated=True),
         Column("name", "str", nullable=False),
         Column("balance", "float", default=0.0),
     ])
 
-async def downgrade(ctx):
-    await ctx.drop_table("accounts")
+async def downgrade(adapter):
+    await adapter.drop_table("accounts")
 """,
         encoding="utf-8",
     )
@@ -80,13 +78,13 @@ async def downgrade(ctx):
     (mig_dir / "0002_add_email.py").write_text(
         """from renus.db.migrations import Column
 
-async def upgrade(ctx):
-    await ctx.add_column("accounts", Column("email", "str", nullable=True))
-    await ctx.create_index("accounts", ["email"], unique=True, name="idx_acc_email")
+async def upgrade(adapter):
+    await adapter.add_column("accounts", Column("email", "str", nullable=True))
+    await adapter.create_index("accounts", ["email"], unique=True, name="idx_acc_email")
 
-async def downgrade(ctx):
-    await ctx.drop_index("accounts", "idx_acc_email")
-    await ctx.drop_column("accounts", "email")
+async def downgrade(adapter):
+    await adapter.drop_index("accounts", "idx_acc_email")
+    await adapter.drop_column("accounts", "email")
 """,
         encoding="utf-8",
     )
@@ -135,11 +133,11 @@ async def test_model_driven_migration(tmp_path: Path):
     (mig_dir / "0001_users_table.py").write_text(
         """from tests.db.test_migrations import MigratedUser
 
-async def upgrade(ctx):
-    await ctx.create_model_table(MigratedUser)
+async def upgrade(adapter):
+    await adapter.create_schema([MigratedUser])
 
-async def downgrade(ctx):
-    await ctx.drop_table("migrated_users")
+async def downgrade(adapter):
+    await adapter.drop_table("migrated_users")
 """,
         encoding="utf-8",
     )
@@ -173,11 +171,11 @@ async def test_migration_downgrades(tmp_path: Path):
         (mig_dir / f"{i:04d}_step_{i}.py").write_text(
             f"""from renus.db.migrations import Column
 
-async def upgrade(ctx):
-    await ctx.create_table("t_{i}", [Column("id", "int", primary_key=True)])
+async def upgrade(adapter):
+    await adapter.create_table("t_{i}", [Column("id", "int", primary_key=True)])
 
-async def downgrade(ctx):
-    await ctx.drop_table("t_{i}")
+async def downgrade(adapter):
+    await adapter.drop_table("t_{i}")
 """,
             encoding="utf-8",
         )
@@ -218,11 +216,11 @@ async def test_migration_checksum_tampering_detection(tmp_path: Path):
     f1.write_text(
         """from renus.db.migrations import Column
 
-async def upgrade(ctx):
-    await ctx.create_table("safe_table", [Column("id", "int", primary_key=True)])
+async def upgrade(adapter):
+    await adapter.create_table("safe_table", [Column("id", "int", primary_key=True)])
 
-async def downgrade(ctx):
-    await ctx.drop_table("safe_table")
+async def downgrade(adapter):
+    await adapter.drop_table("safe_table")
 """,
         encoding="utf-8",
     )
@@ -235,10 +233,10 @@ async def downgrade(ctx):
         """# TAMPERED FILE!
 from renus.db.migrations import Column
 
-async def upgrade(ctx):
+async def upgrade(adapter):
     pass
 
-async def downgrade(ctx):
+async def downgrade(adapter):
     pass
 """,
         encoding="utf-8",
@@ -265,11 +263,11 @@ async def test_migration_transactional_rollback(tmp_path: Path):
     (mig_dir / "0001_good.py").write_text(
         """from renus.db.migrations import Column
 
-async def upgrade(ctx):
-    await ctx.create_table("good_table", [Column("id", "int", primary_key=True)])
+async def upgrade(adapter):
+    await adapter.create_table("good_table", [Column("id", "int", primary_key=True)])
 
-async def downgrade(ctx):
-    await ctx.drop_table("good_table")
+async def downgrade(adapter):
+    await adapter.drop_table("good_table")
 """,
         encoding="utf-8",
     )
@@ -277,12 +275,12 @@ async def downgrade(ctx):
     (mig_dir / "0002_broken.py").write_text(
         """from renus.db.migrations import Column
 
-async def upgrade(ctx):
-    await ctx.create_table("broken_table", [Column("id", "int", primary_key=True)])
+async def upgrade(adapter):
+    await adapter.create_table("broken_table", [Column("id", "int", primary_key=True)])
     raise RuntimeError("Simulated migration failure mid-transaction!")
 
-async def downgrade(ctx):
-    await ctx.drop_table("broken_table")
+async def downgrade(adapter):
+    await adapter.drop_table("broken_table")
 """,
         encoding="utf-8",
     )
@@ -312,15 +310,9 @@ async def test_mongo_migration_capability_limitations():
     mock_db.__getitem__.return_value = mock_coll
     adapter._mongo_db = mock_db
 
-    db = Database(adapter)
-    ctx = MigrationContext(db, adapter=adapter)
-
-    await ctx.add_column("users", Column("age", "int"))
-    await ctx.drop_column("users", "age")
-    await ctx.rename_column("users", "old_age", "new_age")
-
-    with pytest.raises(UnsupportedOperationError, match="is not an SQL adapter"):
-        await ctx.execute_sql("SELECT * FROM users")
+    await adapter.add_column("users", Column("age", "int"))
+    await adapter.drop_column("users", "age")
+    await adapter.rename_column("users", "old_age", "new_age")
 
 @pytest.mark.asyncio
 async def test_mongo_column_migrations():
@@ -331,23 +323,20 @@ async def test_mongo_column_migrations():
     adapter._mongo_db = mock_db
     adapter._mongo_client = MagicMock()
 
-    db = Database(adapter)
-    ctx = MigrationContext(db, adapter=adapter)
-
     mock_coll.update_many = AsyncMock()
-    await ctx.add_column("customers", Column("tier", "str", default="standard"))
+    await adapter.add_column("customers", Column("tier", "str", default="standard"))
     mock_coll.update_many.assert_awaited_once_with({}, {"$set": {"tier": "standard"}})
 
     mock_coll.update_many = AsyncMock()
-    await ctx.add_column("customers", Column("nick", "str"))
+    await adapter.add_column("customers", Column("nick", "str"))
     mock_coll.update_many.assert_not_awaited()
 
     mock_coll.update_many = AsyncMock()
-    await ctx.drop_column("customers", "old_field")
+    await adapter.drop_column("customers", "old_field")
     mock_coll.update_many.assert_awaited_once_with({}, {"$unset": {"old_field": ""}})
 
     mock_coll.update_many = AsyncMock()
-    await ctx.rename_column("customers", "old_name", "new_name")
+    await adapter.rename_column("customers", "old_name", "new_name")
     mock_coll.update_many.assert_awaited_once_with({}, {"$rename": {"old_name": "new_name"}})
 
 @pytest.mark.asyncio
@@ -356,12 +345,12 @@ async def test_mongo_full_migration_lifecycle(tmp_path: Path):
     mig_dir.mkdir()
 
     (mig_dir / "0001_create_customers.py").write_text(
-        """async def upgrade(ctx):
-    await ctx.create_table("customers", [])
-    await ctx.create_index("customers", ["email"], unique=True)
+        """async def upgrade(adapter):
+    await adapter.create_table("customers", [])
+    await adapter.create_index("customers", ["email"], unique=True)
 
-async def downgrade(ctx):
-    await ctx.drop_table("customers")
+async def downgrade(adapter):
+    await adapter.drop_table("customers")
 """,
         encoding="utf-8",
     )
@@ -466,22 +455,22 @@ async def test_migration_cli_lifecycle(tmp_path: Path):
     (mig_dir / "0001_create_items.py").write_text(
         """from renus.db.migrations import Column
 
-async def upgrade(ctx):
-    await ctx.create_table("items", [Column("id", "int", primary_key=True)])
+async def upgrade(adapter):
+    await adapter.create_table("items", [Column("id", "int", primary_key=True)])
 
-async def downgrade(ctx):
-    await ctx.drop_table("items")
+async def downgrade(adapter):
+    await adapter.drop_table("items")
 """,
         encoding="utf-8",
     )
     (mig_dir / "0002_add_item_name.py").write_text(
         """from renus.db.migrations import Column
 
-async def upgrade(ctx):
-    await ctx.add_column("items", Column("name", "str", nullable=True))
+async def upgrade(adapter):
+    await adapter.add_column("items", Column("name", "str", nullable=True))
 
-async def downgrade(ctx):
-    await ctx.drop_column("items", "name")
+async def downgrade(adapter):
+    await adapter.drop_column("items", "name")
 """,
         encoding="utf-8",
     )
@@ -513,11 +502,11 @@ async def downgrade(ctx):
     (mig_dir / "0001_create_items.py").write_text(
         """from renus.db.migrations import Column
 
-async def upgrade(ctx):
-    await ctx.create_table("items", [Column("id", "int", primary_key=True)])
+async def upgrade(adapter):
+    await adapter.create_table("items", [Column("id", "int", primary_key=True)])
 
-async def downgrade(ctx):
-    await ctx.drop_table("items")
+async def downgrade(adapter):
+    await adapter.drop_table("items")
 """,
         encoding="utf-8",
     )
@@ -546,11 +535,11 @@ async def test_native_migration_schema_and_tracking(kind, tmp_path: Path):
         (mig_dir / "0001_users_table.py").write_text(
             """from tests.db.test_migrations import MigratedUser
 
-async def upgrade(ctx):
-    await ctx.create_model_table(MigratedUser)
+async def upgrade(adapter):
+    await adapter.create_schema([MigratedUser])
 
-async def downgrade(ctx):
-    await ctx.drop_table("migrated_users")
+async def downgrade(adapter):
+    await adapter.drop_table("migrated_users")
 """,
             encoding="utf-8",
         )

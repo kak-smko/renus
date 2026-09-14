@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from renus.db.core.adapter import AsyncDatabaseAdapter
 from renus.db.database import Database
-from renus.db.migrations.context import MigrationContext
 from renus.db.migrations.exceptions import (
     MigrationChecksumError,
     MigrationError,
@@ -90,10 +90,10 @@ class MigrationManager:
 
         template = (
             f'"""Migration: {clean_name}"""\n\n'
-            "from renus.db.migrations import Column, MigrationContext\n\n\n"
-            "async def upgrade(ctx: MigrationContext) -> None:\n"
+            "from renus.db.migrations import Column\n\n\n"
+            "async def upgrade(adapter) -> None:\n"
             "    pass\n\n\n"
-            "async def downgrade(ctx: MigrationContext) -> None:\n"
+            "async def downgrade(adapter) -> None:\n"
             "    pass\n"
         )
         file_path.write_text(template, encoding="utf-8")
@@ -103,7 +103,7 @@ class MigrationManager:
         self,
         file_path: Path,
         func_name: str,
-        ctx: MigrationContext,
+        adapter: AsyncDatabaseAdapter,
     ) -> None:
         code = file_path.read_text(encoding="utf-8")
         ns: dict[str, Any] = {}
@@ -119,7 +119,7 @@ class MigrationManager:
 
         sig = inspect.signature(fn)
         if len(sig.parameters) >= 1:
-            res = fn(ctx)
+            res = fn(adapter)
         else:
             res = fn()
 
@@ -149,7 +149,6 @@ class MigrationManager:
                     )
 
         applied_versions: list[str] = []
-        ctx = MigrationContext(self.db, adapter=self.adapter, connection=self.connection)
 
         for version, name, file_path in files:
             if version in applied_map:
@@ -160,7 +159,7 @@ class MigrationManager:
 
             if not fake:
                 async with self.db.transaction(self.connection):
-                    await self._load_and_run(file_path, "upgrade", ctx)
+                    await self._load_and_run(file_path, "upgrade", self.adapter)
                     await self.tracker.record_migration(version, name, checksum)
             else:
                 await self.tracker.record_migration(version, name, checksum)
@@ -205,7 +204,6 @@ class MigrationManager:
                     to_revert.append(r)
 
         reverted_versions: list[str] = []
-        ctx = MigrationContext(self.db, adapter=self.adapter, connection=self.connection)
 
         for rec in to_revert:
             if rec.version not in file_map:
@@ -217,7 +215,7 @@ class MigrationManager:
 
             if not fake:
                 async with self.db.transaction(self.connection):
-                    await self._load_and_run(file_path, "downgrade", ctx)
+                    await self._load_and_run(file_path, "downgrade", self.adapter)
                     await self.tracker.remove_migration(rec.version)
             else:
                 await self.tracker.remove_migration(rec.version)
