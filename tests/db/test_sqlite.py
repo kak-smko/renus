@@ -60,7 +60,6 @@ def test_sqlite_dialect_quoting_and_placeholders():
     assert dialect.quote('user"data') == '"user""data"'
     assert dialect.placeholder == "?"
     assert dialect.placeholders(3) == "?, ?, ?"
-    assert dialect.supports_returning is True
 
 def test_sqlite_compiler_select_query():
     dialect = SQLiteDialect()

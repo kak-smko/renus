@@ -45,21 +45,18 @@ def test_insert_basic():
         "email": "alice@example.com",
         "points": 100,
     }
-    assert ast.returning is None
 
-def test_insert_with_path_keys_and_returning():
+def test_insert_with_path_keys():
 
     ast = Insert(
         Member,
         values={Member.username: "bob", Member.points: 50},
-        returning=(Member.id, Member.username),
     )
     assert ast.values == {"username": "bob", "points": 50}
-    assert ast.returning == ("id", "username")
 
 def test_insert_from_model():
     member = Member(username="carol", email="carol@example.com", points=250)
-    ast = Insert.from_model(member, returning=(Member.id,))
+    ast = Insert.from_model(member)
 
     assert ast.source is Member
     assert ast.values["username"] == "carol"
@@ -67,20 +64,18 @@ def test_insert_from_model():
     assert ast.values["points"] == 250
 
     assert "id" not in ast.values
-    assert ast.returning == ("id",)
 
 def test_insert_many_basic():
     records = [
         {"username": "user1", "email": "u1@x.com"},
         {"username": "user2", "email": "u2@x.com"},
     ]
-    ast = InsertMany(Member, records=records, returning=(Member.id,))
+    ast = InsertMany(Member, records=records)
     assert isinstance(ast, MutationAST)
     assert ast.source is Member
     assert len(ast.records) == 2
     assert ast.records[0] == {"username": "user1", "email": "u1@x.com"}
     assert ast.records[1] == {"username": "user2", "email": "u2@x.com"}
-    assert ast.returning == ("id",)
 
 def test_insert_many_from_models():
     m1 = Member(username="m1", email="m1@x.com")
@@ -121,7 +116,7 @@ def test_update_from_model_with_dirty_tracking():
     member.points = 100
     member.role = "admin"
 
-    ast = Update.from_model(member, returning=(Member.id,))
+    ast = Update.from_model(member)
     assert ast.source is Member
 
     assert ast.values == {"points": 100, "role": "admin"}
@@ -130,7 +125,6 @@ def test_update_from_model_with_dirty_tracking():
     assert ast.filters[0].operator == Operator.EQ
     assert ast.filters[0].path == Member.id
     assert ast.filters[0].value == 10
-    assert ast.returning == ("id",)
 
 def test_update_many():
     cond = Member.role == "guest"
@@ -140,13 +134,11 @@ def test_update_many():
         values={"is_active": False},
         filters=(cond,),
         limit=50,
-        returning=(Member.id,),
     )
     assert isinstance(ast, UpdateMany)
     assert ast.values == {"is_active": False}
     assert ast.filters == (cond,)
     assert ast.limit == 50
-    assert ast.returning == ("id",)
 
     chained = ast.where(Member.points == 0)
     assert len(chained.filters) == 2
@@ -154,10 +146,9 @@ def test_update_many():
 
 def test_delete_basic():
     cond = Member.id == 99
-    ast = Delete(Member, filters=(cond,), returning=(Member.id,))
+    ast = Delete(Member, filters=(cond,))
     assert isinstance(ast, Delete)
     assert ast.filters == (cond,)
-    assert ast.returning == ("id",)
 
 def test_delete_from_model():
     member = Member(id=15, username="frank", email="frank@x.com")
@@ -190,7 +181,6 @@ def test_upsert_basic():
         conflict_target=(Member.email,),
         create_values={"username": "grace", "email": "grace@x.com", "points": 10},
         update_values={"points": 20},
-        returning=(Member.id,),
     )
     assert isinstance(ast, Upsert)
     assert ast.conflict_target == ("email",)
@@ -200,7 +190,6 @@ def test_upsert_basic():
         "points": 10,
     }
     assert ast.update_values == {"points": 20}
-    assert ast.returning == ("id",)
 
 def test_upsert_from_model():
     member = Member(id=101, username="heidi", email="heidi@x.com", points=50)

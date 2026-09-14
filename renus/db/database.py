@@ -39,6 +39,7 @@ class Database:
         self._plugins = PluginManager(self)
 
         if adapter is not None:
+            self._ensure_adapter(adapter, "primary")
             self._adapters["primary"] = adapter
         elif adapters and "primary" in adapters:
             pass
@@ -46,6 +47,8 @@ class Database:
             self._adapters["primary"] = self._resolve_adapter_from_config("primary")
 
         if adapters:
+            for conn, adapt in adapters.items():
+                self._ensure_adapter(adapt, conn)
             self._adapters.update(adapters)
 
     def _resolve_adapter_from_config(
@@ -121,12 +124,21 @@ class Database:
         self._plugins.register(plugin)
         return self
 
+    @staticmethod
+    def _ensure_adapter(adapter: Any, connection: str) -> None:
+        """Raise if ``adapter`` is not an ``AsyncDatabaseAdapter`` instance."""
+        if not isinstance(adapter, AsyncDatabaseAdapter):
+            raise ConfigurationError(
+                f"Adapter for connection '{connection}' is not an AsyncDatabaseAdapter: {type(adapter).__name__}"
+            )
+
     def register_adapter(
         self,
         name: str,
         adapter: AsyncDatabaseAdapter,
     ) -> None:
         """Register or replace an adapter for a named connection."""
+        self._ensure_adapter(adapter, name)
         self._adapters[name] = adapter
 
     def adapter(self, name: str = "primary") -> AsyncDatabaseAdapter:

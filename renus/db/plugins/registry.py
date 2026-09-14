@@ -4,6 +4,7 @@ import importlib
 from importlib.metadata import entry_points
 from typing import Any
 
+from renus.db.core.adapter import AsyncDatabaseAdapter
 from renus.db.core.exceptions import ConfigurationError
 
 __all__ = [
@@ -19,8 +20,23 @@ __all__ = [
 _REGISTRY: dict[str, Any] = {}
 ENTRY_POINT_GROUPS = ("db.adapters", "renus.db.adapters")
 
+def _ensure_adapter_factory(factory: Any, name: str) -> None:
+    """Raise if ``factory`` cannot resolve to an ``AsyncDatabaseAdapter``."""
+    if isinstance(factory, AsyncDatabaseAdapter):
+        return
+    if isinstance(factory, type) and issubclass(factory, AsyncDatabaseAdapter):
+        return
+    raise ConfigurationError(
+        f"Invalid adapter factory for '{name}': {type(factory).__name__}. "
+        "Expected an AsyncDatabaseAdapter instance or a subclass."
+    )
+
 def register_adapter(name: str, factory: Any) -> None:
-    """Register an adapter factory under the given name."""
+    """Register an adapter factory under the given name.
+
+    The factory must be an ``AsyncDatabaseAdapter`` instance or a subclass.
+    """
+    _ensure_adapter_factory(factory, name)
     _REGISTRY[name.lower()] = factory
 
 def unregister_adapter(name: str) -> None:
@@ -49,8 +65,11 @@ def get_adapter(name: str) -> Any:
             for ep in entry_points(group=grp):
                 if ep.name.lower() == key:
                     obj = ep.load()
+                    _ensure_adapter_factory(obj, key)
                     _REGISTRY[key] = obj
                     return obj
+        except ConfigurationError:
+            raise
         except Exception:
             pass
 
@@ -59,6 +78,7 @@ def get_adapter(name: str) -> Any:
         try:
             mod = importlib.import_module(mod_path)
             obj = getattr(mod, class_name)
+            _ensure_adapter_factory(obj, key)
             _REGISTRY[key] = obj
             return obj
         except Exception as exc:

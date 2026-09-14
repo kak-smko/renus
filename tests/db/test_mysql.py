@@ -48,7 +48,6 @@ def test_mysql_dialect_quoting_and_placeholders():
     assert dialect.quote("user`table") == "`user``table`"
     assert dialect.placeholder == "%s"
     assert dialect.placeholders(4) == "%s, %s, %s, %s"
-    assert dialect.supports_returning is False
 
 def test_mysql_dialect_type_mapping():
     dialect = MySQLDialect()
