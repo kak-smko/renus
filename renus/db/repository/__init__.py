@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-from renus.db.repository.core import RawStatement, Repository
+from renus.db.repository.core import Repository
 
-__all__ = ["RawStatement", "Repository"]
+__all__ = ["Repository"]

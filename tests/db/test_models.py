@@ -583,7 +583,8 @@ async def test_native_schema_materialisation_for_declared_model(kind):
         else:
 
             assert "nativecusts_address" in await nh.created_tables(db)
-            cols = await db.adapter("primary").execute_raw('PRAGMA table_info("nativecusts_address");')
+            conn = db.adapter("primary")._sqlite_db
+            cols = conn.execute('PRAGMA table_info("nativecusts_address");').fetchall()
             assert {c["name"] for c in cols} >= {"parent_id", "street", "city"}
             embed = (await nh.native_all(db, "nativecusts_address"))[0]
             assert embed["city"] == "Gotham"

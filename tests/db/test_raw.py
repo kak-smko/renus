@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from renus.db import (
@@ -17,75 +19,27 @@ class Worker(ReModel):
     name: str
     salary: float
 
-@pytest.mark.asyncio
-async def test_repository_portable_raw_api():
-    adapter = SQLiteAdapter({"database": ":memory:"})
-    db = Database(adapter)
-    await db.connect()
-    await db.create_schema([Worker])
-
-    repo = db.repository(Worker)
-    await repo.create(Worker(name="Sam", salary=75000.0))
-
-    assert hasattr(repo, "raw")
-    assert not hasattr(repo, "raw_sql")
-    assert not hasattr(repo, "raw_mongo")
-    assert not hasattr(repo, "execute_raw")
-
-    rows = await repo.raw('SELECT * FROM "workers" WHERE "name" = ?;', ("Sam",))
-    workers = [repo._hydrate(r) for r in rows]
-    assert len(workers) == 1
-    assert isinstance(workers[0], Worker)
-    assert workers[0].name == "Sam"
-    assert workers[0].salary == 75000.0
-    assert workers[0].is_persisted is True
-
-    await db.disconnect()
+def _read(adapter: Any, sql: str, params: tuple[Any, ...] = ()) -> list[dict]:
+    return [dict(r) for r in adapter._sqlite_db.execute(sql, params).fetchall()]
 
 @pytest.mark.asyncio
-async def test_raw_statement_exposes_execute_and_await():
+async def test_sqlite_native_read():
     adapter = SQLiteAdapter({"database": ":memory:"})
     db = Database(adapter)
     await db.connect()
 
-    repo = db.repository(Worker)
-    statement = repo.raw("SELECT 100 AS answer;")
-
-    assert hasattr(statement, "execute")
-    result = await statement.execute()
-    assert result[0]["answer"] == 100
-
-    await db.disconnect()
-
-@pytest.mark.asyncio
-async def test_sqlite_execute_raw_sql_read():
-    adapter = SQLiteAdapter({"database": ":memory:"})
-    await adapter.connect()
-
-    rows = await adapter.execute_raw("SELECT 100 AS number, ? AS word;", ("test",))
+    rows = _read(adapter, "SELECT 100 AS number, ? AS word;", ("test",))
     assert len(rows) == 1
     assert rows[0]["number"] == 100
     assert rows[0]["word"] == "test"
 
-    rows2 = await adapter.execute_raw("SELECT ? + ? AS total;", (10, 20))
+    rows2 = _read(adapter, "SELECT ? + ? AS total;", (10, 20))
     assert rows2[0]["total"] == 30
-
-    await adapter.disconnect()
-
-@pytest.mark.asyncio
-async def test_database_execute_raw_read():
-    adapter = SQLiteAdapter({"database": ":memory:"})
-    db = Database(adapter)
-    await db.connect()
-
-    rows = await db.execute_raw("SELECT 42 AS answer;")
-    assert len(rows) == 1
-    assert rows[0]["answer"] == 42
 
     await db.disconnect()
 
 @pytest.mark.asyncio
-async def test_repository_raw_sql_mutation():
+async def test_native_write_and_read_visible():
     adapter = SQLiteAdapter({"database": ":memory:"})
     db = Database(adapter)
     await db.connect()
@@ -95,49 +49,29 @@ async def test_repository_raw_sql_mutation():
     await repo.create(Worker(name="W1", salary=40000.0))
     await repo.create(Worker(name="W2", salary=80000.0))
 
-    result = await repo.raw(
-        'UPDATE "workers" SET "salary" = "salary" + ? WHERE "salary" > ?;',
-        1,
-        50000,
-    )
-    assert result.rows_affected == 1
+    conn = adapter._sqlite_db
+    conn.execute('UPDATE "workers" SET "salary" = "salary" + ? WHERE "salary" > ?;', (1, 50000))
+    conn.commit()
 
-    rows = await repo.raw('SELECT "salary" FROM "workers" WHERE "name" = ?;', "W2")
+    rows = _read(adapter, 'SELECT "salary" FROM "workers" WHERE "name" = ?;', ("W2",))
     assert len(rows) == 1
     assert rows[0]["salary"] == 80001.0
 
     await db.disconnect()
 
 @pytest.mark.asyncio
-async def test_database_execute_raw_write():
+async def test_native_ddl():
     adapter = SQLiteAdapter({"database": ":memory:"})
     db = Database(adapter)
     await db.connect()
     await db.create_schema([Worker])
 
-    repo = db.repository(Worker)
-    await repo.create(Worker(name="A", salary=5.0))
-    await repo.create(Worker(name="B", salary=50.0))
+    reader = _read(adapter, 'SELECT "salary" FROM "workers" ORDER BY 1;')
+    assert reader == []
 
-    result = await db.execute_raw(
-        'UPDATE "workers" SET "salary" = "salary" + ? WHERE "salary" > ?;',
-        (1, 10),
-        connection="primary",
-    )
-    assert result.rows_affected == 1
-
-    await db.disconnect()
-
-@pytest.mark.asyncio
-async def test_repository_raw_ddl():
-    adapter = SQLiteAdapter({"database": ":memory:"})
-    db = Database(adapter)
-    await db.connect()
-    await db.create_schema([Worker])
-
-    repo = db.repository(Worker)
-    result = await repo.raw('CREATE INDEX "idx_worker_salary" ON "workers" ("salary");')
-    assert result.rows_affected >= 0
+    conn = adapter._sqlite_db
+    conn.execute('CREATE INDEX "idx_worker_salary" ON "workers" ("salary");')
+    conn.commit()
 
     await db.disconnect()
 

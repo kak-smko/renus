@@ -35,12 +35,12 @@ class Item(ReModel):
 @pytest.mark.asyncio
 async def test_database_context_manager_sqlite_closes_on_exit():
     db = Database(SQLiteAdapter({"database": ":memory:"}))
-    assert db.adapter("primary")._conn is None
+    assert db.adapter("primary")._sqlite_db is None
     async with Database(SQLiteAdapter({"database": ":memory:"})) as db:
         await db.create_schema([Item])
         await db.repository(Item).create(Item(code="c1"))
-        assert db.adapter("primary")._conn is not None
-    assert db.adapter("primary")._conn is None
+        assert db.adapter("primary")._sqlite_db is not None
+    assert db.adapter("primary")._sqlite_db is None
 
 @pytest.mark.asyncio
 async def test_database_context_manager_mysql_connects_and_closes():
@@ -65,7 +65,7 @@ async def test_database_context_manager_mongodb_connects_and_closes(kind):
         async with db:
             assert await db.health_check() is True
 
-        assert db.adapter("primary")._client is None
+        assert db.adapter("primary")._mongo_client is None
     finally:
         await db.disconnect()
 
@@ -105,12 +105,12 @@ async def test_mysql_reconnect_after_connection_drop():
         ))
         return conn
 
-    adapter._pool = MagicMock()
-    adapter._pool.acquire = flaky_acquire
-    adapter._pool.release = MagicMock()
+    adapter._mysql_db = MagicMock()
+    adapter._mysql_db.acquire = flaky_acquire
+    adapter._mysql_db.release = MagicMock()
 
     adapter.connect = AsyncMock(side_effect=lambda: setattr(
-        adapter, "_pool", MagicMock(acquire=flaky_acquire, release=MagicMock())
+        adapter, "_mysql_db", MagicMock(acquire=flaky_acquire, release=MagicMock())
     ))
     adapter.disconnect = AsyncMock()
 

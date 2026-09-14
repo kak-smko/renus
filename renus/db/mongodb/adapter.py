@@ -4,7 +4,7 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Iterable
 from types import TracebackType
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Self
 
 from renus.db.core.adapter import (
     AsyncDatabaseAdapter,
@@ -22,13 +22,11 @@ from renus.db.core.backup import (
 from renus.db.core.exceptions import (
     ConfigurationError,
     ConnectionError,
-    UnsupportedOperationError,
 )
 from renus.db import errors
 from renus.db.mongodb.compiler import MongoCompiledQuery, MongoCompiler
 from renus.db.mutation.ast import MutationAST
 from renus.db.query.ast import QueryAST
-from renus.db.repository.core import RawStatement
 
 __all__ = ["MongoDBAdapter", "MongoTransactionContext"]
 
@@ -38,7 +36,7 @@ DEFAULT_SERVER_SELECTION_TIMEOUT_MS = 30_000
 DEFAULT_CONNECT_TIMEOUT_MS = 2_000
 CONNECT_RETRIES = 3
 CONNECT_RETRY_DELAY = 0.5
-class MongoTransactionContext:
+class MongoTransactionContext(TransactionContext):
     """Async context manager wrapping a MongoDB session transaction."""
 
     def __init__(self, session: Any) -> None:
@@ -52,7 +50,7 @@ class MongoTransactionContext:
         self._session = session
         self._active = False
 
-    async def __aenter__(self) -> MongoTransactionContext:
+    async def __aenter__(self) -> Self:
 
         await self._session.start_transaction()
         self._active = True
@@ -102,13 +100,13 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         """
         self.config = config if config else {}
         self.compiler = MongoCompiler()
-        self._client: Any = None
-        self._db: Any = None
+        self._mongo_client: Any = None
+        self._mongo_db: Any = None
         self._tx_session: Any = None
 
     async def connect(self) -> None:
         """Establish a connection to the database."""
-        if self._client is not None:
+        if self._mongo_client is not None:
             return
 
         cfg = self.config
@@ -147,20 +145,20 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         last_err: Exception | None = None
         for attempt in range(1, retries + 1):
             try:
-                self._client = AsyncMongoClient(uri, **client_kwargs)
-                self._db = self._client[db_name]
-                await self._db.command("ping")
+                self._mongo_client = AsyncMongoClient(uri, **client_kwargs)
+                self._mongo_db = self._mongo_client[db_name]
+                await self._mongo_db.command("ping")
                 return
             except Exception as e:
                 last_err = e
-                if self._client is not None:
-                    close = getattr(self._client, "close", None)
+                if self._mongo_client is not None:
+                    close = getattr(self._mongo_client, "close", None)
                     if close is not None:
                         result = close()
                         if hasattr(result, "__await__"):
                             await result
-                    self._client = None
-                self._db = None
+                    self._mongo_client = None
+                self._mongo_db = None
                 if attempt < retries:
                     await asyncio.sleep(delay * (2 ** (attempt - 1)))
 
@@ -168,10 +166,10 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
 
     async def disconnect(self) -> None:
         """Close the active database connection."""
-        if self._client is not None:
-            client = self._client
-            self._client = None
-            self._db = None
+        if self._mongo_client is not None:
+            client = self._mongo_client
+            self._mongo_client = None
+            self._mongo_db = None
             close = getattr(client, "close", None)
             if close is not None:
                 result = close()
@@ -180,20 +178,20 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
 
     async def health_check(self) -> bool:
         """Return whether the database is reachable."""
-        if self._db is None:
+        if self._mongo_db is None:
             return False
         try:
-            await self._db.command("ping")
+            await self._mongo_db.command("ping")
             return True
         except Exception:
             return False
 
     def transaction_factory(self) -> AsyncIterator[TransactionContext]:
         """Yield a MongoDB transaction context for the caller."""
-        if self._client is None:
+        if self._mongo_client is None:
             raise ConfigurationError("Cannot create transaction context: MongoDB is not connected")
 
-        client = self._client
+        client = self._mongo_client
         adapter_self = self
 
         async def _tx_generator() -> AsyncIterator[TransactionContext]:
@@ -221,8 +219,8 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         await self.connect()
 
     async def _run_query(self, mongo_query: MongoCompiledQuery) -> QueryResult[Any]:
-        assert self._db is not None
-        coll = self._db[mongo_query.collection]
+        assert self._mongo_db is not None
+        coll = self._mongo_db[mongo_query.collection]
         session = self._tx_session
         try:
             if mongo_query.pipeline is not None:
@@ -257,9 +255,9 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
 
     async def execute_query(self, compiled: CompiledQuery[Any]) -> QueryResult[Any]:
         """Execute a compiled query and return the results."""
-        if self._db is None:
+        if self._mongo_db is None:
             await self.connect()
-        assert self._db is not None
+        assert self._mongo_db is not None
 
         if isinstance(compiled, QueryAST):
             mongo_query = self.compile_query(compiled)
@@ -283,8 +281,8 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         filt_or_doc: Any,
         extra: Any,
     ) -> MutationResult:
-        assert self._db is not None
-        coll = self._db[coll_name]
+        assert self._mongo_db is not None
+        coll = self._mongo_db[coll_name]
         session = self._tx_session
         try:
             if op == "insert_one":
@@ -327,9 +325,9 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
 
     async def execute_mutation(self, compiled: CompiledMutation) -> MutationResult:
         """Execute a compiled mutation and return the result."""
-        if self._db is None:
+        if self._mongo_db is None:
             await self.connect()
-        assert self._db is not None
+        assert self._mongo_db is not None
 
         if isinstance(compiled, MutationAST):
             coll_name, op, filt_or_doc, extra = self.compile_mutation(compiled)
@@ -346,99 +344,18 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
             await self._reconnect_if_dropped()
             return await self._run_mutation(coll_name, op, filt_or_doc, extra)
 
-    @staticmethod
-    def _normalize_doc(doc: dict[str, Any]) -> dict[str, Any]:
-        out = dict(doc)
-        if "_id" in out and "id" not in out:
-            out["id"] = out["_id"]
-        return out
-
-    async def _execute_raw_statement(self, raw: RawStatement) -> Any:
-        assert self._db is not None
-        meta = getattr(raw.model, "__db_metadata__", None)
-        if meta is None:
-            raise UnsupportedOperationError(
-                "Raw MongoDB collection statements require a model with metadata to resolve the collection"
-            )
-
-        op = raw.statement
-        coll = self._db[meta.table]
-        method = getattr(coll, op, None)
-        if method is None:
-            raise UnsupportedOperationError(
-                f"Unsupported MongoDB raw collection operation '{op}'"
-            )
-
-        session = self._tx_session
-        try:
-            if op in ("find", "aggregate"):
-                cursor = method(*raw.args, session=session)
-                docs = await cursor.to_list(length=5000)
-                return [self._normalize_doc(d) for d in docs]
-            if op == "find_one":
-                doc = await method(*raw.args, session=session)
-                return self._normalize_doc(doc) if doc is not None else None
-            if op in (
-                "update_one",
-                "update_many",
-                "replace_one",
-                "delete_one",
-                "delete_many",
-                "insert_one",
-                "insert_many",
-                "count_documents",
-                "estimated_document_count",
-                "distinct",
-                "drop",
-                "create_index",
-                "drop_index",
-            ):
-                return await method(*raw.args, session=session)
-
-            result = method(*raw.args, session=session)
-            if asyncio.iscoroutine(result):
-                return await result
-            return result
-        except Exception as e:
-            raise DatabaseError(f"MongoDB raw '{op}' execution error: {e}") from e
-
-    async def execute_raw(
-        self,
-        raw: Any,
-        params: tuple[Any, ...] | list[Any] | None = None,
-    ) -> Any:
-        """Execute a raw MongoDB statement, command, or pipeline."""
-        if isinstance(raw, RawStatement):
-            return await self._execute_raw_statement(raw)
-
-        if self._db is None:
-            await self.connect()
-        assert self._db is not None
-
-        try:
-            if isinstance(raw, dict):
-                return await self._db.command(raw)
-            if isinstance(raw, list):
-
-                coll_name = params[0] if params else "default"
-                cur = self._db[coll_name].aggregate(raw)
-                return await cur.to_list(length=5000)
-            return await self._db.command(raw)
-        except Exception as e:
-            raise DatabaseError(f"MongoDB raw execution error: {e}") from e
-
     async def create_schema(self, models: Iterable[Any]) -> None:
         """Create collections and indexes for the given models."""
-        if self._db is None:
+        if self._mongo_db is None:
             await self.connect()
-        assert self._db is not None
+        assert self._mongo_db is not None
 
         for model in models:
             meta = getattr(model, "__db_metadata__", None)
             if not meta:
                 continue
 
-            coll = self._db[meta.table]
+            coll = self._mongo_db[meta.table]
 
             for idx in meta.indexes:
                 keys = [(f, 1) for f in idx.fields]
@@ -452,10 +369,10 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         table_name: str = "_db_migrations",
     ) -> None:
         """Ensure the migrations collection and unique version index exist."""
-        if self._db is None:
+        if self._mongo_db is None:
             await self.connect()
-        assert self._db is not None
-        coll = self._db[table_name]
+        assert self._mongo_db is not None
+        coll = self._mongo_db[table_name]
         try:
             await coll.create_index([("version", 1)], unique=True)
         except Exception:
@@ -467,8 +384,8 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
     ) -> list[dict[str, Any]]:
         """Return all applied migrations sorted by version."""
         await self.ensure_migration_schema(table_name)
-        assert self._db is not None
-        coll = self._db[table_name]
+        assert self._mongo_db is not None
+        coll = self._mongo_db[table_name]
         cursor = coll.find({}).sort("version", 1)
         docs = await cursor.to_list(length=5000)
         return [dict(d) for d in docs]
@@ -483,8 +400,8 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
     ) -> None:
         """Record an applied migration in the migrations collection."""
         await self.ensure_migration_schema(table_name)
-        assert self._db is not None
-        coll = self._db[table_name]
+        assert self._mongo_db is not None
+        coll = self._mongo_db[table_name]
         await coll.insert_one({
             "version": version,
             "name": name,
@@ -499,8 +416,8 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
     ) -> None:
         """Remove a migration record by version."""
         await self.ensure_migration_schema(table_name)
-        assert self._db is not None
-        coll = self._db[table_name]
+        assert self._mongo_db is not None
+        coll = self._mongo_db[table_name]
         await coll.delete_one({"version": version})
 
     async def create_table(
@@ -510,11 +427,11 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         if_not_exists: bool = True,
     ) -> None:
         """Create a new collection in the database."""
-        if self._db is None:
+        if self._mongo_db is None:
             await self.connect()
-        assert self._db is not None
+        assert self._mongo_db is not None
         try:
-            await self._db.create_collection(name)
+            await self._mongo_db.create_collection(name)
         except Exception:
             pass
 
@@ -524,11 +441,11 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         if_exists: bool = True,
     ) -> None:
         """Drop a collection from the database."""
-        if self._db is None:
+        if self._mongo_db is None:
             await self.connect()
-        assert self._db is not None
+        assert self._mongo_db is not None
         try:
-            await self._db.drop_collection(name)
+            await self._mongo_db.drop_collection(name)
         except Exception:
             pass
 
@@ -538,14 +455,14 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         column: Any,
     ) -> None:
         """Add a column by setting its default on existing documents."""
-        if self._db is None:
+        if self._mongo_db is None:
             await self.connect()
-        assert self._db is not None
+        assert self._mongo_db is not None
         name = getattr(column, "name", None)
         default = getattr(column, "default", None)
         if not name or default is None:
             return
-        await self._db[table].update_many({}, {"$set": {name: default}})
+        await self._mongo_db[table].update_many({}, {"$set": {name: default}})
 
     async def drop_column(
         self,
@@ -553,10 +470,10 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         column_name: str,
     ) -> None:
         """Remove a column from all documents in a collection."""
-        if self._db is None:
+        if self._mongo_db is None:
             await self.connect()
-        assert self._db is not None
-        await self._db[table].update_many({}, {"$unset": {column_name: ""}})
+        assert self._mongo_db is not None
+        await self._mongo_db[table].update_many({}, {"$unset": {column_name: ""}})
 
     async def rename_column(
         self,
@@ -565,10 +482,10 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         new_name: str,
     ) -> None:
         """Rename a column across all documents in a collection."""
-        if self._db is None:
+        if self._mongo_db is None:
             await self.connect()
-        assert self._db is not None
-        await self._db[table].update_many({}, {"$rename": {old_name: new_name}})
+        assert self._mongo_db is not None
+        await self._mongo_db[table].update_many({}, {"$rename": {old_name: new_name}})
 
     async def rename_table(
         self,
@@ -576,10 +493,10 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         new_name: str,
     ) -> None:
         """Rename a collection in the database."""
-        if self._db is None:
+        if self._mongo_db is None:
             await self.connect()
-        assert self._db is not None
-        await self._db[old_name].rename(new_name)
+        assert self._mongo_db is not None
+        await self._mongo_db[old_name].rename(new_name)
 
     async def create_index(
         self,
@@ -589,12 +506,12 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         name: str | None = None,
     ) -> None:
         """Create an index on the given fields of a collection."""
-        if self._db is None:
+        if self._mongo_db is None:
             await self.connect()
-        assert self._db is not None
+        assert self._mongo_db is not None
         keys = [(f, 1) for f in fields]
         idx_name = name or f"idx_{table}_{'_'.join(fields)}"
-        await self._db[table].create_index(keys, unique=unique, name=idx_name)
+        await self._mongo_db[table].create_index(keys, unique=unique, name=idx_name)
 
     async def drop_index(
         self,
@@ -602,17 +519,17 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         name: str,
     ) -> None:
         """Drop an index from a collection by name."""
-        if self._db is None:
+        if self._mongo_db is None:
             await self.connect()
-        assert self._db is not None
-        await self._db[table].drop_index(name)
+        assert self._mongo_db is not None
+        await self._mongo_db[table].drop_index(name)
 
     async def tables(self) -> list[str]:
         """Return the names of user collections."""
-        if self._db is None:
+        if self._mongo_db is None:
             await self.connect()
-        assert self._db is not None
-        names = await self._db.list_collection_names()
+        assert self._mongo_db is not None
+        names = await self._mongo_db.list_collection_names()
         excluded = {"_db_migrations", "system.views"}
         return [name for name in names if name not in excluded]
 
@@ -628,7 +545,7 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         os.makedirs(path, exist_ok=True)
         counts: dict[str, int] = {}
 
-        assert self._db is not None
+        assert self._mongo_db is not None
         for table in target_tables:
             file_path = os.path.join(path, f"{table}.json")
             total = 0
@@ -640,7 +557,7 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
             with await asyncio.to_thread(_open_writer) as raw:
                 writer = BackupFileWriter(raw)
                 while True:
-                    cursor = self._db[table].find({}).skip(offset).limit(page_size)
+                    cursor = self._mongo_db[table].find({}).skip(offset).limit(page_size)
                     docs = await cursor.to_list(length=page_size)
                     if not docs:
                         break
@@ -674,14 +591,14 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
             ]
 
         counts: dict[str, int] = {}
-        assert self._db is not None
+        assert self._mongo_db is not None
         for table in tables:
             file_path = os.path.join(path, f"{table}.json")
             if not os.path.exists(file_path):
                 continue
 
             if drop_existing:
-                await self._db[table].delete_many({})
+                await self._mongo_db[table].delete_many({})
 
             restored = 0
 
@@ -693,7 +610,7 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
                     docs = [r for r in page if r]
                     if not docs:
                         continue
-                    await self._db[table].insert_many(docs)
+                    await self._mongo_db[table].insert_many(docs)
                     restored += len(docs)
             counts[table] = restored
 

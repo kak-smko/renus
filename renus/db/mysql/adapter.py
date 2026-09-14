@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from types import TracebackType
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Self
 
 from renus.db.core.adapter import (
     AsyncDatabaseAdapter,
@@ -30,7 +30,7 @@ DEFAULT_MYSQL_CONNECT_TIMEOUT = 5
 CONNECT_RETRIES = 3
 CONNECT_RETRY_DELAY = 0.5
 
-class MySQLTransactionContext:
+class MySQLTransactionContext(TransactionContext):
     """Async context manager wrapping a MySQL connection transaction."""
 
     def __init__(self, conn: Any, pool: Any) -> None:
@@ -47,7 +47,7 @@ class MySQLTransactionContext:
         self._pool = pool
         self._active = False
 
-    async def __aenter__(self) -> MySQLTransactionContext:
+    async def __aenter__(self) -> Self:
         await self._conn.begin()
         self._active = True
         return self
@@ -108,7 +108,7 @@ class MySQLAdapter(SQLAdapter):
         self.dialect = MySQLDialect()
         self.compiler = SQLCompiler(self.dialect)
         self.mutation_compiler = SQLMutationCompiler(self.dialect)
-        self._pool: Any = None
+        self._mysql_db: Any = None
         self._tx_session: Any = None
         self._schema_conn: Any = None
         self._lock = asyncio.Lock()
@@ -137,18 +137,18 @@ class MySQLAdapter(SQLAdapter):
         )
 
     async def _verify_connection(self) -> bool:
-        conn = await self._pool.acquire()
+        conn = await self._mysql_db.acquire()
         try:
             async with conn.cursor() as cur:
                 await cur.execute("SELECT 1;")
                 await cur.fetchone()
             return True
         finally:
-            self._pool.release(conn)
+            self._mysql_db.release(conn)
 
     async def connect(self,) -> None:
         """Establish a connection pool to the database."""
-        if self._pool is not None:
+        if self._mysql_db is not None:
             return
 
         cfg =  self.config
@@ -181,19 +181,19 @@ class MySQLAdapter(SQLAdapter):
         for attempt in range(1, retries + 1):
             try:
                 pool = await self._create_pool(params)
-                self._pool = pool
+                self._mysql_db = pool
                 if await self._verify_connection():
                     return
                 raise ConnectionError("MySQL connection verification failed")
             except Exception as e:
                 last_err = e
-                if self._pool is not None:
+                if self._mysql_db is not None:
                     try:
-                        self._pool.close()
-                        await self._pool.wait_closed()
+                        self._mysql_db.close()
+                        await self._mysql_db.wait_closed()
                     except Exception:
                         pass
-                    self._pool = None
+                    self._mysql_db = None
                 if attempt < retries:
                     await asyncio.sleep(retry_delay * (2 ** (attempt - 1)))
 
@@ -201,9 +201,9 @@ class MySQLAdapter(SQLAdapter):
 
     async def disconnect(self) -> None:
         """Close the active connection pool."""
-        if self._pool is not None:
-            pool = self._pool
-            self._pool = None
+        if self._mysql_db is not None:
+            pool = self._mysql_db
+            self._mysql_db = None
             if hasattr(pool, "close"):
                 pool.close()
             if hasattr(pool, "wait_closed"):
@@ -211,11 +211,11 @@ class MySQLAdapter(SQLAdapter):
 
     async def health_check(self) -> bool:
         """Return whether the database is reachable."""
-        if self._pool is None:
+        if self._mysql_db is None:
             return False
         conn = None
         try:
-            conn = await self._pool.acquire()
+            conn = await self._mysql_db.acquire()
             async with conn.cursor() as cur:
                 await cur.execute("SELECT 1;")
                 await cur.fetchone()
@@ -223,15 +223,15 @@ class MySQLAdapter(SQLAdapter):
         except Exception:
             return False
         finally:
-            if conn is not None and self._pool is not None:
-                self._pool.release(conn)
+            if conn is not None and self._mysql_db is not None:
+                self._mysql_db.release(conn)
 
     def transaction_factory(self) -> AsyncIterator[TransactionContext]:
         """Yield a MySQL transaction context for the caller."""
-        if self._pool is None:
+        if self._mysql_db is None:
             raise ConfigurationError("Cannot create transaction context: MySQL is not connected")
 
-        pool = self._pool
+        pool = self._mysql_db
         adapter_self = self
 
         async def _tx_generator() -> AsyncIterator[TransactionContext]:
@@ -256,7 +256,7 @@ class MySQLAdapter(SQLAdapter):
     ) -> QueryResult[Any]:
         conn: Any = None
         try:
-            conn = self._tx_session or await self._pool.acquire()
+            conn = self._tx_session or await self._mysql_db.acquire()
             cursor_kwargs = {"cursor": cursor_cls} if cursor_cls else {}
             async with conn.cursor(**cursor_kwargs) as cur:
                 await cur.execute(sql_compiled.sql, sql_compiled.params)
@@ -265,14 +265,14 @@ class MySQLAdapter(SQLAdapter):
         except Exception as e:
             raise errors.translate_driver_error("MySQL", "mysql", e, "query") from e
         finally:
-            if conn is not None and self._tx_session is None and self._pool is not None:
-                self._pool.release(conn)
+            if conn is not None and self._tx_session is None and self._mysql_db is not None:
+                self._mysql_db.release(conn)
 
     async def execute_query(self, compiled: CompiledQuery[Any]) -> QueryResult[Any]:
         """Execute a compiled query and return the results."""
-        if self._pool is None:
+        if self._mysql_db is None:
             await self.connect()
-        assert self._pool is not None
+        assert self._mysql_db is not None
 
         if isinstance(compiled, QueryAST):
             sql_compiled: SQLCompiled = self.compile_query(compiled)
@@ -296,7 +296,7 @@ class MySQLAdapter(SQLAdapter):
     async def _mutation_pool(self, sql_compiled: SQLCompiled) -> MutationResult:
         conn: Any = None
         try:
-            conn = self._tx_session or await self._pool.acquire()
+            conn = self._tx_session or await self._mysql_db.acquire()
             async with conn.cursor() as cur:
                 await cur.execute(sql_compiled.sql, sql_compiled.params)
                 if self._tx_session is None:
@@ -307,14 +307,14 @@ class MySQLAdapter(SQLAdapter):
         except Exception as e:
             raise errors.translate_driver_error("MySQL", "mysql", e, "mutation") from e
         finally:
-            if conn is not None and self._tx_session is None and self._pool is not None:
-                self._pool.release(conn)
+            if conn is not None and self._tx_session is None and self._mysql_db is not None:
+                self._mysql_db.release(conn)
 
     async def execute_mutation(self, compiled: CompiledMutation) -> MutationResult:
         """Execute a compiled mutation and return the result."""
-        if self._pool is None:
+        if self._mysql_db is None:
             await self.connect()
-        assert self._pool is not None
+        assert self._mysql_db is not None
 
         if isinstance(compiled, MutationAST):
             sql_compiled: SQLCompiled = self.compile_mutation(compiled)
@@ -330,10 +330,10 @@ class MySQLAdapter(SQLAdapter):
             return await self._mutation_pool(sql_compiled)
 
     async def _open_schema_session(self) -> Any:
-        if self._pool is None:
+        if self._mysql_db is None:
             await self.connect()
-        assert self._pool is not None
-        self._schema_conn = await self._pool.acquire()
+        assert self._mysql_db is not None
+        self._schema_conn = await self._mysql_db.acquire()
         return self._schema_conn
 
     async def _execute_ddl(self, sql: str) -> None:
@@ -354,8 +354,8 @@ class MySQLAdapter(SQLAdapter):
     async def _close_schema_session(self) -> None:
         conn = self._schema_conn
         self._schema_conn = None
-        if conn is not None and self._pool is not None:
-            self._pool.release(conn)
+        if conn is not None and self._mysql_db is not None:
+            self._mysql_db.release(conn)
 
     async def tables(self) -> list[str]:
         """Return the names of user tables."""

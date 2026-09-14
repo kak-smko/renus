@@ -48,20 +48,18 @@ async def connect_schema(kind: str, models: list[type]) -> Database:
 
 async def native_all(db: Database, table: str) -> list[dict]:
     if db.adapter("primary").name == "mongodb":
-        coll = db.adapter("primary")._db[table]
+        coll = db.adapter("primary")._mongo_db[table]
         return [dict(d) for d in await coll.find({}).to_list(length=None)]
-    return await db.adapter("primary").execute_raw(
-        f'SELECT * FROM "{table}" ORDER BY 1;'
-    )
+    conn = db.adapter("primary")._sqlite_db
+    return [dict(r) for r in conn.execute(f'SELECT * FROM "{table}" ORDER BY 1;').fetchall()]
 
 async def table_count(db: Database, table: str) -> int:
     if db.adapter("primary").name == "mongodb":
-        coll = db.adapter("primary")._db[table]
+        coll = db.adapter("primary")._mongo_db[table]
         return await coll.count_documents({})
-    rows = await db.adapter("primary").execute_raw(
-        f'SELECT COUNT(*) AS c FROM "{table}";'
-    )
-    return int(rows[0]["c"])
+    conn = db.adapter("primary")._sqlite_db
+    row = conn.execute(f'SELECT COUNT(*) AS c FROM "{table}";').fetchone()
+    return int(row[0])
 
 async def created_tables(db: Database) -> set[str]:
     return set(await db.tables())
@@ -70,7 +68,7 @@ async def cleanup(db: Database) -> None:
     try:
         if db.adapter("primary").name == "mongodb":
             adapter = db.adapter("primary")
-            drop = adapter._client.drop_database(adapter._db.name)
+            drop = adapter._mongo_client.drop_database(adapter._mongo_db.name)
             if inspect.isawaitable(drop):
                 await drop
         await db.disconnect()

@@ -4,7 +4,7 @@ from typing import Any, Self, TypeVar
 
 from renus.config import Config
 from renus.db.core.adapter import AsyncDatabaseAdapter
-from renus.db.core.exceptions import ConfigurationError, UnsupportedOperationError
+from renus.db.core.exceptions import ConfigurationError
 from renus.db.plugins.core import Plugin, PluginManager
 from renus.db.repository.core import Repository
 from renus.db.transaction.core import Transaction
@@ -152,21 +152,6 @@ class Database:
     def transaction(self, connection: str = "primary") -> Transaction:
         """Create a transaction context for a connection."""
         return Transaction(self.adapter(connection))
-
-    async def execute_raw(
-        self,
-        raw: Any,
-        params: tuple[Any, ...] | list[Any] | None = None,
-        connection: str = "primary",
-    ) -> list[dict[str, Any]]:
-        """Execute a raw query on a connection and return result rows."""
-        adapter = self.adapter(connection)
-        if hasattr(adapter, "execute_raw"):
-            exec_fn = getattr(adapter, "execute_raw")
-            return await exec_fn(raw, params)
-        raise UnsupportedOperationError(
-            f"Adapter '{type(adapter).__name__}' does not support execute_raw"
-        )
 
     async def connect(self, connection: str | None = None) -> None:
         """Open one named connection, or all connections when none is given."""

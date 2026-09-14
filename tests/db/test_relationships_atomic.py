@@ -32,12 +32,15 @@ async def _make_item_adapter() -> tuple[Database, object, object]:
     repo = db.repository(Item)
     return db, db.adapter("primary"), repo
 
+def _sql_rows(adapter, sql: str) -> list[dict]:
+    return [dict(r) for r in adapter._sqlite_db.execute(sql).fetchall()]
+
 async def _seed_item(repo, adapter) -> None:
     await repo.create(
         Item(id="1", name="w", address=Addr(city="old"), tags=[Tag(label="a")])
     )
-    assert await adapter.execute_raw("SELECT city FROM items_address") == [{"city": "old"}]
-    assert [r["label"] for r in await adapter.execute_raw("SELECT label FROM items_tags")] == [
+    assert _sql_rows(adapter, "SELECT city FROM items_address") == [{"city": "old"}]
+    assert [r["label"] for r in _sql_rows(adapter, "SELECT label FROM items_tags")] == [
         "a"
     ]
 
@@ -65,7 +68,7 @@ async def test_embedded_one_persist_rolls_back_delete_on_failed_insert():
 
         adapter.execute_mutation = original
 
-        assert await adapter.execute_raw("SELECT city FROM items_address") == [
+        assert _sql_rows(adapter, "SELECT city FROM items_address") == [
             {"city": "old"}
         ]
     finally:
@@ -95,7 +98,7 @@ async def test_embedded_many_persist_rolls_back_delete_on_failed_insert():
 
         adapter.execute_mutation = original
 
-        assert [r["label"] for r in await adapter.execute_raw("SELECT label FROM items_tags")] == [
+        assert [r["label"] for r in _sql_rows(adapter, "SELECT label FROM items_tags")] == [
             "a"
         ]
     finally:
@@ -113,10 +116,10 @@ async def test_embedded_persist_saves_atomically_when_insert_succeeds():
         item._mark_dirty()
         await repo.save(item)
 
-        assert await adapter.execute_raw("SELECT city FROM items_address") == [
+        assert _sql_rows(adapter, "SELECT city FROM items_address") == [
             {"city": "new"}
         ]
-        assert [r["label"] for r in await adapter.execute_raw("SELECT label FROM items_tags")] == [
+        assert [r["label"] for r in _sql_rows(adapter, "SELECT label FROM items_tags")] == [
             "x"
         ]
     finally:
@@ -144,6 +147,6 @@ async def test_create_rolls_back_parent_insert_on_failed_embedded_write():
 
         adapter.execute_mutation = original
 
-        assert await adapter.execute_raw("SELECT id FROM items") == []
+        assert _sql_rows(adapter, "SELECT id FROM items") == []
     finally:
         await db.disconnect()

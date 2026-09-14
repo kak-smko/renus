@@ -303,16 +303,17 @@ async def test_sqlite_end_to_end_repository_operations():
     await db.disconnect()
 
 @pytest.mark.asyncio
-async def test_sqlite_raw_sql_via_portable_interface():
+async def test_sqlite_raw_sql_via_native_connection():
     adapter = SQLiteAdapter({"database": ":memory:"})
     db = Database(adapter)
     await db.connect()
 
-    pragma_res = await db.execute_raw("PRAGMA foreign_keys;")
+    conn = adapter._sqlite_db
+    pragma_res = [dict(r) for r in conn.execute("PRAGMA foreign_keys;").fetchall()]
     assert len(pragma_res) == 1
     assert pragma_res[0]["foreign_keys"] == 1
 
-    await db.execute_raw("VACUUM;")
+    conn.execute("VACUUM;")
 
     await db.disconnect()
 
@@ -323,19 +324,22 @@ async def test_native_physical_schema_and_stored_rows():
     await db.connect()
     await db.create_schema([Employee, Project])
 
-    raw = db.adapter("primary").execute_raw
+    conn = db.adapter("primary")._sqlite_db
 
-    cols = await raw('PRAGMA table_info("employees");')
+    def raw(sql: str, params: tuple = ()) -> list[dict]:
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+    cols = raw('PRAGMA table_info("employees");')
     names = {c["name"]: c["type"] for c in cols}
     assert names["id"] == "INTEGER"
     assert names["name"] == "TEXT"
     assert names["salary"] == "REAL"
     assert "deleted_at" in names
 
-    indexes = await raw('PRAGMA index_list("employees");')
+    indexes = raw('PRAGMA index_list("employees");')
     assert any(i["unique"] == 1 for i in indexes)
 
-    sub_tables = await raw(
+    sub_tables = raw(
         "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ? ESCAPE '\\';",
         ("employees\\_address",),
     )
@@ -352,13 +356,13 @@ async def test_native_physical_schema_and_stored_rows():
         )
     )
 
-    emp = (await raw('SELECT * FROM "employees";'))[0]
+    emp = raw('SELECT * FROM "employees";')[0]
     assert emp["name"] == "Zoe"
     assert emp["salary"] == 92000.0
     assert emp["active"] == 1
     assert "address" not in emp
 
-    addr = (await raw('SELECT * FROM "employees_address";'))[0]
+    addr = raw('SELECT * FROM "employees_address";')[0]
     assert addr["parent_id"] == emp["id"]
     assert addr["street"] == "1 Main"
     assert addr["city"] == "Oslo"

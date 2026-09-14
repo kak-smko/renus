@@ -185,7 +185,7 @@ async def test_mysql_mock_execution():
     mock_pool.close = MagicMock()
     mock_pool.wait_closed = AsyncMock()
 
-    adapter._pool = mock_pool
+    adapter._mysql_db = mock_pool
 
     assert await adapter.health_check() is True
 
@@ -199,11 +199,15 @@ async def test_mysql_mock_execution():
     assert res.rows_affected == 1
     assert res.last_id == 1
 
-    raw_res = await adapter.execute_raw("SELECT 1;")
+    mysql_conn = await adapter._mysql_db.acquire()
+    async with mysql_conn.cursor() as cur:
+        await cur.execute("SELECT 1;")
+        raw_res = await cur.fetchall()
+    adapter._mysql_db.release(mysql_conn)
     assert len(raw_res) == 1
 
     await adapter.disconnect()
-    assert adapter._pool is None
+    assert adapter._mysql_db is None
 
 @pytest.mark.asyncio
 async def test_mysql_transaction_context():
@@ -250,7 +254,7 @@ async def test_mysql_error_translation():
     mock_pool.acquire = AsyncMock(return_value=mock_conn)
     mock_pool.release = MagicMock()
 
-    adapter._pool = mock_pool
+    adapter._mysql_db = mock_pool
 
     with pytest.raises(DuplicateKeyError, match="duplicate key error"):
         await adapter.execute_mutation(Insert(Customer, values={"username": "alice"}))

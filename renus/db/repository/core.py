@@ -10,7 +10,6 @@ from typing import Any, Generic, TypeVar
 from uuid import UUID
 
 from renus.db.core.adapter import AsyncDatabaseAdapter, MutationResult
-from renus.db.core.exceptions import ConfigurationError
 from renus.db.mutation.ast import (
     Delete,
     DeleteMany,
@@ -26,70 +25,9 @@ from renus.db.query.builder import Count, Query
 from renus.db.serialization.core import from_dict
 from renus.db.transaction.core import Transaction
 
-__all__ = ["RawStatement", "Repository"]
+__all__ = ["Repository"]
 
 T = TypeVar("T")
-
-class RawStatement:
-
-    __slots__ = ("_repository", "args", "statement")
-
-    def __init__(self, repository: Any, statement: Any, args: tuple[Any, ...]) -> None:
-        """Build a lazily-bound raw statement.
-
-        Parameters
-        ----------
-        repository:
-            Repository this statement is bound to, or ``None`` to bind later.
-        statement:
-            The raw SQL statement string.
-        args:
-            Positional binding arguments for the statement. Empty by default.
-        """
-        self._repository = repository
-        self.statement = statement
-        self.args = args
-
-    @property
-    def repository(self) -> Any:
-        """Return the repository this statement is bound to."""
-        return self._repository
-
-    @property
-    def model(self) -> Any:
-        """Return the bound repository's model class."""
-        if self._repository is None:
-            return None
-        return getattr(self._repository, "model", None)
-
-    @property
-    def adapter(self) -> Any:
-        """Return the bound repository's adapter."""
-        if self._repository is None:
-            raise ConfigurationError("Cannot resolve adapter without a bound repository")
-        return self._repository.adapter
-
-    @property
-    def backend(self) -> str | None:
-        """Return the bound adapter's backend name."""
-        if self._repository is None:
-            return None
-        return getattr(self._repository.adapter, "name", None)
-
-    async def execute(self) -> Any:
-        """Execute the raw statement against the bound adapter."""
-        if self._repository is None:
-            raise ConfigurationError(
-                "Cannot execute raw query without a bound repository"
-            )
-        return await self.adapter.execute_raw(self)
-
-    def __await__(self) -> Any:
-        return self.execute().__await__()
-
-    def __repr__(self) -> str:
-        b_name = self.backend or "unbound"
-        return f"RawStatement[{b_name}](statement={self.statement!r}, args={self.args!r})"
 
 class Repository(Generic[T]):
 
@@ -150,10 +88,6 @@ class Repository(Generic[T]):
         if conditions:
             return q.where(*conditions)
         return q
-
-    def raw(self, statement: Any, *args: Any) -> RawStatement:
-        """Create a raw statement bound to this repository."""
-        return RawStatement(self, statement, tuple(args))
 
     async def create(self, obj: T) -> T:
         """Insert a single model and return it with generated keys."""

@@ -270,8 +270,8 @@ async def test_mongodb_mock_execution():
     mock_client.__getitem__ = MagicMock(return_value=mock_db)
     mock_client.close = MagicMock()
 
-    adapter._client = mock_client
-    adapter._db = mock_db
+    adapter._mongo_client = mock_client
+    adapter._mongo_db = mock_db
 
     assert await adapter.health_check() is True
 
@@ -287,11 +287,11 @@ async def test_mongodb_mock_execution():
     assert res.rows_affected == 1
     assert res.last_id == 1
 
-    raw_res = await adapter.execute_raw({"ping": 1})
+    raw_res = await adapter._mongo_db.command({"ping": 1})
     assert raw_res == {"ok": 1}
 
     await adapter.disconnect()
-    assert adapter._client is None
+    assert adapter._mongo_client is None
 
 @pytest.mark.asyncio
 async def test_mongodb_transaction_context():
@@ -357,7 +357,7 @@ async def test_native_raw_documents_in_collection():
             )
         )
 
-        coll = adapter._db["accountdocs"]
+        coll = adapter._mongo_db["accountdocs"]
         docs = [dict(d) for d in await coll.find({}).to_list(length=None)]
         assert len(docs) == 1
         doc = docs[0]

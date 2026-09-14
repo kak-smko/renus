@@ -131,18 +131,5 @@ class MigrationContext:
             f"Adapter '{type(self.adapter).__name__}' is not an SQL adapter"
         )
 
-    async def execute_raw(
-        self,
-        raw: Any,
-        params: tuple[Any, ...] | list[Any] | None = None,
-    ) -> Any:
-        """Execute raw SQL through the adapter's raw executor."""
-        if hasattr(self.adapter, "execute_raw"):
-            exec_fn = getattr(self.adapter, "execute_raw")
-            return await exec_fn(raw, params)
-        raise UnsupportedOperationError(
-            f"Adapter '{type(self.adapter).__name__}' does not support execute_raw"
-        )
-
     def __getattr__(self, item: str) -> Any:
         return getattr(self.db, item)

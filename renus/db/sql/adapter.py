@@ -18,7 +18,6 @@ from renus.db.migrations.operations import (
 )
 from renus.db.mutation.ast import MutationAST
 from renus.db.query.ast import QueryAST
-from renus.db.repository.core import RawStatement
 from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
 from renus.db.sql.dialect.base import SQLDialect
 from renus.db.sql.mutation import SQLMutationCompiler
@@ -38,13 +37,6 @@ class SQLAdapter(AsyncDatabaseAdapter):
     def compile_mutation(self, ast: MutationAST) -> SQLCompiled:
         """Compile a mutation AST into SQL."""
         return self.mutation_compiler.compile(ast)
-
-    @staticmethod
-    def _is_read_statement(sql: str) -> bool:
-        head = sql.lstrip()[:24].upper()
-        return head.startswith(
-            ("SELECT", "PRAGMA", "WITH", "EXPLAIN", "SHOW", "DESC", "VACUUM")
-        )
 
     _raw_embedded_key_type: ClassVar[str] = "TEXT"
 
@@ -238,34 +230,6 @@ class SQLAdapter(AsyncDatabaseAdapter):
             await self._commit_schema()
         finally:
             await self._close_schema_session()
-
-    @staticmethod
-    def _resolve_raw_params(
-        args: tuple[Any, ...],
-        params: tuple[Any, ...] | list[Any] | None,
-    ) -> tuple[Any, ...]:
-        if params is not None:
-            return tuple(params)
-        if len(args) == 1 and isinstance(args[0], (list, tuple)):
-            return tuple(args[0])
-        return tuple(args)
-
-    async def execute_raw(
-        self,
-        raw: Any,
-        params: tuple[Any, ...] | list[Any] | None = None,
-    ) -> Any:
-        """Execute a raw SQL statement, routing reads vs. mutations."""
-        if isinstance(raw, RawStatement):
-            sql = str(raw.statement)
-            p = self._resolve_raw_params(raw.args, params)
-        else:
-            sql = str(raw)
-            p = tuple(params) if params is not None else ()
-
-        if self._is_read_statement(sql):
-            return await self.execute_query(SQLCompiled(sql, p))
-        return await self.execute_mutation(SQLCompiled(sql, p))
 
     async def ensure_migration_schema(
         self,

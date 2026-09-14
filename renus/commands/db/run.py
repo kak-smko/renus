@@ -10,7 +10,6 @@ from typing import Any
 from renus.config import Config
 from renus.rich import Terminal
 from renus.db.database import Database
-
 try:
     from bson import (
         Binary,
@@ -245,22 +244,15 @@ async def get_tables() -> list[str]:
     db = get_database()
     return await db.tables()
 
-def _quote_identifier(value: str) -> str:
-    driver = resolve_driver()
-    if driver == "sqlite":
-        return '"' + value.replace('"', '""') + '"'
-    if driver == "mysql":
-        return "`" + value.replace("`", "``") + "`"
-    return value
-
 async def delete_all_records(table_name: str) -> None:
     """Delete all records from a single table."""
     db = get_database()
-    adapter = db.adapter("primary")
-    if hasattr(adapter, "_db"):
-        await adapter._db[table_name].delete_many({})
-    else:
-        await db.execute_raw(f"DELETE FROM {_quote_identifier(table_name)};")
+    source = type(table_name, (), {"table": table_name})
+    await db.connect("primary")
+    try:
+        await db.repository(source).delete_many()
+    finally:
+        await db.disconnect("primary")
 
 async def backup_table_paginated(table_name: str, path: str, per_page: int = 100) -> int:
     """Back up one table and return its record count."""

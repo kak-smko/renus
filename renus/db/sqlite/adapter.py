@@ -38,7 +38,7 @@ DEFAULT_SQLITE_BUSY_TIMEOUT = 5000
 CONNECT_RETRIES = 3
 CONNECT_RETRY_DELAY = 0.5
 
-class SQLiteTransactionContext:
+class SQLiteTransactionContext(TransactionContext):
     """Async context manager wrapping a SQLite connection transaction."""
 
     def __init__(self, conn: sqlite3.Connection, lock: asyncio.Lock) -> None:
@@ -106,7 +106,7 @@ class SQLiteAdapter(SQLAdapter):
         self.dialect = SQLiteDialect()
         self.compiler = SQLCompiler(self.dialect)
         self.mutation_compiler = SQLMutationCompiler(self.dialect)
-        self._conn: sqlite3.Connection | None = None
+        self._sqlite_db: sqlite3.Connection | None = None
         self._lock = asyncio.Lock()
         self._tx_session: Any = None
 
@@ -125,7 +125,7 @@ class SQLiteAdapter(SQLAdapter):
 
     async def connect(self) -> None:
         """Establish a connection to the database."""
-        if self._conn is not None:
+        if self._sqlite_db is not None:
             return
 
         cfg = self.config
@@ -144,36 +144,36 @@ class SQLiteAdapter(SQLAdapter):
 
         for attempt in range(1, retries + 1):
             try:
-                self._conn = await asyncio.to_thread(
+                self._sqlite_db = await asyncio.to_thread(
                     sqlite3.connect,
                     database=db_path,
                     check_same_thread=False,
                     timeout=timeout,
                 )
-                self._conn.row_factory = sqlite3.Row
+                self._sqlite_db.row_factory = sqlite3.Row
                 await asyncio.to_thread(
-                    self._conn.execute, f"PRAGMA busy_timeout = {busy_timeout};"
+                    self._sqlite_db.execute, f"PRAGMA busy_timeout = {busy_timeout};"
                 )
-                await asyncio.to_thread(self._conn.execute, "PRAGMA foreign_keys = ON;")
+                await asyncio.to_thread(self._sqlite_db.execute, "PRAGMA foreign_keys = ON;")
                 if journal_mode is not None:
                     await asyncio.to_thread(
-                        self._conn.execute, f"PRAGMA journal_mode = {journal_mode};"
+                        self._sqlite_db.execute, f"PRAGMA journal_mode = {journal_mode};"
                     )
                 elif not in_memory:
 
-                    await asyncio.to_thread(self._conn.execute, "PRAGMA journal_mode = WAL;")
-                    await asyncio.to_thread(self._conn.execute, "PRAGMA synchronous = NORMAL;")
+                    await asyncio.to_thread(self._sqlite_db.execute, "PRAGMA journal_mode = WAL;")
+                    await asyncio.to_thread(self._sqlite_db.execute, "PRAGMA synchronous = NORMAL;")
 
                 last_err = None
                 return
             except Exception as e:
                 last_err = e
-                if self._conn is not None:
+                if self._sqlite_db is not None:
                     try:
-                        await asyncio.to_thread(self._conn.close)
+                        await asyncio.to_thread(self._sqlite_db.close)
                     except Exception:
                         pass
-                    self._conn = None
+                    self._sqlite_db = None
                 if attempt < retries:
                     await asyncio.sleep(retry_delay * (2 ** (attempt - 1)))
 
@@ -183,28 +183,28 @@ class SQLiteAdapter(SQLAdapter):
 
     async def disconnect(self) -> None:
         """Close the active database connection."""
-        if self._conn is not None:
-            conn = self._conn
-            self._conn = None
+        if self._sqlite_db is not None:
+            conn = self._sqlite_db
+            self._sqlite_db = None
             await asyncio.to_thread(conn.close)
 
     async def health_check(self) -> bool:
         """Return whether the database is reachable."""
-        if self._conn is None:
+        if self._sqlite_db is None:
             return False
         try:
             async with self._lock:
-                await asyncio.to_thread(self._conn.execute, "SELECT 1;")
+                await asyncio.to_thread(self._sqlite_db.execute, "SELECT 1;")
             return True
         except Exception:
             return False
 
     def transaction_factory(self) -> AsyncIterator[TransactionContext]:
         """Yield a SQLite transaction context for the caller."""
-        if self._conn is None:
+        if self._sqlite_db is None:
             raise ConfigurationError("Cannot create transaction context: SQLite is not connected")
 
-        conn = self._conn
+        conn = self._sqlite_db
         adapter_self = self
 
         async def _tx_generator() -> AsyncIterator[TransactionContext]:
@@ -219,9 +219,9 @@ class SQLiteAdapter(SQLAdapter):
 
     async def execute_query(self, compiled: CompiledQuery[Any]) -> QueryResult[Any]:
         """Execute a compiled query and return the results."""
-        if self._conn is None:
+        if self._sqlite_db is None:
             await self.connect()
-        assert self._conn is not None
+        assert self._sqlite_db is not None
 
         if isinstance(compiled, QueryAST):
             sql_compiled: SQLCompiled = self.compile_query(compiled)
@@ -232,7 +232,7 @@ class SQLiteAdapter(SQLAdapter):
         try:
             async with self._lock:
                 cursor = await asyncio.to_thread(
-                    self._conn.execute,
+                    self._sqlite_db.execute,
                     sql_compiled.sql,
                     params,
                 )
@@ -243,9 +243,9 @@ class SQLiteAdapter(SQLAdapter):
 
     async def execute_mutation(self, compiled: CompiledMutation) -> MutationResult:
         """Execute a compiled mutation and return the result."""
-        if self._conn is None:
+        if self._sqlite_db is None:
             await self.connect()
-        assert self._conn is not None
+        assert self._sqlite_db is not None
 
         if isinstance(compiled, MutationAST):
             sql_compiled: SQLCompiled = self.compile_mutation(compiled)
@@ -256,12 +256,12 @@ class SQLiteAdapter(SQLAdapter):
         try:
             async with self._lock:
                 cursor = await asyncio.to_thread(
-                    self._conn.execute,
+                    self._sqlite_db.execute,
                     sql_compiled.sql,
                     params,
                 )
                 if not self._in_active_transaction():
-                    await asyncio.to_thread(self._conn.commit)
+                    await asyncio.to_thread(self._sqlite_db.commit)
 
             rows_affected = cursor.rowcount if cursor.rowcount >= 0 else 1
             last_id = cursor.lastrowid if cursor.lastrowid else None
@@ -280,16 +280,16 @@ class SQLiteAdapter(SQLAdapter):
         params: Any = (),
     ) -> list[dict[str, Any]]:
         """Execute raw SQL and return the resulting rows."""
-        if self._conn is None:
+        if self._sqlite_db is None:
             await self.connect()
-        assert self._conn is not None
+        assert self._sqlite_db is not None
 
         p_list = params if isinstance(params, (list, tuple)) else (params,)
         normalized_params = tuple(self._normalize_param(p) for p in p_list)
         try:
             async with self._lock:
                 cursor = await asyncio.to_thread(
-                    self._conn.execute,
+                    self._sqlite_db.execute,
                     sql,
                     normalized_params,
                 )
@@ -304,21 +304,21 @@ class SQLiteAdapter(SQLAdapter):
         params: Any = (),
     ) -> MutationResult:
         """Execute raw SQL and return the mutation result."""
-        if self._conn is None:
+        if self._sqlite_db is None:
             await self.connect()
-        assert self._conn is not None
+        assert self._sqlite_db is not None
 
         p_list = params if isinstance(params, (list, tuple)) else (params,)
         normalized_params = tuple(self._normalize_param(p) for p in p_list)
         try:
             async with self._lock:
                 cursor = await asyncio.to_thread(
-                    self._conn.execute,
+                    self._sqlite_db.execute,
                     sql,
                     normalized_params,
                 )
                 if not self._in_active_transaction():
-                    await asyncio.to_thread(self._conn.commit)
+                    await asyncio.to_thread(self._sqlite_db.commit)
 
             rows_affected = cursor.rowcount if cursor.rowcount >= 0 else 1
             last_id = cursor.lastrowid if cursor.lastrowid else None
@@ -332,20 +332,20 @@ class SQLiteAdapter(SQLAdapter):
             raise DatabaseError(f"SQLite mutation error: {e}") from e
 
     async def _open_schema_session(self) -> Any:
-        if self._conn is None:
+        if self._sqlite_db is None:
             await self.connect()
-        assert self._conn is not None
-        return self._conn
+        assert self._sqlite_db is not None
+        return self._sqlite_db
 
     async def _execute_ddl(self, sql: str) -> None:
-        assert self._conn is not None
+        assert self._sqlite_db is not None
         async with self._lock:
-            await asyncio.to_thread(self._conn.execute, sql)
+            await asyncio.to_thread(self._sqlite_db.execute, sql)
 
     async def _commit_schema(self) -> None:
-        assert self._conn is not None
+        assert self._sqlite_db is not None
         async with self._lock:
-            await asyncio.to_thread(self._conn.commit)
+            await asyncio.to_thread(self._sqlite_db.commit)
 
     async def _close_schema_session(self) -> None:
         return None

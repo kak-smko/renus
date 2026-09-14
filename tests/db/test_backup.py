@@ -19,8 +19,14 @@ async def seed(db: Database, count: int) -> str:
     return BackupProduct.__db_metadata__.table
 
 async def table_count(db: Database, table: str) -> int:
-    rows = await db.execute_raw(f'SELECT COUNT(*) AS c FROM "{table}";')
-    return int(rows[0]["c"])
+    conn = db.adapter("primary")._sqlite_db
+    row = conn.execute(f'SELECT COUNT(*) AS c FROM "{table}";').fetchone()
+    return int(row[0])
+
+def _delete_all_sqlite(db: Database, table: str) -> None:
+    conn = db.adapter("primary")._sqlite_db
+    conn.execute(f'DELETE FROM "{table}";')
+    conn.commit()
 
 @pytest.mark.asyncio
 async def test_paginated_backup_writes_single_json_file(tmp_path):
@@ -65,7 +71,7 @@ async def test_paginated_backup_restore_round_trip(tmp_path, page_size, chunk_si
     assert backed == {table: 450}
 
     assert await table_count(db, table) == 450
-    await db.execute_raw(f'DELETE FROM "{table}";')
+    _delete_all_sqlite(db, table)
     assert await table_count(db, table) == 0
 
     restored = await db.restore(path=path, tables=[table], chunk_size=chunk_size)
@@ -109,9 +115,9 @@ async def test_native_row_content_preserved_across_backup_restore(kind, tmp_path
         await db.backup(path=path, tables=[table], page_size=7)
 
         if db.adapter("primary").name == "mongodb":
-            await db.adapter("primary")._db[table].delete_many({})
+            await db.adapter("primary")._mongo_db[table].delete_many({})
         else:
-            await db.execute_raw(f'DELETE FROM "{table}";')
+            _delete_all_sqlite(db, table)
         assert await nh.native_all(db, table) == []
 
         await db.restore(path=path, tables=[table], chunk_size=4)

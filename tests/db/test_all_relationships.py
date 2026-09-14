@@ -120,12 +120,11 @@ async def assert_created_tables(kind: str, db: Database, expected: set[str]) -> 
 
 async def native_all(kind: str, db: Database, name: str) -> list[dict]:
     if is_mongo(db):
-        coll = db.adapter("primary")._db[name]
+        coll = db.adapter("primary")._mongo_db[name]
         return [dict(d) for d in await coll.find({}).to_list(length=None)]
 
-    return await db.adapter("primary").execute_raw(
-        f"SELECT * FROM [{name}] ORDER BY 1;"
-    )
+    conn = db.adapter("primary")._sqlite_db
+    return [dict(r) for r in conn.execute(f"SELECT * FROM [{name}] ORDER BY 1;").fetchall()]
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", BACKENDS)

@@ -305,12 +305,12 @@ async def downgrade(ctx):
 async def test_mongo_migration_capability_limitations():
     adapter = MongoDBAdapter("mongodb://localhost:27017/test_db")
 
-    adapter._client = MagicMock()
+    adapter._mongo_client = MagicMock()
     mock_coll = MagicMock()
     mock_coll.update_many = AsyncMock()
     mock_db = MagicMock()
     mock_db.__getitem__.return_value = mock_coll
-    adapter._db = mock_db
+    adapter._mongo_db = mock_db
 
     db = Database(adapter)
     ctx = MigrationContext(db, adapter=adapter)
@@ -328,8 +328,8 @@ async def test_mongo_column_migrations():
     mock_coll = MagicMock()
     mock_db = MagicMock()
     mock_db.__getitem__.return_value = mock_coll
-    adapter._db = mock_db
-    adapter._client = MagicMock()
+    adapter._mongo_db = mock_db
+    adapter._mongo_client = MagicMock()
 
     db = Database(adapter)
     ctx = MigrationContext(db, adapter=adapter)
@@ -426,8 +426,8 @@ async def downgrade(ctx):
     mock_client = MagicMock()
     mock_client.start_session = MagicMock(return_value=mock_session)
 
-    adapter._db = MockMongoDB()
-    adapter._client = mock_client
+    adapter._mongo_db = MockMongoDB()
+    adapter._mongo_client = mock_client
 
     db = Database(adapter)
     mm = MigrationManager(db, path=mig_dir)
@@ -561,17 +561,17 @@ async def downgrade(ctx):
         if db.adapter("primary").name == "mongodb":
 
             adapter = db.adapter("primary")
-            cursor = await adapter._db["migrated_users"].list_indexes()
+            cursor = await adapter._mongo_db["migrated_users"].list_indexes()
             idx_names = [i["name"] for i in await cursor.to_list(length=None)]
             assert any("username" in n for n in idx_names)
             assert any("email" in n for n in idx_names)
         else:
-            raw = db.adapter("primary").execute_raw
+            conn = db.adapter("primary")._sqlite_db
 
-            cols = {c["name"] for c in await raw('PRAGMA table_info("migrated_users");')}
+            cols = {c["name"] for c in conn.execute('PRAGMA table_info("migrated_users");').fetchall()}
             assert {"id", "username", "email", "is_active", "created_at", "updated_at"} <= cols
 
-            idx = await raw('PRAGMA index_list("migrated_users");')
+            idx = conn.execute('PRAGMA index_list("migrated_users");').fetchall()
             idx_names = [i["name"] for i in idx]
             assert any("username" in n for n in idx_names) and any(i["unique"] == 1 for i in idx)
             assert any("email" in n for n in idx_names)
