@@ -11,7 +11,6 @@ from renus.db import (
     CompiledQuery,
     ConfigurationError,
     Database,
-    DatabaseCapabilities,
     DatabaseField,
     Delete,
     DeleteMany,
@@ -53,13 +52,7 @@ class InMemoryAdapter(DDLFakeMixin, AsyncDatabaseAdapter):
 
     def __init__(
         self,
-        capabilities: DatabaseCapabilities | None = None,
     ) -> None:
-        self.capabilities = capabilities or DatabaseCapabilities(
-            transactions=True,
-            bulk_operations=True,
-            upsert=True,
-        )
         self.connected = False
         self.executed_queries: list[Any] = []
         self.executed_mutations: list[Any] = []
@@ -317,17 +310,6 @@ async def test_repository_upsert():
     assert rows == 1
     assert isinstance(adapter.executed_mutations[-1], Upsert)
 
-@pytest.mark.asyncio
-async def test_repository_upsert_unsupported_raises():
-    no_upsert_adapter = InMemoryAdapter(capabilities=DatabaseCapabilities.none())
-    repo = Repository(no_upsert_adapter, Account)
-
-    with pytest.raises(UnsupportedOperationError, match="requires capability 'upsert'"):
-        await repo.upsert(
-            conflict_target=("owner",),
-            create_values={"owner": "Karl"},
-            update_values={"balance": 10.0},
-        )
 
 @pytest.mark.asyncio
 async def test_repository_count_and_exists():
@@ -424,7 +406,7 @@ async def test_unit_of_work_dynamic_attribute_lookup():
 
 @pytest.mark.asyncio
 async def test_explicit_transaction():
-    adapter = InMemoryAdapter(capabilities=DatabaseCapabilities(transactions=True))
+    adapter = InMemoryAdapter()
     db = Database(adapter)
 
     async with db.transaction():
@@ -433,14 +415,6 @@ async def test_explicit_transaction():
 
     assert adapter.tx_committed is True
 
-@pytest.mark.asyncio
-async def test_explicit_transaction_unsupported_raises():
-    adapter = InMemoryAdapter(capabilities=DatabaseCapabilities.none())
-    db = Database(adapter)
-
-    with pytest.raises(UnsupportedOperationError, match="requires capability 'transactions'"):
-        async with db.transaction():
-            pass
 
 @pytest.mark.asyncio
 async def test_database_facade_lifecycle_and_connections():
@@ -455,7 +429,7 @@ async def test_database_facade_lifecycle_and_connections():
     assert replica.connected is True
 
     assert await db.health_check("primary") is True
-    assert db.capabilities == primary.capabilities
+    assert db.adapter().nested_documents == primary.nested_documents
 
     rep_primary = db.repository(Account, connection="primary")
     rep_replica = db.repository(Account, connection="replica")
@@ -480,7 +454,7 @@ async def test_database_gets_adapter_from_config(monkeypatch: Any):
 
     db = Database()
     assert db.adapter("primary") is test_adapter
-    assert db.capabilities == test_adapter.capabilities
+    assert db.adapter().nested_documents == test_adapter.nested_documents
 
 @pytest.mark.asyncio
 async def test_database_invalid_adapter_in_config_raises(monkeypatch: Any):

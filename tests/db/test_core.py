@@ -10,7 +10,6 @@ from renus.db.core import (
     CompiledQuery,
     ConfigurationError,
     ConnectionError,
-    DatabaseCapabilities,
     DatabaseError,
     DuplicateKeyError,
     Event,
@@ -29,7 +28,6 @@ from renus.db.core import (
     DBError,
     UnsupportedOperationError,
     ValidationError,
-    require_capability,
 )
 from renus.db import DatabaseField, Field, ReModel
 from renus.db.core.exceptions import MutationError
@@ -53,42 +51,6 @@ def test_all_exceptions_derive_from_dberror():
 def test_connection_error_is_not_builtin():
 
     assert issubclass(ConnectionError, DBError)
-
-def test_capabilities_default_to_unsupported():
-    caps = DatabaseCapabilities.none()
-    assert not caps.supports("transactions")
-    assert not caps.supports("joins")
-    assert not caps.supports("upsert")
-
-def test_capabilities_selective_support():
-    caps = DatabaseCapabilities(transactions=True, upsert=True)
-    assert caps.supports("transactions")
-    assert caps.supports("upsert")
-    assert not caps.supports("foreign_keys")
-
-def test_capabilities_require_raises_when_unsupported():
-    caps = DatabaseCapabilities.none()
-    with pytest.raises(UnsupportedOperationError):
-        caps.require("joins")
-    DatabaseCapabilities(joins=True).require("joins")
-
-def test_require_capability_helper():
-    require_capability(DatabaseCapabilities(returning=True), "returning")
-    with pytest.raises(UnsupportedOperationError):
-        require_capability(DatabaseCapabilities.none(), "returning")
-
-def test_capabilities_unknown_name_raises():
-    with pytest.raises(UnsupportedOperationError):
-        DatabaseCapabilities.none().supports("does_not_exist")
-
-def test_capability_names_are_stable():
-    assert "transactions" in DatabaseCapabilities.names()
-    assert "nested_documents" in DatabaseCapabilities.names()
-    assert "cursor_pagination" in DatabaseCapabilities.names()
-
-def test_capabilities_portability_classifies_capability_dependent():
-    caps = DatabaseCapabilities(transactions=True)
-    assert caps.portability("transactions").is_capability_dependent
 
 def test_portability_kind_values():
     assert PortabilityKind.PORTABLE.value == "portable"
@@ -238,7 +200,7 @@ def test_concrete_adapter_instantiates():
     adapter = ConcreteAdapter()
     assert isinstance(adapter, AsyncDatabaseAdapter)
     assert adapter.name == "fake"
-    assert adapter.capabilities == DatabaseCapabilities.none()
+    assert adapter.nested_documents is False
 
 @pytest.mark.asyncio
 async def test_adapter_create_schema_unsupported_by_default():
@@ -260,13 +222,12 @@ async def test_adapter_execute_mutation():
     result = await adapter.execute_mutation(object())
     assert result.rows_affected == 1
 
-def test_adapter_capabilities_class_attribute_override():
-    caps = DatabaseCapabilities(transactions=True)
+def test_adapter_nested_documents_class_attribute_override():
 
-    class WithCaps(ConcreteAdapter):
-        capabilities = caps
+    class WithNested(ConcreteAdapter):
+        nested_documents = True
 
-    assert WithCaps.capabilities.supports("transactions")
+    assert WithNested.nested_documents is True
 
 class NativeCoreItem(ReModel):
     id: str = Field(database=DatabaseField(primary_key=True))

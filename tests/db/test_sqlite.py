@@ -106,12 +106,7 @@ def test_sqlite_mutation_compiler_upsert():
 @pytest.mark.asyncio
 async def test_sqlite_adapter_lifecycle_and_capabilities():
     adapter = SQLiteAdapter({"database": ":memory:"})
-    assert adapter.capabilities.supports("transactions")
-    assert adapter.capabilities.supports("upsert")
-    assert adapter.capabilities.supports("returning")
-    assert adapter.capabilities.supports("joins")
-    assert adapter.capabilities.supports("bulk_operations")
-    assert not adapter.capabilities.supports("nested_documents")
+    assert adapter.nested_documents is False
 
     assert await adapter.health_check() is False
     await adapter.connect()

@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from types import TracebackType
 from typing import Any, ClassVar, Protocol, Self, TypeVar
 
-from renus.db.core.capabilities import DatabaseCapabilities
-
 __all__ = [
     "AsyncDatabaseAdapter",
     "CompiledMutation",
@@ -64,7 +62,7 @@ class AsyncDatabaseAdapter(ABC):
     """Abstract async database adapter interface."""
 
     name: ClassVar[str]
-    capabilities: DatabaseCapabilities = DatabaseCapabilities.none()
+    nested_documents: ClassVar[bool] = False
 
     @abstractmethod
     async def connect(self) -> None:

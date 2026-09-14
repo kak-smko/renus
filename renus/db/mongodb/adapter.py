@@ -19,7 +19,6 @@ from renus.db.core.backup import (
     BackupFileWriter,
     load_rows_pages,
 )
-from renus.db.core.capabilities import DatabaseCapabilities
 from renus.db.core.exceptions import (
     ConfigurationError,
     ConnectionError,
@@ -91,20 +90,7 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
 
     name: ClassVar[str] = "mongodb"
 
-    capabilities: DatabaseCapabilities = DatabaseCapabilities(
-        transactions=True,
-        nested_documents=True,
-        joins=False,
-        foreign_keys=False,
-        upsert=True,
-        returning=False,
-        json=True,
-        arrays=True,
-        cursor_pagination=True,
-        bulk_operations=True,
-        indexes=True,
-        constraints=False,
-    )
+    nested_documents: ClassVar[bool] = True
 
     def __init__(self, config: dict | None = None) -> None:
         """Initialize the MongoDB adapter.

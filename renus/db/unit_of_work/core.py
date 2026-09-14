@@ -86,41 +86,33 @@ class UnitOfWork:
         if not self._active:
             raise ConfigurationError("Cannot commit an inactive Unit of Work")
 
-        if self.adapter.capabilities.supports("transactions"):
-            if self._tx_context is not None:
-                await self._tx_context.commit()
-            self._committed = True
-        else:
-
-            self._committed = True
+        if self._tx_context is not None:
+            await self._tx_context.commit()
+        self._committed = True
 
     async def rollback(self) -> None:
         """Roll back the current transaction."""
         if not self._active:
             raise ConfigurationError("Cannot rollback an inactive Unit of Work")
 
-        if self.adapter.capabilities.supports("transactions"):
-            if self._tx_context is not None:
-                await self._tx_context.rollback()
-            self._committed = False
+        if self._tx_context is not None:
+            await self._tx_context.rollback()
+        self._committed = False
 
     async def __aenter__(self) -> Self:
         self._active = True
         self._committed = False
 
-        if self.adapter.capabilities.supports("transactions"):
-            factory_result = self.adapter.transaction_factory()
+        factory_result = self.adapter.transaction_factory()
 
-            if hasattr(factory_result, "__anext__") or hasattr(factory_result, "__aiter__"):
-                self._tx_iter = factory_result
-                self._tx_context = await anext(self._tx_iter)
-            else:
-                self._tx_context = factory_result
-
-            if self._tx_context is not None and hasattr(self._tx_context, "__aenter__"):
-                await self._tx_context.__aenter__()
+        if hasattr(factory_result, "__anext__") or hasattr(factory_result, "__aiter__"):
+            self._tx_iter = factory_result
+            self._tx_context = await anext(self._tx_iter)
         else:
-            self._tx_context = None
+            self._tx_context = factory_result
+
+        if self._tx_context is not None and hasattr(self._tx_context, "__aenter__"):
+            await self._tx_context.__aenter__()
 
         return self
 

@@ -11,7 +11,6 @@ from renus.db import (
     CompiledQuery,
     ConfigurationError,
     Database,
-    DatabaseCapabilities,
     DatabaseField,
     MutationResult,
     Plugin,
@@ -35,20 +34,7 @@ from tests.db._fakes import DDLFakeMixin
 class MockCustomAdapter(DDLFakeMixin, AsyncDatabaseAdapter):
 
     name: ClassVar[str] = "custom_test_backend"
-    capabilities: DatabaseCapabilities = DatabaseCapabilities(
-        transactions=False,
-        nested_documents=True,
-        joins=False,
-        foreign_keys=False,
-        upsert=True,
-        returning=False,
-        json=True,
-        arrays=True,
-        cursor_pagination=False,
-        bulk_operations=True,
-        indexes=False,
-        constraints=False,
-    )
+    nested_documents=True
 
     def __init__(self, config: Any = None) -> None:
         self.config = config

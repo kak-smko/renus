@@ -4,7 +4,6 @@ import pytest
 
 from renus.db import (
     Database,
-    DatabaseCapabilities,
     DatabaseField,
     Field,
     ReModel,
@@ -107,17 +106,6 @@ async def test_nested_transaction_unsupported():
 
     await db.disconnect()
 
-@pytest.mark.asyncio
-async def test_unsupported_transactions_raise():
-
-    class NoTxAdapter(SQLiteAdapter):
-        capabilities = DatabaseCapabilities(transactions=False)
-
-    db = Database(NoTxAdapter(":memory:"))
-
-    with pytest.raises(UnsupportedOperationError, match="requires capability 'transactions'"):
-        async with db.transaction():
-            pass
 
 class NativeAccount(ReModel):
     id: str = Field(database=DatabaseField(primary_key=True))

@@ -8,11 +8,6 @@ from renus.db.core.adapter import (
     QueryResult,
     TransactionContext,
 )
-from renus.db.core.capabilities import (
-    CAPABILITIES,
-    DatabaseCapabilities,
-    require_capability,
-)
 from renus.db.core.events import (
     Event,
     EventBus,
@@ -38,13 +33,11 @@ from renus.db.core.portability import Portability, PortabilityKind
 from renus.db.core.state import IdentityKind, Lifecycle
 
 __all__ = [
-    "CAPABILITIES",
     "AsyncDatabaseAdapter",
     "CompiledMutation",
     "CompiledQuery",
     "ConfigurationError",
     "ConnectionError",
-    "DatabaseCapabilities",
     "DatabaseError",
     "DuplicateKeyError",
     "Event",
@@ -67,5 +60,4 @@ __all__ = [
     "DBError",
     "UnsupportedOperationError",
     "ValidationError",
-    "require_capability",
 ]

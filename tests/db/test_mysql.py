@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from renus.db import (
-    DatabaseCapabilities,
     DatabaseError,
     DatabaseField,
     DuplicateKeyError,
@@ -129,13 +128,7 @@ def test_mysql_compiler_mutations():
 def test_mysql_adapter_capabilities():
     adapter = MySQLAdapter()
     assert adapter.name == "mysql"
-    assert adapter.capabilities.supports("transactions")
-    assert adapter.capabilities.supports("joins")
-    assert adapter.capabilities.supports("foreign_keys")
-    assert adapter.capabilities.supports("upsert")
-    assert adapter.capabilities.supports("bulk_operations")
-    assert not adapter.capabilities.supports("nested_documents")
-    assert not adapter.capabilities.supports("returning")
+    assert adapter.nested_documents is False
 
 def test_mysql_adapter_connection_defaults():
     from renus.db.mysql.adapter import (

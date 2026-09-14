@@ -11,7 +11,6 @@ from renus.db import (
     ReModel,
     SQLiteAdapter,
 )
-from renus.db.core.capabilities import DatabaseCapabilities
 from renus.db.mutation.ast import Insert, InsertMany
 
 class Addr(ReModel):
@@ -123,22 +122,6 @@ async def test_embedded_persist_saves_atomically_when_insert_succeeds():
     finally:
         await db.disconnect()
 
-class _NoBulk(SQLiteAdapter):
-
-    capabilities: DatabaseCapabilities = DatabaseCapabilities(
-        transactions=True,
-        nested_documents=False,
-        joins=True,
-        foreign_keys=True,
-        upsert=True,
-        returning=True,
-        json=True,
-        arrays=False,
-        cursor_pagination=True,
-        bulk_operations=False,
-        indexes=True,
-        constraints=True,
-    )
 
 @pytest.mark.asyncio
 async def test_create_rolls_back_parent_insert_on_failed_embedded_write():
@@ -162,26 +145,5 @@ async def test_create_rolls_back_parent_insert_on_failed_embedded_write():
         adapter.execute_mutation = original
 
         assert await adapter.execute_raw("SELECT id FROM items") == []
-    finally:
-        await db.disconnect()
-
-@pytest.mark.asyncio
-async def test_create_many_fallback_rolls_back_earlier_writes_on_mid_batch_failure():
-    db = Database(_NoBulk({"database": ":memory:"}))
-    await db.connect()
-    await db.create_schema([Item])
-    try:
-        adapter = db.adapter("primary")
-        repo = db.repository(Item)
-
-        await adapter.execute_raw('INSERT INTO items (id, name) VALUES (?, ?)', ("dup", "existing"))
-        assert [r["id"] for r in await adapter.execute_raw("SELECT id FROM items")] == ["dup"]
-
-        from renus.db.core.exceptions import DuplicateKeyError
-
-        with pytest.raises(DuplicateKeyError):
-            await repo.create_many([Item(id="new"), Item(id="dup")])
-
-        assert [r["id"] for r in await adapter.execute_raw("SELECT id FROM items")] == ["dup"]
     finally:
         await db.disconnect()

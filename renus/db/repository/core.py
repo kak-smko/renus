@@ -138,7 +138,7 @@ class Repository(Generic[T]):
 
     @asynccontextmanager
     async def _atomic(self) -> AsyncIterator[None]:
-        if not self.adapter.capabilities.supports("transactions") or self.adapter._in_active_transaction():
+        if self.adapter._in_active_transaction():
             yield
             return
         async with Transaction(self.adapter):
@@ -185,33 +185,27 @@ class Repository(Generic[T]):
             return []
 
         async with self._atomic():
-
-            if self.adapter.capabilities.supports("bulk_operations"):
-                insert_many_ast = InsertMany.from_models(obj_list)
-                res = await self._execute_mutation(insert_many_ast)
-                meta = getattr(self.model, "__db_metadata__", None)
-                if meta:
-                    pk_field = meta.primary_key_field
-                    if res.generated and "ids" in res.generated:
-                        for obj, gen_id in zip(obj_list, res.generated["ids"]):
-                            if getattr(obj, pk_field, None) is None:
-                                object.__setattr__(obj, pk_field, gen_id)
-                    elif res.last_id is not None and len(obj_list) > 0:
-                        first_id = res.last_id - len(obj_list) + 1
-                        for idx, obj in enumerate(obj_list):
-                            if getattr(obj, pk_field, None) is None:
-                                object.__setattr__(obj, pk_field, first_id + idx)
-
-                for obj in obj_list:
-                    if hasattr(obj, "_mark_persisted"):
-                        getattr(obj, "_mark_persisted")()
-
-                for obj in obj_list:
-                    await self._rel_coordinator.persist_relationships(obj)
-                return obj_list
+            insert_many_ast = InsertMany.from_models(obj_list)
+            res = await self._execute_mutation(insert_many_ast)
+            meta = getattr(self.model, "__db_metadata__", None)
+            if meta:
+                pk_field = meta.primary_key_field
+                if res.generated and "ids" in res.generated:
+                    for obj, gen_id in zip(obj_list, res.generated["ids"]):
+                        if getattr(obj, pk_field, None) is None:
+                            object.__setattr__(obj, pk_field, gen_id)
+                elif res.last_id is not None and len(obj_list) > 0:
+                    first_id = res.last_id - len(obj_list) + 1
+                    for idx, obj in enumerate(obj_list):
+                        if getattr(obj, pk_field, None) is None:
+                            object.__setattr__(obj, pk_field, first_id + idx)
 
             for obj in obj_list:
-                await self.create(obj)
+                if hasattr(obj, "_mark_persisted"):
+                    getattr(obj, "_mark_persisted")()
+
+            for obj in obj_list:
+                await self._rel_coordinator.persist_relationships(obj)
             return obj_list
 
     async def save(self, obj: T) -> T:
@@ -384,8 +378,6 @@ class Repository(Generic[T]):
         target: T | None = None,
     ) -> int:
         """Insert or update a row on conflict for the target and return rows affected."""
-        self.adapter.capabilities.require("upsert")
-
         if target is not None:
             upsert_ast = Upsert.from_model(target, conflict_target=conflict_target)
         elif isinstance(conflict_target, self.model):

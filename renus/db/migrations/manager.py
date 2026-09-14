@@ -158,13 +158,8 @@ class MigrationManager:
             content = file_path.read_text(encoding="utf-8")
             checksum = self._calculate_checksum(content)
 
-            supports_tx = self.adapter.capabilities.supports("transactions")
             if not fake:
-                if supports_tx:
-                    async with self.db.transaction(self.connection):
-                        await self._load_and_run(file_path, "upgrade", ctx)
-                        await self.tracker.record_migration(version, name, checksum)
-                else:
+                async with self.db.transaction(self.connection):
                     await self._load_and_run(file_path, "upgrade", ctx)
                     await self.tracker.record_migration(version, name, checksum)
             else:
@@ -219,14 +214,9 @@ class MigrationManager:
                 )
 
             _, file_path = file_map[rec.version]
-            supports_tx = self.adapter.capabilities.supports("transactions")
 
             if not fake:
-                if supports_tx:
-                    async with self.db.transaction(self.connection):
-                        await self._load_and_run(file_path, "downgrade", ctx)
-                        await self.tracker.remove_migration(rec.version)
-                else:
+                async with self.db.transaction(self.connection):
                     await self._load_and_run(file_path, "downgrade", ctx)
                     await self.tracker.remove_migration(rec.version)
             else:

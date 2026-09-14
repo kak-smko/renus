@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from renus.db.core import (
-    CAPABILITIES,
     AsyncDatabaseAdapter,
     CompiledMutation,
     CompiledQuery,
     ConfigurationError,
     ConnectionError,
-    DatabaseCapabilities,
     DatabaseError,
     DuplicateKeyError,
     Event,
@@ -30,7 +28,6 @@ from renus.db.core import (
     DBError,
     UnsupportedOperationError,
     ValidationError,
-    require_capability,
 )
 from renus.db.database import Database
 from renus.db.metadata import (
@@ -134,7 +131,6 @@ from renus.db.unit_of_work import UnitOfWork
 __all__ = [
     "AsyncDatabaseAdapter",
     "Avg",
-    "CAPABILITIES",
     "CheckConstraint",
     "Column",
     "CompiledMutation",
@@ -144,7 +140,6 @@ __all__ = [
     "ConnectionError",
     "Constraint",
     "Count",
-    "DatabaseCapabilities",
     "DatabaseError",
     "DatabaseField",
     "Database",
@@ -236,7 +231,6 @@ __all__ = [
     "get_adapter",
     "has_adapter",
     "register_adapter",
-    "require_capability",
     "reset_builtin_adapters",
     "sanitize_params",
     "to_dict",

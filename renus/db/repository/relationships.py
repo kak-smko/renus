@@ -51,27 +51,10 @@ class RelationshipCoordinator:
         """Return the repository's database adapter."""
         return self.repo.adapter
 
-    def _doc_backend(self) -> bool:
-        capabilities = getattr(self.adapter, "capabilities", None)
-        if capabilities is None:
-            return False
-        try:
-            return bool(capabilities.supports("nested_documents"))
-        except Exception:
-            return False
-
-    def _can_transact(self) -> bool:
-        caps = getattr(self.adapter, "capabilities", None)
-        if caps is None:
-            return False
-        try:
-            return bool(caps.supports("transactions"))
-        except Exception:
-            return False
 
     @asynccontextmanager
     async def _atomic(self) -> AsyncIterator[None]:
-        if not self._can_transact() or self.adapter._in_active_transaction():
+        if self.adapter._in_active_transaction():
             yield
             return
         async with Transaction(self.adapter):
@@ -94,13 +77,13 @@ class RelationshipCoordinator:
                 continue
 
             if rel.kind == RelationshipKind.EMBEDDED_ONE:
-                if self._doc_backend():
+                if self.adapter.nested_documents:
                     await self._embed_one_in_document(meta, rname, obj)
                 else:
                     await self._persist_embedded_one(meta, rname, rel, parent_id, val)
 
             elif rel.kind == RelationshipKind.EMBEDDED_MANY:
-                if self._doc_backend():
+                if self.adapter.nested_documents:
                     await self._embed_many_in_document(meta, rname, obj)
                 else:
                     await self._persist_embedded_many(meta, rname, rel, parent_id, val)
@@ -361,8 +344,7 @@ class RelationshipCoordinator:
 
         for rname, rel in meta.relationships.items():
             if rel.is_embedded:
-                if self._doc_backend():
-
+                if self.adapter.nested_documents:
                     continue
                 table_name = f"{meta.table}_{rname}"
                 embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
@@ -405,11 +387,11 @@ class RelationshipCoordinator:
                 continue
 
             if rel.kind == RelationshipKind.EMBEDDED_ONE:
-                if not self._doc_backend():
+                if not self.adapter.nested_documents:
                     await self._load_embedded_one_batch(meta, rel_name, rel, parent_ids, objects)
 
             elif rel.kind == RelationshipKind.EMBEDDED_MANY:
-                if not self._doc_backend():
+                if not self.adapter.nested_documents:
                     await self._load_embedded_many_batch(meta, rel_name, rel, parent_ids, objects)
 
             elif rel.kind == RelationshipKind.ONE_TO_MANY:

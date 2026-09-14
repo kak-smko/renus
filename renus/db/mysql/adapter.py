@@ -13,7 +13,6 @@ from renus.db.core.adapter import (
     QueryResult,
     TransactionContext,
 )
-from renus.db.core.capabilities import DatabaseCapabilities
 from renus.db.core.exceptions import ConfigurationError, ConnectionError
 from renus.db import errors
 from renus.db.mutation.ast import MutationAST
@@ -87,20 +86,7 @@ class MySQLAdapter(SQLAdapter):
 
     name: ClassVar[str] = "mysql"
 
-    capabilities: DatabaseCapabilities = DatabaseCapabilities(
-        transactions=True,
-        nested_documents=False,
-        joins=True,
-        foreign_keys=True,
-        upsert=True,
-        returning=False,
-        json=True,
-        arrays=False,
-        cursor_pagination=True,
-        bulk_operations=True,
-        indexes=True,
-        constraints=True,
-    )
+    nested_documents: ClassVar[bool] = False
 
     _raw_embedded_key_type: ClassVar[str] = "VARCHAR(255)"
     _raw_embedded_pos_type: ClassVar[str] = "INT"

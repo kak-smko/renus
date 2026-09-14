@@ -24,9 +24,6 @@ class Transaction:
         self._committed = False
 
     async def __aenter__(self) -> TransactionContext:
-
-        self.adapter.capabilities.require("transactions")
-
         factory_result = self.adapter.transaction_factory()
         if hasattr(factory_result, "__anext__") or hasattr(factory_result, "__aiter__"):
             self._tx_iter = factory_result

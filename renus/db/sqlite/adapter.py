@@ -17,7 +17,6 @@ from renus.db.core.adapter import (
     QueryResult,
     TransactionContext,
 )
-from renus.db.core.capabilities import DatabaseCapabilities
 from renus.db.core.exceptions import (
     ConfigurationError,
     ConnectionError,
@@ -93,20 +92,7 @@ class SQLiteAdapter(SQLAdapter):
 
     name: ClassVar[str] = "sqlite"
 
-    capabilities: DatabaseCapabilities = DatabaseCapabilities(
-        transactions=True,
-        nested_documents=False,
-        joins=True,
-        foreign_keys=True,
-        upsert=True,
-        returning=True,
-        json=True,
-        arrays=False,
-        cursor_pagination=True,
-        bulk_operations=True,
-        indexes=True,
-        constraints=True,
-    )
+    nested_documents: ClassVar[bool] = False
 
     def __init__(self, config: dict | None = None) -> None:
         """Initialize the SQLite adapter.

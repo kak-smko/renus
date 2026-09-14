@@ -9,7 +9,6 @@ from renus.db import (
     Avg,
     Count,
     Database,
-    DatabaseCapabilities,
     DatabaseError,
     DatabaseField,
     DuplicateKeyError,
@@ -216,14 +215,7 @@ def test_mongo_compiler_mutations():
 def test_mongodb_adapter_capabilities():
     adapter = MongoDBAdapter()
     assert adapter.name == "mongodb"
-    assert adapter.capabilities.supports("transactions")
-    assert adapter.capabilities.supports("nested_documents")
-    assert adapter.capabilities.supports("arrays")
-    assert adapter.capabilities.supports("upsert")
-    assert adapter.capabilities.supports("bulk_operations")
-    assert not adapter.capabilities.supports("joins")
-    assert not adapter.capabilities.supports("foreign_keys")
-    assert not adapter.capabilities.supports("returning")
+    assert adapter.nested_documents is True
 
 def test_mongodb_adapter_connection_defaults():
     from renus.db.mongodb.adapter import (

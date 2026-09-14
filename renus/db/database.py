@@ -4,7 +4,6 @@ from typing import Any, Self, TypeVar
 
 from renus.config import Config
 from renus.db.core.adapter import AsyncDatabaseAdapter
-from renus.db.core.capabilities import DatabaseCapabilities
 from renus.db.core.exceptions import ConfigurationError, UnsupportedOperationError
 from renus.db.plugins.core import Plugin, PluginManager
 from renus.db.repository.core import Repository
@@ -137,11 +136,6 @@ class Database:
                 f"No adapter registered for connection '{name}'. Available: {list(self._adapters.keys())}"
             )
         return self._adapters[name]
-
-    @property
-    def capabilities(self) -> DatabaseCapabilities:
-        """Return the capabilities of the primary adapter."""
-        return self.adapter("primary").capabilities
 
     def repository(
         self,
