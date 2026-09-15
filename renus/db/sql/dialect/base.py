@@ -170,10 +170,7 @@ class SQLDialect(ABC):
                     f"FOREIGN KEY ({self.quote(c.name)}) "
                     f"REFERENCES {self.quote(ref_table)}({self.quote(ref_col)})"
                 )
-                if c.on_delete:
-                    fk_clause += f" ON DELETE {c.on_delete.upper()}"
-                if c.on_update:
-                    fk_clause += f" ON UPDATE {c.on_update.upper()}"
+                
                 col_defs.append(fk_clause)
 
         return f"CREATE TABLE {if_clause}{quoted_table} ({', '.join(col_defs)});"

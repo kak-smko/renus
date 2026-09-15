@@ -11,23 +11,10 @@ from renus.db.query.ast import QueryAST
 from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
 from renus.db.sql.dialect.base import SQLDialect
 from renus.db.sql.mutation import SQLMutationCompiler
+from renus.util import to_plural_lower
 
 __all__ = ["SQLAdapter"]
 
-def _singular_table(name: str) -> str:
-    """Derive a singular table name for building relationship column suffixes.
-
-    Used to turn a plural table name (e.g. ``employees``) into the conventional
-    singular form (``employee``) used when naming foreign-key columns such as
-    ``employee_id``.
-    """
-    if name.endswith("ies"):
-        return f"{name[:-3]}y"
-    if name.endswith("ses"):
-        return name[:-2]
-    if name.endswith("s") and not name.endswith("ss") and not name.endswith("is"):
-        return name[:-1]
-    return name
 
 class SQLAdapter(AsyncDatabaseAdapter):
 
@@ -227,9 +214,9 @@ class SQLAdapter(AsyncDatabaseAdapter):
         if tk_fmeta is not None:
             target_pk_type = self.dialect.type_to_sql(tk_fmeta).split()[0]
 
-        local_col = self.dialect.quote(rel.local_key or f"{_singular_table(meta.table)}_id")
+        local_col = self.dialect.quote(rel.local_key or f"{to_plural_lower(meta.table)}_id")
         foreign_col = self.dialect.quote(
-            rel.foreign_key or f"{_singular_table(target_meta.table)}_id"
+            rel.foreign_key or f"{to_plural_lower(target_meta.table)}_id"
         )
 
         cols = [

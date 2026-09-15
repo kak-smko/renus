@@ -14,6 +14,7 @@ from renus.db.query.ast import Condition, Include, Path
 from renus.db.relationships import RelationshipKind
 from renus.db.serialization.core import to_dict
 from renus.db.transaction.core import Transaction
+from renus.util import to_plural_lower
 
 __all__ = ["RelationshipCoordinator"]
 
@@ -29,15 +30,6 @@ def _string_parse(value: Any) -> str | None:
         return None
     return str(value)
 
-def _singular_table(name: str) -> str:
-    """Derive a singular table name for building relationship column suffixes."""
-    if name.endswith("ies"):
-        return f"{name[:-3]}y"
-    if name.endswith("ses"):
-        return name[:-2]
-    if name.endswith("s") and not name.endswith("ss") and not name.endswith("is"):
-        return name[:-1]
-    return name
 
 def _junction_columns(owner_meta: Any, rel: Any, target_meta: Any) -> tuple[str, str]:
     """Return the (owner, target) column names of a many-to-many junction table.
@@ -46,8 +38,8 @@ def _junction_columns(owner_meta: Any, rel: Any, target_meta: Any) -> tuple[str,
     they are derived from the singularised owner and target table names (e.g.
     ``employee_id`` and ``role_id`` for employees/roles).
     """
-    local_col = rel.local_key or f"{_singular_table(owner_meta.table)}_id"
-    foreign_col = rel.foreign_key or f"{_singular_table(target_meta.table)}_id"
+    local_col = rel.local_key or f"{to_plural_lower(owner_meta.table)}_id"
+    foreign_col = rel.foreign_key or f"{to_plural_lower(target_meta.table)}_id"
     return local_col, foreign_col
 
 def _junction_source(through_table: str) -> Any:
@@ -372,7 +364,7 @@ class RelationshipCoordinator:
         target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
         child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
 
-        fk_name = rel.foreign_key or f"{parent_meta.table[:-1] if parent_meta.table.endswith('s') else parent_meta.table}_id"
+        fk_name = rel.foreign_key or f"{to_plural_lower(parent_meta.table)}_id"
         object.__setattr__(child, fk_name, parent_id)
         await child_repo.save(child)
 
@@ -386,7 +378,7 @@ class RelationshipCoordinator:
         target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
         child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
 
-        fk_name = rel.foreign_key or f"{parent_meta.table[:-1] if parent_meta.table.endswith('s') else parent_meta.table}_id"
+        fk_name = rel.foreign_key or f"{to_plural_lower(parent_meta.table)}_id"
 
         for child in children:
             object.__setattr__(child, fk_name, parent_id)
@@ -469,7 +461,7 @@ class RelationshipCoordinator:
 
             elif "all" in rel.cascade or "delete" in rel.cascade or rel.on_delete == "cascade":
                 target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
-                fk_name = rel.foreign_key or f"{meta.table[:-1] if meta.table.endswith('s') else meta.table}_id"
+                fk_name = rel.foreign_key or f"{to_plural_lower(meta.table)}_id"
                 child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
                 if hard:
                     await child_repo.hard_delete_many(Path(target_cls, (fk_name,)).in_(parent_ids))
@@ -683,7 +675,7 @@ class RelationshipCoordinator:
         inc: Include,
     ) -> None:
         target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
-        fk_name = rel.foreign_key or f"{meta.table[:-1] if meta.table.endswith('s') else meta.table}_id"
+        fk_name = rel.foreign_key or f"{to_plural_lower(meta.table)}_id"
         child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
 
         filter_cond = Path(target_cls, (fk_name,)).in_(parent_ids)
@@ -744,7 +736,7 @@ class RelationshipCoordinator:
         inc: Include,
     ) -> None:
         target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
-        fk_name = rel.foreign_key or f"{meta.table[:-1] if meta.table.endswith('s') else meta.table}_id"
+        fk_name = rel.foreign_key or f"{to_plural_lower(meta.table)}_id"
         child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
 
         children = await child_repo.query(Path(target_cls, (fk_name,)).in_(parent_ids)).all()

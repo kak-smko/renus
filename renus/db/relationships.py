@@ -79,6 +79,17 @@ class Relationship:
             Whether the target is stored inline with the owner.
         is_collection:
             Whether the relationship resolves to multiple records.
+
+     
+        on_delete and on_update options:
+        | Action | Behavior When Parent Record is Deleted (or Updated) | 
+        | :--- | :--- | :--- |
+        | **CASCADE** | Child records are **automatically deleted** (or updated) along with the parent. |
+        | **RESTRICT** | The deletion is **blocked** and the database throws an **Error**. | 
+        | **SET NULL** | The Foreign Key in the child record is set to **NULL**. |
+        | **SET DEFAULT** | The Foreign Key in the child record is set to its **Default** value. |
+        | **NO ACTION** | Throws an **Error** (just like RESTRICT), but the check is **deferred** until the end of the transaction. | 
+        
         """
         self.kind = RelationshipKind(kind) if isinstance(kind, str) else kind
         self.target = target
