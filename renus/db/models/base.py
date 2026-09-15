@@ -340,7 +340,7 @@ class ModelMeta(type):
                 local_key=rel.local_key,
                 foreign_key=rel.foreign_key,
                 through=rel.through,
-                cascade=rel.cascade,
+                on_save=rel.on_save,
                 on_delete=rel.on_delete,
                 on_update=rel.on_update,
                 loading=rel.loading,
@@ -680,9 +680,13 @@ class ReModel(metaclass=ModelMeta):
                     raise
                 raise ValidationError(e.args or str(e)) from e
 
+            is_relationship = name in meta.relationships
             current_state = getattr(self, "_db_state", Lifecycle.NEW)
-            if fmeta and current_state in (Lifecycle.PERSISTED, Lifecycle.DIRTY):
-                if self._is_field_dirty(name):
+            if (fmeta or is_relationship) and current_state in (
+                Lifecycle.PERSISTED,
+                Lifecycle.DIRTY,
+            ):
+                if is_relationship or self._is_field_dirty(name):
                     object.__setattr__(self, "_db_state", Lifecycle.DIRTY)
                 else:
 

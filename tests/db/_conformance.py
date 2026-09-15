@@ -96,7 +96,9 @@ class User(ReModel):
     age: int = 0
     active: bool = True
     profile: Profile = Embedded(Profile)
-    posts: list[Post] = OneToMany(Post, foreign_key="user_id", cascade=("all",))
+    posts: list[Post] = OneToMany(
+        Post, foreign_key="user_id", on_save="cascade", on_delete="cascade"
+    )
 
     class Meta:
         timestamps = True
@@ -140,7 +142,9 @@ class Role(ReModel):
 class Citizen(ReModel):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
-    passport: Passport = OneToOne(Passport, foreign_key="citizen_id", cascade=("all",))
+    passport: Passport = OneToOne(
+        Passport, foreign_key="citizen_id", on_save="cascade", on_delete="cascade"
+    )
 
 
 class Item(ReModel):

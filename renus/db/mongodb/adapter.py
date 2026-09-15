@@ -300,10 +300,14 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
                 )
 
             if op == "update_one":
+                if isinstance(extra, dict) and "_id" in extra.get("$set", {}):
+                    return await self._update_reassign_pk(coll, filt_or_doc, extra["$set"], session, single=True)
                 res = await coll.update_one(filt_or_doc, extra, session=session)
                 return MutationResult(rows_affected=res.modified_count)
 
             if op == "update_many":
+                if isinstance(extra, dict) and "_id" in extra.get("$set", {}):
+                    return await self._update_reassign_pk(coll, filt_or_doc, extra["$set"], session, single=False)
                 res = await coll.update_many(filt_or_doc, extra, session=session)
                 return MutationResult(rows_affected=res.modified_count)
 
@@ -324,6 +328,27 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
             raise NotImplementedError(f"Unsupported MongoDB operation: {op}")
         except Exception as e:
             raise errors.translate_driver_error("MongoDB", "mongodb", e, "mutation") from e
+
+    async def _update_reassign_pk(self, coll, filt, set_doc, session, *, single):
+        docs = await coll.find(filt, session=session).to_list(length=1 if single else 2)
+        if len(docs) > 1:
+            raise errors.DuplicateKeyError(
+                "MongoDB reassign error: multiple documents cannot be reassigned to the same unique '_id'"
+            )
+        if not docs:
+            return MutationResult(rows_affected=0)
+        doc = docs[0]
+        old_id = doc.get("_id")
+        new_id = set_doc["_id"]
+        if old_id == new_id:
+            return MutationResult(rows_affected=0)
+        replacement = {k: v for k, v in set_doc.items() if k != "_id"}
+        new_doc = dict(doc)
+        new_doc.update(replacement)
+        new_doc["_id"] = new_id
+        await coll.insert_one(new_doc, session=session)
+        await coll.delete_one({"_id": old_id}, session=session)
+        return MutationResult(rows_affected=1)
 
     async def execute_mutation(self, compiled: CompiledMutation) -> MutationResult:
         """Execute a compiled mutation and return the result."""

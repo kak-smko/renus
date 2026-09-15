@@ -166,6 +166,7 @@ class Repository(Generic[T]):
             return obj
 
         async with self._atomic():
+            await self._rel_coordinator.cascade_on_update(obj)
             update_ast = Update.from_model(obj)
             if update_ast.values:
                 await self._execute_mutation(update_ast)

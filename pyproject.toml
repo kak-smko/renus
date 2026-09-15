@@ -11,7 +11,7 @@ build-backend = "setuptools.build_meta"
 name = "renus"
 description = "Renus Core Framework - a lightweight ASGI web framework and toolkit."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 # Version is read dynamically from renus/__init__.py (single source of truth).
 dynamic = ["version"]
 license = { text = "BSD-3-Clause" }

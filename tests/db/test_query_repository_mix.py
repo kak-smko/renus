@@ -43,7 +43,9 @@ class User(ReModel):
     name: str | None = None
     age: int = 0
     active: bool = True
-    posts: list[Post] = OneToMany(Post, foreign_key="user_id", cascade=("all",))
+    posts: list[Post] = OneToMany(
+        Post, foreign_key="user_id", on_save="cascade", on_delete="cascade"
+    )
 
 
 class SoftUser(ReModel):

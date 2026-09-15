@@ -84,7 +84,7 @@ class RelationshipMetadata:
     local_key: str | None = None
     foreign_key: str | None = None
     through: type | str | None = None
-    cascade: frozenset[str] = frozenset()
+    on_save: str = "no action"
     on_delete: str = "restrict"
     on_update: str = "cascade"
     loading: str = "selectin"

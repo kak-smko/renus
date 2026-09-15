@@ -4,11 +4,13 @@ from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from typing import Any
 
+from renus.db.core.exceptions import IntegrityError
 from renus.db.mutation.ast import (
     DeleteMany,
     Insert,
     InsertMany,
     Update,
+    UpdateMany,
 )
 from renus.db.query.ast import Condition, Include, Path
 from renus.db.relationships import RelationshipKind
@@ -106,17 +108,63 @@ class RelationshipCoordinator:
                     await self._persist_embedded_many(meta, rname, rel, parent_id, val)
 
             elif rel.kind == RelationshipKind.ONE_TO_MANY and (
-                "all" in rel.cascade or "save" in rel.cascade
+                rel.on_save == "cascade"
             ):
                 await self._persist_one_to_many(meta, rel, parent_id, val)
 
             elif rel.kind == RelationshipKind.ONE_TO_ONE and (
-                "all" in rel.cascade or "save" in rel.cascade
+                rel.on_save == "cascade"
             ):
                 await self._persist_one_to_one(meta, rel, parent_id, val)
 
+            elif rel.kind == RelationshipKind.MANY_TO_ONE and rel.on_save == "cascade":
+                await self._persist_many_to_one(obj, rel)
+
             elif rel.kind == RelationshipKind.MANY_TO_MANY and val:
                 await self._persist_many_to_many(meta, rel, parent_id, val)
+
+    async def _persist_many_to_one(
+        self,
+        obj: Any,
+        rel: Any,
+    ) -> None:
+        """Persist the referenced parent and link this model's foreign key to it.
+
+        Used when a many-to-one relationship cascades on save: the referenced
+        parent is created only when it is not already stored, then the local
+        foreign key on the holder is updated to point at it.
+        """
+        parent = getattr(obj, rel.name, None)
+        if parent is None:
+            return
+        target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
+        parent_meta = getattr(target_cls, "__db_metadata__", None)
+        obj_meta = getattr(self.model, "__db_metadata__", None)
+        fk_name = rel.foreign_key
+        if parent_meta is None or obj_meta is None or not fk_name:
+            return
+
+        parent_pk = parent_meta.primary_key_field
+        parent_id = getattr(parent, parent_pk, None)
+        parent_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
+        exists = parent_id is not None and await parent_repo.exists(
+            Path(target_cls, (parent_pk,)) == parent_id
+        )
+        if not exists:
+            await parent_repo.save(parent)
+            parent_id = getattr(parent, parent_pk, None)
+        if parent_id is None:
+            return
+
+        if getattr(obj, fk_name, None) is None:
+            obj_pk = obj_meta.primary_key_field
+            setattr(obj, fk_name, parent_id)
+            upd_ast = Update(
+                source=self.model,
+                values={fk_name: parent_id},
+                filters=(Path(self.model, (obj_pk,)) == getattr(obj, obj_pk, None),),
+            )
+            await self.adapter.execute_mutation(upd_ast)
 
     async def _persist_many_to_many(
         self,
@@ -138,6 +186,7 @@ class RelationshipCoordinator:
         target_meta = self._mtm_target_meta(rel)
         if target_meta is None:
             return
+        target_cls = target_meta.model
 
         target_pk = target_meta.primary_key_field
         local_col, foreign_col = _junction_columns(parent_meta, rel, target_meta)
@@ -150,6 +199,9 @@ class RelationshipCoordinator:
         )
         await self.adapter.execute_mutation(del_ast)
 
+        cascade = rel.on_save == "cascade"
+        target_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
+
         records: list[dict[str, Any]] = []
         for child in children or []:
             fk_val = (
@@ -157,17 +209,21 @@ class RelationshipCoordinator:
                 if isinstance(child, dict)
                 else getattr(child, target_pk, None)
             )
-            if fk_val is None:
-                # Persist a brand-new target so it has an id to link against.
-                child_repo = self.repo.__class__(
-                    self.adapter, target_cls, self.repo.connection_name
-                )
-                await child_repo.save(child)
-                fk_val = (
-                    child.get(target_pk)
-                    if isinstance(child, dict)
-                    else getattr(child, target_pk, None)
-                )
+            already_stored = fk_val is not None and await target_repo.exists(
+                Path(target_cls, (target_pk,)) == fk_val
+            )
+            if not already_stored:
+                if cascade:
+                    # Create a missing target so it has an id to link against.
+                    await target_repo.save(child)
+                    fk_val = (
+                        child.get(target_pk)
+                        if isinstance(child, dict)
+                        else getattr(child, target_pk, None)
+                    )
+                else:
+                    # No action: only link targets that are already stored.
+                    continue
             if fk_val is None:
                 continue
             records.append({local_col: parent_id, foreign_col: fk_val})
@@ -459,14 +515,106 @@ class RelationshipCoordinator:
                 )
                 await self.adapter.execute_mutation(del_ast)
 
-            elif "all" in rel.cascade or "delete" in rel.cascade or rel.on_delete == "cascade":
+            elif rel.kind in (RelationshipKind.ONE_TO_ONE, RelationshipKind.ONE_TO_MANY):
                 target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
                 fk_name = rel.foreign_key or f"{to_plural_lower(meta.table)}_id"
+                child_condition = Path(target_cls, (fk_name,)).in_(parent_ids)
+                if rel.on_delete == "cascade":
+                    child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
+                    if hard:
+                        await child_repo.hard_delete_many(child_condition)
+                    else:
+                        await child_repo.delete_many(child_condition)
+                elif rel.on_delete == "set null":
+                    upd_ast = UpdateMany(
+                        source=target_cls,
+                        values={fk_name: None},
+                        filters=(child_condition,),
+                    )
+                    await self.adapter.execute_mutation(upd_ast)
+                elif rel.on_delete == "set default":
+                    upd_ast = UpdateMany(
+                        source=target_cls,
+                        values={fk_name: self._fk_default(target_cls, fk_name)},
+                        filters=(child_condition,),
+                    )
+                    await self.adapter.execute_mutation(upd_ast)
+                elif rel.on_delete == "restrict":
+                    child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
+                    if await child_repo.exists(child_condition):
+                        raise IntegrityError(
+                            f"cannot delete {meta.table} because related {target_cls.__name__} "
+                            f"rows still reference the parent"
+                        )
+
+
+    @staticmethod
+    def _fk_default(target_cls: type, fk_name: str) -> Any:
+        meta = getattr(target_cls, "__db_metadata__", None)
+        if meta is None:
+            return None
+        fmeta = meta.fields.get(fk_name)
+        if fmeta is None:
+            return None
+        return fmeta.get_default()
+
+    async def cascade_on_update(self, obj: Any) -> None:
+        meta = getattr(self.model, "__db_metadata__", None)
+        if not meta:
+            return
+
+        pk = meta.primary_key_field
+        old_id = getattr(obj, "_db_original_snapshot", {}).get(pk)
+        new_id = getattr(obj, pk, None)
+        if old_id is None or old_id == new_id:
+            return
+
+        for rname, rel in meta.relationships.items():
+            if rel.is_embedded:
+                continue
+            if rel.kind == RelationshipKind.MANY_TO_MANY:
+                if not rel.through:
+                    continue
+                target_meta = self._mtm_target_meta(rel)
+                if target_meta is None:
+                    continue
+                local_col, _ = _junction_columns(meta, rel, target_meta)
+                junction_source = _junction_source(rel.through)
+                upd_ast = UpdateMany(
+                    source=junction_source,
+                    values={local_col: new_id},
+                    filters=(Path(junction_source, (local_col,)) == old_id,),
+                )
+                await self.adapter.execute_mutation(upd_ast)
+                continue
+            if rel.kind not in (RelationshipKind.ONE_TO_ONE, RelationshipKind.ONE_TO_MANY):
+                continue
+            action = rel.on_update
+            if action not in ("cascade", "set null", "set default", "restrict"):
+                continue
+            target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
+            fk_name = rel.foreign_key or f"{to_plural_lower(meta.table)}_id"
+            condition = Path(target_cls, (fk_name,)) == old_id
+            if action == "cascade":
+                values = {fk_name: new_id}
+            elif action == "set null":
+                values = {fk_name: None}
+            elif action == "set default":
+                values = {fk_name: self._fk_default(target_cls, fk_name)}
+            else:
                 child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
-                if hard:
-                    await child_repo.hard_delete_many(Path(target_cls, (fk_name,)).in_(parent_ids))
-                else:
-                    await child_repo.delete_many(Path(target_cls, (fk_name,)).in_(parent_ids))
+                if await child_repo.exists(condition):
+                    raise IntegrityError(
+                        f"cannot update {meta.table} because related {target_cls.__name__} "
+                        f"rows still reference the parent"
+                    )
+                continue
+            upd_ast = UpdateMany(
+                source=target_cls,
+                values=values,
+                filters=(condition,),
+            )
+            await self.adapter.execute_mutation(upd_ast)
 
     @staticmethod
     def _row_pk_value(row: Any, pk: str) -> Any:

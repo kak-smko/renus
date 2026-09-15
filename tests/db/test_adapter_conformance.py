@@ -18,12 +18,22 @@ from renus.db import (
     Avg,
     Count,
     Database,
+    DatabaseField,
     DuplicateKeyError,
+    Field,
     Include,
+    IntegrityError,
+    LoadingStrategy,
+    ManyToMany,
+    ManyToOne,
     Max,
     Min,
+    OneToMany,
+    OneToOne,
     ReModel,
+    ReferentialAction,
     RelationshipKind,
+    SaveAction,
     Sum,
 )
 
@@ -74,6 +84,166 @@ async def _row_counts(db, *tables: str) -> dict[str, int]:
     """Return the number of rows stored in each table/collection.
     """
     return {t: await db.repository(_row_count_model(t)).count() for t in tables}
+
+
+def _o2o_pair(
+    name,
+    *,
+    on_save,
+    on_delete,
+    on_update,
+    fk_default=None,
+) -> tuple[type, type, str]:
+    """Build a one-to-one owner/child model pair for action testing.
+    """
+    fk = f"{name.lower()}_id"
+    child_cls = type(
+        f"{name}Detail",
+        (ReModel,),
+        {
+            "__annotations__": {"id": str, fk: (str | None), "label": str},
+            "id": Field(database=DatabaseField(primary_key=True)),
+            fk: fk_default,
+            "label": "",
+        },
+    )
+    owner_cls = type(
+        f"{name}Owner",
+        (ReModel,),
+        {
+            "__annotations__": {"id": str, "name": str, "detail": child_cls},
+            "id": Field(database=DatabaseField(primary_key=True)),
+            "name": "",
+            "detail": OneToOne(
+                child_cls,
+                foreign_key=fk,
+                on_save=on_save,
+                on_delete=on_delete,
+                on_update=on_update,
+            ),
+        },
+    )
+    return owner_cls, child_cls, fk
+
+
+def _o2m_pair(
+    name,
+    *,
+    on_save,
+    on_delete,
+    on_update,
+    fk_default=None,
+) -> tuple[type, type, str]:
+    """Build a one-to-many owner/child model pair for action testing.
+    """
+    fk = f"{name.lower()}_id"
+    child_cls = type(
+        f"{name}Child",
+        (ReModel,),
+        {
+            "__annotations__": {"id": str, fk: (str | None), "label": str},
+            "id": Field(database=DatabaseField(primary_key=True)),
+            fk: fk_default,
+            "label": "",
+        },
+    )
+    owner_cls = type(
+        f"{name}Owner",
+        (ReModel,),
+        {
+            "__annotations__": {"id": str, "name": str, "children": list[child_cls]},
+            "id": Field(database=DatabaseField(primary_key=True)),
+            "name": "",
+            "children": OneToMany(
+                child_cls,
+                foreign_key=fk,
+                on_save=on_save,
+                on_delete=on_delete,
+                on_update=on_update,
+            ),
+        },
+    )
+    return owner_cls, child_cls, fk
+
+
+def _m2o_pair(
+    name,
+    *,
+    on_save,
+) -> tuple[type, type, str]:
+    """Build a many-to-one holder/parent model pair for action testing.
+
+    The holder carries the foreign key and the ``ManyToOne`` relationship;
+    many-to-one only supports ``on_save`` (delete/update are always no action).
+    """
+    fk = f"{name.lower()}_id"
+    parent_cls = type(
+        f"{name}Parent",
+        (ReModel,),
+        {
+            "__annotations__": {"id": str, "name": str},
+            "id": Field(database=DatabaseField(primary_key=True)),
+            "name": "",
+        },
+    )
+    holder_cls = type(
+        f"{name}Item",
+        (ReModel,),
+        {
+            "__annotations__": {
+                "id": str,
+                fk: (str | None),
+                "label": str,
+                "parent": parent_cls,
+            },
+            "id": Field(database=DatabaseField(primary_key=True)),
+            fk: None,
+            "label": "",
+            "parent": ManyToOne(
+                parent_cls,
+                foreign_key=fk,
+                on_save=on_save,
+            ),
+        },
+    )
+    return holder_cls, parent_cls, fk
+
+
+def _mtm_pair(
+    name,
+    *,
+    on_save,
+) -> tuple[type, type, str]:
+    """Build a many-to-many owner/target model pair for action testing.
+
+    Many-to-many only supports ``on_save`` (delete/update are fixed to cascade
+    and operate on the junction ``through`` table).
+    """
+    through = f"{name.lower()}_links"
+    target_cls = type(
+        f"{name}Role",
+        (ReModel,),
+        {
+            "__annotations__": {"id": str, "name": str},
+            "id": Field(database=DatabaseField(primary_key=True)),
+            "name": "",
+        },
+    )
+    owner_cls = type(
+        f"{name}Owner",
+        (ReModel,),
+        {
+            "__annotations__": {"id": str, "name": str, "items": list[target_cls]},
+            "id": Field(database=DatabaseField(primary_key=True)),
+            "name": "",
+            "items": ManyToMany(
+                target_cls,
+                through=through,
+                on_save=on_save,
+            ),
+        },
+    )
+    return owner_cls, target_cls, through
 
 
 # ---------------------------------------------------------------------------
@@ -1011,8 +1181,495 @@ async def test_cascade_on_delete_one_to_many_isolates_siblings(kind):
         await db.disconnect()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+@pytest.mark.parametrize(
+    "action", list(SaveAction), ids=lambda a: a.value.replace(" ", "_")
+)
+async def test_one_to_one_on_save(kind, action):
+    name = "OnSave" + "".join(w.capitalize() for w in action.value.split())
+    owner, child, _fk = _o2o_pair(
+        name,
+        on_save=action.value,
+        on_delete=ReferentialAction.CASCADE.value,
+        on_update=ReferentialAction.CASCADE.value,
+    )
+    owner_table = owner.metadata().table
+    child_table = child.metadata().table
+    db = await database_for(kind, [owner, child])
+    try:
+        repo = db.repository(owner)
+        await repo.create(owner(id="p1", name="p", detail=child(id="d1", label="x")))
+        child_count = await db.repository(child).query().count()
+        if action is SaveAction.CASCADE:
+            assert child_count == 1
+        else:
+            assert child_count == 0
+        assert await _row_counts(db, owner_table, child_table) == {
+            owner_table: 1,
+            child_table: child_count,
+        }
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+@pytest.mark.parametrize(
+    "action", list(ReferentialAction), ids=lambda a: a.value.replace(" ", "_")
+)
+async def test_one_to_one_on_delete(kind, action):
+    name = "OnDelete" + "".join(w.capitalize() for w in action.value.split())
+    fk_default = "unknown" if action is ReferentialAction.SET_DEFAULT else None
+    owner, child, fk = _o2o_pair(
+        name,
+        on_save=SaveAction.CASCADE.value,
+        on_delete=action.value,
+        on_update=ReferentialAction.CASCADE.value,
+        fk_default=fk_default,
+    )
+    owner_table = owner.metadata().table
+    child_table = child.metadata().table
+    db = await database_for(kind, [owner, child])
+    try:
+        repo = db.repository(owner)
+        await repo.create(owner(id="p1", name="p", detail=child(id="d1", label="x")))
+        before = await _row_counts(db, owner_table, child_table)
+        loaded = (await repo.query().include(owner.detail).all())[0]
+        if action is ReferentialAction.RESTRICT:
+            with pytest.raises(IntegrityError):
+                await repo.delete(loaded)
+            assert await _row_counts(db, owner_table, child_table) == before
+        else:
+            await repo.delete(loaded)
+            children = await db.repository(child).query().all()
+            after = {
+                owner_table: await repo.query().count(),
+                child_table: len(children),
+            }
+            if action is ReferentialAction.CASCADE:
+                assert after == {owner_table: 0, child_table: 0}
+            else:
+                assert after == {owner_table: 0, child_table: 1}
+                if action is ReferentialAction.SET_NULL:
+                    assert getattr(children[0], fk) is None
+                elif action is ReferentialAction.SET_DEFAULT:
+                    assert getattr(children[0], fk) == "unknown"
+                else:
+                    assert getattr(children[0], fk) == "p1"
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+@pytest.mark.parametrize(
+    "action", list(ReferentialAction), ids=lambda a: a.value.replace(" ", "_")
+)
+async def test_one_to_one_on_update(kind, action):
+    name = "OnUpdate" + "".join(w.capitalize() for w in action.value.split())
+    fk_default = "unknown" if action is ReferentialAction.SET_DEFAULT else None
+    owner, child, fk = _o2o_pair(
+        name,
+        on_save=SaveAction.NO_ACTION.value,
+        on_delete=ReferentialAction.CASCADE.value,
+        on_update=action.value,
+        fk_default=fk_default,
+    )
+    owner_table = owner.metadata().table
+    child_table = child.metadata().table
+    db = await database_for(kind, [owner, child])
+    try:
+        await db.repository(child).create(child(id="d1", label="x", **{fk: "p1"}))
+        await db.repository(owner).create(owner(id="p1", name="p"))
+        before = await _row_counts(db, owner_table, child_table)
+        loaded = (await db.repository(owner).query().include(owner.detail).all())[0]
+        loaded.id = "p2"
+        if action is ReferentialAction.RESTRICT:
+            with pytest.raises(IntegrityError):
+                await db.repository(owner).save(loaded)
+            stored = (await db.repository(owner).query().all())[0]
+            assert stored.id == "p1"
+            children = await db.repository(child).query().all()
+            assert len(children) == 1
+            assert getattr(children[0], fk) == "p1"
+            assert await _row_counts(db, owner_table, child_table) == before
+        else:
+            await db.repository(owner).save(loaded)
+            children = await db.repository(child).query().all()
+            assert len(children) == 1
+            if action is ReferentialAction.CASCADE:
+                assert getattr(children[0], fk) == "p2"
+            elif action is ReferentialAction.SET_NULL:
+                assert getattr(children[0], fk) is None
+            elif action is ReferentialAction.SET_DEFAULT:
+                assert getattr(children[0], fk) == "unknown"
+            else:
+                assert getattr(children[0], fk) == "p1"
+            assert await _row_counts(db, owner_table, child_table) == before
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+@pytest.mark.parametrize(
+    "action", list(SaveAction), ids=lambda a: a.value.replace(" ", "_")
+)
+async def test_one_to_many_on_save(kind, action):
+    name = "OnSave" + "".join(w.capitalize() for w in action.value.split())
+    owner, child, _fk = _o2m_pair(
+        name,
+        on_save=action.value,
+        on_delete=ReferentialAction.CASCADE.value,
+        on_update=ReferentialAction.CASCADE.value,
+    )
+    owner_table = owner.metadata().table
+    child_table = child.metadata().table
+    db = await database_for(kind, [owner, child])
+    try:
+        repo = db.repository(owner)
+        await repo.create(
+            owner(
+                id="p1",
+                name="p",
+                children=[
+                    child(id="d1", label="x"),
+                    child(id="d2", label="y"),
+                    child(id="d3", label="z"),
+                ],
+            )
+        )
+        child_count = await db.repository(child).query().count()
+        if action is SaveAction.CASCADE:
+            assert child_count == 3
+        else:
+            assert child_count == 0
+        assert await _row_counts(db, owner_table, child_table) == {
+            owner_table: 1,
+            child_table: child_count,
+        }
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+@pytest.mark.parametrize(
+    "action", list(ReferentialAction), ids=lambda a: a.value.replace(" ", "_")
+)
+async def test_one_to_many_on_delete(kind, action):
+    name = "OnDelete" + "".join(w.capitalize() for w in action.value.split())
+    fk_default = "unknown" if action is ReferentialAction.SET_DEFAULT else None
+    owner, child, fk = _o2m_pair(
+        name,
+        on_save=SaveAction.CASCADE.value,
+        on_delete=action.value,
+        on_update=ReferentialAction.CASCADE.value,
+        fk_default=fk_default,
+    )
+    owner_table = owner.metadata().table
+    child_table = child.metadata().table
+    db = await database_for(kind, [owner, child])
+    try:
+        repo = db.repository(owner)
+        await repo.create(
+            owner(
+                id="p1",
+                name="p",
+                children=[
+                    child(id="d1", label="x"),
+                    child(id="d2", label="y"),
+                    child(id="d3", label="z"),
+                ],
+            )
+        )
+        before = await _row_counts(db, owner_table, child_table)
+        loaded = (await repo.query().include(owner.children).all())[0]
+        if action is ReferentialAction.RESTRICT:
+            with pytest.raises(IntegrityError):
+                await repo.delete(loaded)
+            assert await _row_counts(db, owner_table, child_table) == before
+        else:
+            await repo.delete(loaded)
+            children = await db.repository(child).query().all()
+            after = {
+                owner_table: await repo.query().count(),
+                child_table: len(children),
+            }
+            if action is ReferentialAction.CASCADE:
+                assert after == {owner_table: 0, child_table: 0}
+            else:
+                assert after == {owner_table: 0, child_table: 3}
+                if action is ReferentialAction.SET_NULL:
+                    assert all(getattr(c, fk) is None for c in children)
+                elif action is ReferentialAction.SET_DEFAULT:
+                    assert all(getattr(c, fk) == "unknown" for c in children)
+                else:
+                    assert all(getattr(c, fk) == "p1" for c in children)
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+@pytest.mark.parametrize(
+    "action", list(ReferentialAction), ids=lambda a: a.value.replace(" ", "_")
+)
+async def test_one_to_many_on_update(kind, action):
+    name = "OnUpdate" + "".join(w.capitalize() for w in action.value.split())
+    fk_default = "unknown" if action is ReferentialAction.SET_DEFAULT else None
+    owner, child, fk = _o2m_pair(
+        name,
+        on_save=SaveAction.NO_ACTION.value,
+        on_delete=ReferentialAction.CASCADE.value,
+        on_update=action.value,
+        fk_default=fk_default,
+    )
+    owner_table = owner.metadata().table
+    child_table = child.metadata().table
+    db = await database_for(kind, [owner, child])
+    try:
+        await db.repository(child).create_many(
+            [
+                child(id="d1", label="x", **{fk: "p1"}),
+                child(id="d2", label="y", **{fk: "p1"}),
+                child(id="d3", label="z", **{fk: "p1"}),
+            ]
+        )
+        await db.repository(owner).create(owner(id="p1", name="p"))
+        before = await _row_counts(db, owner_table, child_table)
+        loaded = (await db.repository(owner).query().include(owner.children).all())[0]
+        loaded.id = "p2"
+        if action is ReferentialAction.RESTRICT:
+            with pytest.raises(IntegrityError):
+                await db.repository(owner).save(loaded)
+            stored = (await db.repository(owner).query().all())[0]
+            assert stored.id == "p1"
+            children = await db.repository(child).query().all()
+            assert len(children) == 3
+            assert all(getattr(c, fk) == "p1" for c in children)
+            assert await _row_counts(db, owner_table, child_table) == before
+        else:
+            await db.repository(owner).save(loaded)
+            children = await db.repository(child).query().all()
+            assert len(children) == 3
+            if action is ReferentialAction.CASCADE:
+                assert all(getattr(c, fk) == "p2" for c in children)
+            elif action is ReferentialAction.SET_NULL:
+                assert all(getattr(c, fk) is None for c in children)
+            elif action is ReferentialAction.SET_DEFAULT:
+                assert all(getattr(c, fk) == "unknown" for c in children)
+            else:
+                assert all(getattr(c, fk) == "p1" for c in children)
+            assert await _row_counts(db, owner_table, child_table) == before
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+@pytest.mark.parametrize(
+    "action", list(SaveAction), ids=lambda a: a.value.replace(" ", "_")
+)
+async def test_many_to_one_on_save(kind, action):
+    name = "OnSave" + "".join(w.capitalize() for w in action.value.split())
+    holder, parent, fk = _m2o_pair(name, on_save=action.value)
+    holder_table = holder.metadata().table
+    parent_table = parent.metadata().table
+    db = await database_for(kind, [holder, parent])
+    try:
+        repo = db.repository(holder)
+        await repo.create_many(
+            [
+                holder(id="c1", label="x", parent=parent(id="p1", name="p")),
+                holder(id="c2", label="y", parent=parent(id="p1", name="p")),
+                holder(id="c3", label="z", parent=parent(id="p1", name="p")),
+            ]
+        )
+        parent_count = await db.repository(parent).query().count()
+        if action is SaveAction.CASCADE:
+            assert parent_count == 1
+        else:
+            assert parent_count == 0
+        assert await _row_counts(db, holder_table, parent_table) == {
+            holder_table: 3,
+            parent_table: parent_count,
+        }
+        stored = await repo.query().all()
+        if action is SaveAction.CASCADE:
+            assert all(getattr(o, fk) == "p1" for o in stored)
+        else:
+            assert all(getattr(o, fk) is None for o in stored)
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_many_to_one_on_delete(kind):
+    name = "OnDelete"
+    holder, parent, fk = _m2o_pair(name, on_save=SaveAction.NO_ACTION.value)
+    holder_table = holder.metadata().table
+    parent_table = parent.metadata().table
+    db = await database_for(kind, [holder, parent])
+    try:
+        await db.repository(parent).create(parent(id="p1", name="p"))
+        await db.repository(holder).create_many(
+            [
+                holder(id="c1", label="x", **{fk: "p1"}),
+                holder(id="c2", label="y", **{fk: "p1"}),
+                holder(id="c3", label="z", **{fk: "p1"}),
+            ]
+        )
+        before = await _row_counts(db, holder_table, parent_table)
+        loaded = (await db.repository(holder).query().all())[0]
+        await db.repository(holder).delete(loaded)
+        after = await _row_counts(db, holder_table, parent_table)
+        assert after == {holder_table: 2, parent_table: 1}
+        holders = await db.repository(holder).query().all()
+        assert len(holders) == 2
+        assert all(getattr(h, fk) == "p1" for h in holders)
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_many_to_one_on_update(kind):
+    name = "OnUpdate"
+    holder, parent, fk = _m2o_pair(name, on_save=SaveAction.NO_ACTION.value)
+    holder_table = holder.metadata().table
+    parent_table = parent.metadata().table
+    db = await database_for(kind, [holder, parent])
+    try:
+        await db.repository(parent).create(parent(id="p1", name="p"))
+        await db.repository(holder).create_many(
+            [
+                holder(id="c1", label="x", **{fk: "p1"}),
+                holder(id="c2", label="y", **{fk: "p1"}),
+                holder(id="c3", label="z", **{fk: "p1"}),
+            ]
+        )
+        before = await _row_counts(db, holder_table, parent_table)
+        loaded = await db.repository(holder).query().first()
+        await db.repository(holder).query(
+            holder.id == "c1"
+        ).update({"id":"cp"})
+        loaded=await db.repository(holder).query(holder.id == "cp").first()
+        assert loaded.id == "cp"
+        assert loaded.label == "x"
+        assert await _row_counts(db, holder_table, parent_table) == before
+        holders = await db.repository(holder).query().all()
+        assert len(holders) == 3
+        assert all(getattr(h, fk) == "p1" for h in holders)
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+@pytest.mark.parametrize(
+    "action", list(SaveAction), ids=lambda a: a.value.replace(" ", "_")
+)
+async def test_many_to_many_on_save(kind, action):
+    name = "OnSave" + "".join(w.capitalize() for w in action.value.split())
+    owner, target, through = _mtm_pair(name, on_save=action.value)
+    owner_table = owner.metadata().table
+    target_table = target.metadata().table
+    db = await database_for(kind, [owner, target])
+    try:
+        repo = db.repository(owner)
+        await repo.create(
+            owner(
+                id="p1",
+                name="p",
+                items=[target(id="r1", name="a"), target(id="r2", name="b")],
+            )
+        )
+        target_count = await db.repository(target).query().count()
+        if action is SaveAction.CASCADE:
+            assert target_count == 2
+        else:
+            assert target_count == 0
+        assert await _row_counts(db, owner_table, target_table, through) == {
+            owner_table: 1,
+            target_table: target_count,
+            through: target_count,
+        }
+        loaded = (await repo.query().include(owner.items).all())[0]
+        if action is SaveAction.CASCADE:
+            assert sorted(i.name for i in loaded.items) == ["a", "b"]
+        else:
+            assert loaded.items == []
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_many_to_many_on_delete(kind):
+    name = "OnDelete"
+    owner, target, through = _mtm_pair(name, on_save=SaveAction.CASCADE.value)
+    owner_table = owner.metadata().table
+    target_table = target.metadata().table
+    db = await database_for(kind, [owner, target])
+    try:
+        repo = db.repository(owner)
+        await repo.create(
+            owner(
+                id="p1",
+                name="p",
+                items=[target(id="r1", name="a"), target(id="r2", name="b")],
+            )
+        )
+        before = await _row_counts(db, owner_table, target_table, through)
+        assert before == {owner_table: 1, target_table: 2, through: 2}
+        loaded = (await repo.query().all())[0]
+        await repo.delete(loaded)
+        assert await _row_counts(db, owner_table, target_table, through) == {
+            owner_table: 0,
+            target_table: 2,
+            through: 0,
+        }
+        assert await repo.query().count() == 0
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_many_to_many_on_update(kind):
+    name = "OnUpdate"
+    owner, target, through = _mtm_pair(name, on_save=SaveAction.CASCADE.value)
+    owner_table = owner.metadata().table
+    target_table = target.metadata().table
+    db = await database_for(kind, [owner, target])
+    try:
+        repo = db.repository(owner)
+        await repo.create(
+            owner(
+                id="p1",
+                name="p",
+                items=[target(id="r1", name="a"), target(id="r2", name="b")],
+            )
+        )
+        loaded = (await repo.query().include(owner.items).all())[0]
+        loaded.items = [target(id="r1", name="a")]
+        await repo.save(loaded)
+        assert await _row_counts(db, owner_table, target_table, through) == {
+            owner_table: 1,
+            target_table: 2,
+            through: 1,
+        }
+        reloaded = (await repo.query().include(owner.items).all())[0]
+        assert sorted(i.name for i in reloaded.items) == ["a"]
+    finally:
+        await db.disconnect()
+
+
 # ---------------------------------------------------------------------------
-# Soft delete
+# Cascades: on update & on delete
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
