@@ -10,26 +10,14 @@ from collections.abc import Mapping
 from typing import Any
 
 try:
-    from bson import ObjectId
-except ImportError:
-    ObjectId = None
-
-try:
     import orjson as _orjson
 except ImportError:
     _orjson = None
 
 __all__ = ["jsonEncoder", "JSONEncoder", "json_decoder", "dumps", "loads", "dumps_bytes"]
 
-def _make_object_id(hex_value: str) -> Any:
-    if ObjectId is None:
-        raise ImportError(
-            "bson is not installed; install 'pymongo' to decode MongoDB ObjectIds"
-        )
-    return ObjectId(hex_value)
 
 _ISOFORMAT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}")
-_OBJECTID_RE = re.compile(r"^[a-fA-F0-9]{24}$")
 _UUID_RE = re.compile(
     r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-"
     r"[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$"
@@ -67,8 +55,6 @@ def _encode_default_value(o: Any) -> Any:
         return str(o)
     if isinstance(o, (set, frozenset)):
         return sorted(o, key=repr)
-    if ObjectId is not None and isinstance(o, ObjectId):
-        return str(o)
     if isinstance(o, (str, int, float, bool, type(None))):
         return o
     if isinstance(o, Mapping):
@@ -95,12 +81,6 @@ def _decode_string(value: str) -> Any:
             clean = value.rstrip("Z")
             return datetime.datetime.fromisoformat(clean)
         except (ValueError, TypeError):
-            pass
-
-    if length == 24 and _OBJECTID_RE.match(value):
-        try:
-            return _make_object_id(value)
-        except Exception:
             pass
 
     if length == 36 and _UUID_RE.match(value):

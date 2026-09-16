@@ -8,11 +8,12 @@ from collections.abc import Callable, Collection
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
+from renus.db.models.id import ID
+
 if TYPE_CHECKING:
     from renus.db.models.db_field import DatabaseField
 
 from renus.db.core.exceptions import ValidationError
-from renus.db.models.db_field import ObjectId
 
 class _Unset:
     def __repr__(self) -> str:
@@ -550,11 +551,11 @@ class FieldInfo:
 
         if (
             value is not None
-            and type(value).__name__ == "ObjectId"
-            and not isinstance(value, ObjectId)
+            and type(value).__name__ == "ID"
+            and not isinstance(value, ID)
         ):
-            if ObjectId in self.effective_types:
-                value = ObjectId(str(value))
+            if ID in self.effective_types:
+                value = ID(str(value))
             elif str in self.effective_types:
                 value = str(value)
 

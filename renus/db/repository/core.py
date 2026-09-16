@@ -30,6 +30,7 @@ from renus.db.query.ast import (
 )
 from renus.db.query.builder import Count, Query
 from renus.db.serialization.core import from_dict
+from renus.db.models.id import ID
 from renus.db.transaction.core import Transaction
 
 __all__ = ["Repository"]
@@ -114,12 +115,20 @@ class Repository(Generic[T]):
             if meta and result.last_id is not None:
                 pk_field = meta.primary_key_field
                 if getattr(obj, pk_field, None) is None:
-                    object.__setattr__(obj, pk_field, result.last_id)
+                    pk_meta = meta.fields.get(pk_field)
+                    generated_id = result.last_id
+                    if pk_meta is not None and pk_meta.inferred_type is ID:
+                        generated_id = self.adapter.decode_value(result.last_id, pk_meta)
+                    object.__setattr__(obj, pk_field, generated_id)
 
             if result.generated:
                 for k, v in result.generated.items():
                     if getattr(obj, k, None) is None:
-                        object.__setattr__(obj, k, v)
+                        field_meta = meta.fields.get(k) if meta else None
+                        generated_value = v
+                        if field_meta is not None and field_meta.inferred_type is ID:
+                            generated_value = self.adapter.decode_value(v, field_meta)
+                        object.__setattr__(obj, k, generated_value)
 
             if hasattr(obj, "_mark_persisted"):
                 getattr(obj, "_mark_persisted")()
@@ -140,14 +149,31 @@ class Repository(Generic[T]):
             if meta:
                 pk_field = meta.primary_key_field
                 if res.generated and "ids" in res.generated:
+                    pk_meta = meta.fields.get(pk_field)
                     for obj, gen_id in zip(obj_list, res.generated["ids"]):
                         if getattr(obj, pk_field, None) is None:
-                            object.__setattr__(obj, pk_field, gen_id)
+                            generated_id = gen_id
+                            if pk_meta is not None and pk_meta.inferred_type is ID:
+                                generated_id = self.adapter.decode_value(gen_id, pk_meta)
+                            object.__setattr__(obj, pk_field, generated_id)
                 elif res.last_id is not None and len(obj_list) > 0:
                     first_id = res.last_id - len(obj_list) + 1
                     for idx, obj in enumerate(obj_list):
                         if getattr(obj, pk_field, None) is None:
                             object.__setattr__(obj, pk_field, first_id + idx)
+
+            if res.generated:
+                for field_name, generated_values in res.generated.items():
+                    if field_name == "ids" or not isinstance(generated_values, list):
+                        continue
+                    field_meta = meta.fields.get(field_name) if meta else None
+                    for obj, generated_value in zip(obj_list, generated_values):
+                        if getattr(obj, field_name, None) is None:
+                            if field_meta is not None and field_meta.inferred_type is ID:
+                                generated_value = self.adapter.decode_value(
+                                    generated_value, field_meta
+                                )
+                            object.__setattr__(obj, field_name, generated_value)
 
             for obj in obj_list:
                 if hasattr(obj, "_mark_persisted"):
@@ -468,68 +494,7 @@ class Repository(Generic[T]):
         if not meta:
             return row
 
-        data = dict(row)
-        for fname, fmeta in meta.fields.items():
-            col = fmeta.column_name
-            if col in data:
-                val = data[col]
-            elif fname in data:
-                val = data[fname]
-            else:
-                continue
-
-            if val is None:
-                data[fname] = None
-                continue
-
-            target_type = fmeta.inferred_type
-            type_str = str(target_type).lower()
-
-            if (target_type is bool or type_str in ("bool", "boolean")) and isinstance(val, int):
-                data[fname] = bool(val)
-                continue
-
-            if (target_type is datetime or "datetime" in type_str) and isinstance(val, str):
-                try:
-                    data[fname] = datetime.fromisoformat(val.rstrip("Z"))
-                except Exception:
-                    pass
-                continue
-
-            if (target_type is date or type_str == "date") and isinstance(val, str):
-                try:
-                    data[fname] = date.fromisoformat(val)
-                except Exception:
-                    pass
-                continue
-
-            if (target_type is UUID or "uuid" in type_str) and isinstance(val, str):
-                try:
-                    data[fname] = UUID(val)
-                except Exception:
-                    pass
-                continue
-
-            if (target_type is Decimal or "decimal" in type_str) and isinstance(val, (str, int, float)):
-                try:
-                    data[fname] = Decimal(str(val))
-                except Exception:
-                    pass
-                continue
-
-            if (
-                target_type in (dict, list)
-                or getattr(target_type, "__origin__", None) in (dict, list)
-                or type_str.startswith("dict")
-                or type_str.startswith("list")
-            ) and isinstance(val, str):
-                try:
-                    data[fname] = json.loads(val)
-                except Exception:
-                    pass
-                continue
-
-            data[fname] = val
+        data = self.adapter.decode_row(dict(row), meta)
 
         rel_meta = getattr(meta, "relationships", None)
         if rel_meta:

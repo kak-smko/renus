@@ -25,6 +25,7 @@ from renus.db.core.exceptions import (
 )
 from renus.db import errors
 from renus.db.mongodb.compiler import MongoCompiledQuery, MongoCompiler
+from renus.db.mongodb.dialect import MongoDialect
 from renus.db.mutation.ast import MutationAST
 from renus.db.query.ast import QueryAST
 
@@ -99,7 +100,8 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
             Optional connection configuration dictionary. Defaults to empty.
         """
         self.config = config if config else {}
-        self.compiler = MongoCompiler()
+        self.dialect = MongoDialect()
+        self.compiler = MongoCompiler(self.dialect)
         self._mongo_client: Any = None
         self._mongo_db: Any = None
         self._tx_session: Any = None
@@ -288,15 +290,51 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         session = self._tx_session
         try:
             if op == "insert_one":
-                res = await coll.insert_one(filt_or_doc, session=session)
-                return MutationResult(rows_affected=1, last_id=res.inserted_id)
+                doc = dict(filt_or_doc)
+                auto_inc_field = extra.get("auto_inc_field") if isinstance(extra, dict) else None
+                generated_value = None
+                generated_field = None
+                if auto_inc_field is not None and auto_inc_field not in filt_or_doc:
+                    generated_value = await self._next_sequence(coll.name, session)
+                    generated_field = auto_inc_field
+                    if auto_inc_field == "id":
+                        doc["_id"] = generated_value
+                    else:
+                        doc[auto_inc_field] = generated_value
+
+                res = await coll.insert_one(doc, session=session)
+                generated = None
+                if generated_field is not None and generated_field != "id":
+                    generated = {generated_field: generated_value}
+                return MutationResult(
+                    rows_affected=1,
+                    last_id=res.inserted_id,
+                    generated=generated,
+                )
 
             if op == "insert_many":
                 docs = filt_or_doc.get("docs", [])
-                res = await coll.insert_many(docs, session=session)
+                auto_inc_field = extra.get("auto_inc_field") if isinstance(extra, dict) else None
+                new_docs = []
+                generated_values: list[Any] = []
+                for d in docs:
+                    dd = dict(d)
+                    stored_field = "_id" if auto_inc_field == "id" else auto_inc_field
+                    if auto_inc_field is not None and stored_field not in dd:
+                        next_id = await self._next_sequence(coll.name, session)
+                        dd[stored_field] = next_id
+                        generated_values.append(next_id)
+                    elif auto_inc_field is not None:
+                        generated_values.append(dd[stored_field])
+                    new_docs.append(dd)
+
+                res = await coll.insert_many(new_docs, session=session)
+                generated: dict[str, Any] = {"ids": list(res.inserted_ids)}
+                if auto_inc_field is not None and auto_inc_field != "id":
+                    generated[auto_inc_field] = generated_values
                 return MutationResult(
                     rows_affected=len(res.inserted_ids),
-                    generated={"ids": res.inserted_ids},
+                    generated=generated,
                 )
 
             if op == "update_one":
@@ -328,6 +366,24 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
             raise NotImplementedError(f"Unsupported MongoDB operation: {op}")
         except Exception as e:
             raise errors.translate_driver_error("MongoDB", "mongodb", e, "mutation") from e
+
+    async def _next_sequence(self, coll_name: str, session: Any) -> int:
+        """Atomically allocate the next integer id for a collection.
+
+        Uses an upserting ``$inc`` on a shared ``__counters__`` collection so
+        concurrent inserts receive distinct ids.
+        """
+        from pymongo import ReturnDocument
+
+        counters = self._mongo_db["__counters__"]
+        counter = await counters.find_one_and_update(
+            {"_id": f"seq_{coll_name}"},
+            {"$inc": {"seq": 1}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+            session=session,
+        )
+        return counter["seq"]
 
     async def _update_reassign_pk(self, coll, filt, set_doc, session, *, single):
         docs = await coll.find(filt, session=session).to_list(length=1 if single else 2)

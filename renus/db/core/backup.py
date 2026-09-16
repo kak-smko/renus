@@ -9,7 +9,8 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from renus.db.models import ObjectId
+from renus.db.models.id import ID
+
 
 __all__ = [
     "BackupEncoder",
@@ -41,8 +42,8 @@ def backup_encode(value: Any) -> Any:
         return {"$numberDecimal": str(value)}
     if isinstance(value, Enum):
         return {"$enum": value.value}
-    if isinstance(value, ObjectId):
-        return {"$oid": str(value)}
+    if isinstance(value, ID):
+        return {"$id": str(value)}
     if isinstance(value, (bytes, bytearray)):
         return {
             "$binary": {
@@ -85,11 +86,11 @@ def backup_decode_hook(obj: Any) -> Any:
         except (ValueError, TypeError, AttributeError):
             return obj["$uuid"]
 
-    if "$oid" in obj:
+    if "$id" in obj:
         try:
-            return ObjectId(obj["$oid"])
+            return ID(obj["$id"])
         except (ValueError, TypeError, AttributeError):
-            return obj["$oid"]
+            return obj["$id"]
 
    
     if "$numberDecimal" in obj:

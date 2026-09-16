@@ -28,8 +28,8 @@ from renus.db.mutation.ast import MutationAST
 from renus.db.query.ast import QueryAST
 from renus.db.sql.adapter import SQLAdapter
 from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
-from renus.db.sqlite.dialect import SQLiteDialect
 from renus.db.sql.mutation import SQLMutationCompiler
+from renus.db.sqlite.dialect import SQLiteDialect
 
 __all__ = ["SQLiteAdapter", "SQLiteTransactionContext"]
 
@@ -37,6 +37,7 @@ DEFAULT_SQLITE_TIMEOUT = 5.0
 DEFAULT_SQLITE_BUSY_TIMEOUT = 5000
 CONNECT_RETRIES = 3
 CONNECT_RETRY_DELAY = 0.5
+
 
 class SQLiteTransactionContext(TransactionContext):
     """Async context manager wrapping a SQLite connection transaction."""
@@ -88,8 +89,8 @@ class SQLiteTransactionContext(TransactionContext):
                 await asyncio.to_thread(self._conn.rollback)
                 self._active = False
 
-class SQLiteAdapter(SQLAdapter):
 
+class SQLiteAdapter(SQLAdapter):
     name: ClassVar[str] = "sqlite"
 
     nested_documents: ClassVar[bool] = False
@@ -111,17 +112,7 @@ class SQLiteAdapter(SQLAdapter):
         self._tx_session: Any = None
 
     def _normalize_param(self, p: Any) -> Any:
-        if isinstance(p, datetime):
-            return p.isoformat()
-        if isinstance(p, date):
-            return p.isoformat()
-        if isinstance(p, UUID):
-            return str(p)
-        if isinstance(p, Decimal):
-            return str(p)
-        if isinstance(p, (dict, list)):
-            return json.dumps(p)
-        return p
+        return self.dialect.encode_value(p)
 
     async def connect(self) -> None:
         """Establish a connection to the database."""
@@ -154,15 +145,21 @@ class SQLiteAdapter(SQLAdapter):
                 await asyncio.to_thread(
                     self._sqlite_db.execute, f"PRAGMA busy_timeout = {busy_timeout};"
                 )
-                await asyncio.to_thread(self._sqlite_db.execute, "PRAGMA foreign_keys = ON;")
+                await asyncio.to_thread(
+                    self._sqlite_db.execute, "PRAGMA foreign_keys = ON;"
+                )
                 if journal_mode is not None:
                     await asyncio.to_thread(
-                        self._sqlite_db.execute, f"PRAGMA journal_mode = {journal_mode};"
+                        self._sqlite_db.execute,
+                        f"PRAGMA journal_mode = {journal_mode};",
                     )
                 elif not in_memory:
-
-                    await asyncio.to_thread(self._sqlite_db.execute, "PRAGMA journal_mode = WAL;")
-                    await asyncio.to_thread(self._sqlite_db.execute, "PRAGMA synchronous = NORMAL;")
+                    await asyncio.to_thread(
+                        self._sqlite_db.execute, "PRAGMA journal_mode = WAL;"
+                    )
+                    await asyncio.to_thread(
+                        self._sqlite_db.execute, "PRAGMA synchronous = NORMAL;"
+                    )
 
                 last_err = None
                 return
@@ -202,7 +199,9 @@ class SQLiteAdapter(SQLAdapter):
     def transaction_factory(self) -> AsyncIterator[TransactionContext]:
         """Yield a SQLite transaction context for the caller."""
         if self._sqlite_db is None:
-            raise ConfigurationError("Cannot create transaction context: SQLite is not connected")
+            raise ConfigurationError(
+                "Cannot create transaction context: SQLite is not connected"
+            )
 
         conn = self._sqlite_db
         adapter_self = self

@@ -45,7 +45,7 @@ from renus.db.models import (
     DatabaseField,
     Field,
     ModelMeta,
-    ObjectId,
+    ID,
     ReModel,
 )
 from renus.db.mutation import (
@@ -189,7 +189,7 @@ __all__ = [
     "MutationResult",
     "MySQLAdapter",
     "NotFoundError",
-    "ObjectId",
+    "ID",
     "OneToMany",
     "OneToOne",
     "Operator",

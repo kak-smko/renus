@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from renus.db.core.exceptions import ValidationError
-from renus.db.models.db_field import UNSET, DatabaseField, ObjectId
+from renus.db.models.db_field import UNSET, DatabaseField
 from renus.db.models.base import ReModel
 from renus.db.models.field import Field, FieldInfo
 from renus.db.validation.rules import (
@@ -46,7 +46,6 @@ __all__ = [
     "Field",
     "FieldInfo",
     "DatabaseField",
-    "ObjectId",
     "UNSET",
     "ValidationError",
     "Validate",

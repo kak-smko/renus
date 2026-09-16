@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from renus.config import Config
 from renus.db.mutation.ast import (
     Delete,
     DeleteMany,
@@ -22,7 +23,9 @@ from renus.db.query.ast import (
     RelationAny,
 )
 from renus.db.relationships import RelationshipKind
-from renus.util.naming import to_plural_lower
+from renus.db.models.id import ID
+from renus.db.mongodb.dialect import MongoDialect
+from renus.util import to_plural_lower
 
 __all__ = ["MongoCompiledQuery", "MongoCompiler"]
 
@@ -76,6 +79,17 @@ class MongoCompiledQuery:
         self.pipeline = pipeline
 
 class MongoCompiler:
+
+    def __init__(self, dialect: MongoDialect | None = None) -> None:
+        """Initialize the compiler with a MongoDB dialect.
+
+        Parameters
+        ----------
+        dialect:
+            Dialect describing BSON type support and value encoding. Defaults
+            to a shared :class:`MongoDialect` instance.
+        """
+        self.dialect = dialect or MongoDialect()
 
     def compile_query(self, ast: QueryAST) -> MongoCompiledQuery:
         """Compile a query AST into a MongoCompiledQuery."""
@@ -217,28 +231,28 @@ class MongoCompiler:
                 return {path: val}
 
         if op == Operator.EQ:
-            return {path: val}
+            return {path: self.dialect.encode_value(val)}
 
         if op == Operator.NE:
-            return {path: {"$ne": val}}
+            return {path: {"$ne": self.dialect.encode_value(val)}}
 
         if op == Operator.GT:
-            return {path: {"$gt": val}}
+            return {path: {"$gt": self.dialect.encode_value(val)}}
 
         if op == Operator.GE:
-            return {path: {"$gte": val}}
+            return {path: {"$gte": self.dialect.encode_value(val)}}
 
         if op == Operator.LT:
-            return {path: {"$lt": val}}
+            return {path: {"$lt": self.dialect.encode_value(val)}}
 
         if op == Operator.LE:
-            return {path: {"$lte": val}}
+            return {path: {"$lte": self.dialect.encode_value(val)}}
 
         if op == Operator.IN:
-            return {path: {"$in": list(val)}}
+            return {path: {"$in": [self.dialect.encode_value(v) for v in val]}}
 
         if op == Operator.NOT_IN:
-            return {path: {"$nin": list(val)}}
+            return {path: {"$nin": [self.dialect.encode_value(v) for v in val]}}
 
         if op == Operator.IS_NULL:
             return {path: None}
@@ -263,7 +277,12 @@ class MongoCompiler:
 
         if op == Operator.BETWEEN:
             lower, upper = val
-            return {path: {"$gte": lower, "$lte": upper}}
+            return {
+                path: {
+                    "$gte": self.dialect.encode_value(lower),
+                    "$lte": self.dialect.encode_value(upper),
+                }
+            }
 
         raise ValueError(f"Unsupported MongoDB query operator: {op}")
 
@@ -271,6 +290,7 @@ class MongoCompiler:
         """Compile a mutation AST into a collection, operation, and arguments."""
         source = m.source
         meta = getattr(source, "__db_metadata__", None)
+        auto_inc_field = self._auto_inc_field(meta)
         collection = (
             meta.table
             if meta
@@ -280,11 +300,18 @@ class MongoCompiler:
 
         if isinstance(m, Insert):
             doc = self._map_doc_for_mongo(m.values, meta)
-            return collection, "insert_one", doc, None
+            self._needs_auto_int_id(meta, m.values)
+            return collection, "insert_one", doc, {
+                "auto_inc_field": auto_inc_field,
+            }
 
         if isinstance(m, InsertMany):
             docs = [self._map_doc_for_mongo(r, meta) for r in m.records]
-            return collection, "insert_many", {"docs": docs}, None
+            for record in m.records:
+                self._needs_auto_int_id(meta, record)
+            return collection, "insert_many", {"docs": docs}, {
+                "auto_inc_field": auto_inc_field,
+            }
 
         if isinstance(m, Update):
             filt = self._compile_filters(m.filters, meta)
@@ -325,6 +352,33 @@ class MongoCompiler:
 
         raise NotImplementedError(f"Unsupported mutation: {type(m).__name__}")
 
+    def _auto_inc_field(self, meta: Any) -> str | None:
+        """Validate and return the model's configured auto-increment field."""
+        if not meta:
+            return None
+
+        configured_id = Config("database").get("ID", int)
+        auto_inc_fields: list[str] = []
+        for field_name, field_meta in meta.fields.items():
+            if not field_meta.database.auto_inc:
+                continue
+            if configured_id is not int:
+                raise ValueError("MongoDB auto_inc requires Config('database').ID=int")
+            if field_meta.inferred_type not in (int, ID):
+                raise ValueError(
+                    f"MongoDB auto_inc field '{field_name}' must have type int or ID"
+                )
+            auto_inc_fields.append(field_name)
+
+        if len(auto_inc_fields) > 1:
+            raise ValueError("MongoDB supports one auto_inc field per model")
+        return auto_inc_fields[0] if auto_inc_fields else None
+
+    def _needs_auto_int_id(self, meta: Any, values: dict[str, Any]) -> bool:
+        """Return whether an auto-increment integer is needed for an insert."""
+        auto_inc_field = self._auto_inc_field(meta)
+        return auto_inc_field is not None and auto_inc_field not in values
+
     def _map_doc_for_mongo(
         self,
         doc: dict[str, Any],
@@ -333,9 +387,9 @@ class MongoCompiler:
         mapped: dict[str, Any] = {}
         for k, v in doc.items():
             if k == "id" and (not meta or meta.primary_key_field == "id") and "_id" not in doc:
-                mapped["_id"] = v
+                mapped["_id"] = self.dialect.encode_value(v)
             else:
-                mapped[k] = v
+                mapped[k] = self.dialect.encode_value(v)
         return mapped
 
     def _combine_filter_parts(self, parts: list[dict[str, Any]]) -> dict[str, Any]:

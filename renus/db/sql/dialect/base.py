@@ -7,15 +7,17 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from renus.db.core import convert
 from renus.db.metadata.core import FieldMetadata
+from renus.db.models.id import ID, is_identity
 
 if TYPE_CHECKING:
     from renus.db.migrations.operations import Column
 
 __all__ = ["SQLDialect"]
 
-class SQLDialect(ABC):
 
+class SQLDialect(ABC):
     placeholder: str = "?"
 
     @abstractmethod
@@ -66,9 +68,13 @@ class SQLDialect(ABC):
             raw_type = col.type.strip()
 
             lower = raw_type.lower()
-            if lower in ("int", "integer"):
-                if col.primary_key and col.generated:
-                    return "INT AUTO_INCREMENT PRIMARY KEY" if is_mysql else "INTEGER PRIMARY KEY AUTOINCREMENT"
+            if lower in ("int", "integer","id"):
+                if col.primary_key and col.generated and col.auto_inc:
+                    return (
+                        "INT AUTO_INCREMENT PRIMARY KEY"
+                        if is_mysql
+                        else "INTEGER PRIMARY KEY AUTOINCREMENT"
+                    )
                 return "INT" if is_mysql else "INTEGER"
             if lower in ("str", "string", "varchar"):
                 return "VARCHAR(255)" if is_mysql else "TEXT"
@@ -96,8 +102,12 @@ class SQLDialect(ABC):
             if issubclass(col.type, bool):
                 return "TINYINT(1)" if is_mysql else "INTEGER"
             if issubclass(col.type, int):
-                if col.primary_key and col.generated:
-                    return "INT AUTO_INCREMENT PRIMARY KEY" if is_mysql else "INTEGER PRIMARY KEY AUTOINCREMENT"
+                if col.primary_key and col.generated and col.auto_inc:
+                    return (
+                        "INT AUTO_INCREMENT PRIMARY KEY"
+                        if is_mysql
+                        else "INTEGER PRIMARY KEY AUTOINCREMENT"
+                    )
                 return "INT" if is_mysql else "INTEGER"
             if issubclass(col.type, float):
                 return "DOUBLE" if is_mysql else "REAL"
@@ -170,7 +180,7 @@ class SQLDialect(ABC):
                     f"FOREIGN KEY ({self.quote(c.name)}) "
                     f"REFERENCES {self.quote(ref_table)}({self.quote(ref_col)})"
                 )
-                
+
                 col_defs.append(fk_clause)
 
         return f"CREATE TABLE {if_clause}{quoted_table} ({', '.join(col_defs)});"
@@ -256,3 +266,21 @@ class SQLDialect(ABC):
         if "sqlite" in dialect_name:
             return f"DROP INDEX IF EXISTS {quoted_name};"
         return f"DROP INDEX {quoted_name} ON {quoted_table};"
+
+    def encode_value(self, value: Any, field_meta: Any = None) -> Any:
+        """Encode a value for storage.
+
+        An ``ID`` is stored in its portable text form, matching the SQL text
+        column a relational backend uses for identity values.
+        """
+        if isinstance(value, ID):
+            return None if value.value is None else str(value)
+        return convert.encode_value(value, field_meta)
+
+    def decode_value(self, value: Any, field_meta: Any = None) -> Any:
+        """Decode a stored value back into its Python form."""
+        if value is not None and field_meta is not None and is_identity(
+            field_meta.inferred_type
+        ):
+            return ID(value)
+        return convert.decode_value(value, field_meta)

@@ -15,8 +15,9 @@ from renus.db.metadata.core import (
     RelationshipMetadata,
 )
 from renus.db.metadata.inference import analyze_field_type, infer_identity_kind, is_optional_type
-from renus.db.models.db_field import UNSET, DatabaseField, ObjectId
+from renus.db.models.db_field import UNSET, DatabaseField
 from renus.db.models.field import Field, FieldInfo, _UNSET
+from renus.db.models.id import ID
 from renus.db.query.ast import Path
 from renus.db.relationships import EmbeddedMany, EmbeddedOne, Relationship
 from renus.util.codec import json_decode
@@ -169,9 +170,9 @@ class ModelMeta(type):
             validation_fields.pop(rname, None)
 
         if "_id" in annotations or "_id" in declared_db_fields:
-            _id_type = annotations.get("_id", ObjectId)
+            _id_type = annotations.get("_id", ID)
             _id_db = declared_db_fields.get("_id") or DatabaseField(
-                primary_key=True, default_factory=ObjectId
+                primary_key=True, default_factory=ID
             )
             _id_field = Field(default=None, default_factory=_id_db.default_factory, database=_id_db)
             validation_fields["_id"] = FieldInfo(
@@ -209,6 +210,11 @@ class ModelMeta(type):
             pk = db.primary_key or (fname in ("id", "_id") and not any(
                 d.primary_key for d in declared_db_fields.values()
             ))
+
+            if db.auto_inc and not pk:
+                raise ValueError(
+                    f"Field '{fname}' with auto_inc=True must be primary_key=True"
+                )
 
             identity_kind: IdentityKind | None = None
             if pk:
@@ -286,7 +292,7 @@ class ModelMeta(type):
                 object.__setattr__(pk_meta, "primary_key", True)
                 identity = IdentityMetadata(
                     fields=("_id",),
-                    kind=IdentityKind.OBJECT_ID,
+                    kind=IdentityKind.ID,
                     generated=True,
                 )
             elif "id" in fields_dict:

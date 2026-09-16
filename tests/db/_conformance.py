@@ -61,6 +61,7 @@ __all__ = [
     "conformance_tests",
     "adapter_for",
     "database_for",
+    "cleanup",
     "Profile",
     "User",
     "Post",
@@ -201,6 +202,10 @@ class AdapterDriver(ABC):
         """Return a fresh ``Database`` wrapping a new adapter instance."""
         return Database(self.make_adapter())
 
+    async def drop_database(self, adapter) -> None:
+        """Drop the database backing the given adapter."""
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Registry
@@ -272,18 +277,16 @@ def _unique_db(prefix: str) -> str:
     return f"renus_conf_{os.getpid()}_{prefix}_{uuid.uuid4().hex[:6]}"
 
 
-def _drive(kind: str, label: str, factory, ready) -> AdapterDriver:
-    driver = type(
-        "_CfgDriver",
-        (AdapterDriver,),
-        {
-            "kind": kind,
-            "label": label,
-            "make_adapter": lambda self, _f=factory: _f(),
-            "ready": staticmethod(ready),
-        },
-    )()
-    return driver
+def _drive(kind: str, label: str, factory, ready, drop_database=None) -> AdapterDriver:
+    methods = {
+        "kind": kind,
+        "label": label,
+        "make_adapter": lambda self, _f=factory: _f(),
+        "ready": staticmethod(ready),
+    }
+    if drop_database is not None:
+        methods["drop_database"] = drop_database
+    return type("_CfgDriver", (AdapterDriver,), methods)()
 
 
 def _builtin_drivers() -> list[AdapterDriver]:
@@ -301,6 +304,7 @@ def _builtin_drivers() -> list[AdapterDriver]:
                 {"uri": "mongodb://localhost:27017", "database": _unique_db("mongo")}
             ),
             _mongo_ready,
+            drop_database=lambda self, adapter: _drop_mongo_database(adapter),
         ),
         _drive(
             "mysql",
@@ -315,6 +319,7 @@ def _builtin_drivers() -> list[AdapterDriver]:
                 }
             ),
             _mysql_ready,
+            drop_database=lambda self, adapter: _drop_mysql_database(adapter),
         ),
     ]
 
@@ -357,10 +362,28 @@ def adapter_for(kind: str):
     return _CONFORMANCE_ADAPTERS[kind].make_adapter()
 
 
+async def _drop_mongo_database(adapter) -> None:
+    await adapter._mongo_client.drop_database(adapter._mongo_db.name)
+
+
+async def _drop_mysql_database(adapter) -> None:
+    pool = adapter._mysql_db
+    cfg = adapter.config
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(f"DROP DATABASE IF EXISTS `{cfg['database']}`")
+
+
+async def cleanup(db: Database) -> None:
+    adapter = db.adapter("primary")
+    await _CONFORMANCE_ADAPTERS[adapter.name].drop_database(adapter)
+    await db.disconnect()
+
+
 async def database_for(kind: str, models=None):
     """Create a connected ``Database`` with schema ready for ``models``.
 
-    The caller is responsible for ``await db.disconnect()``.
+    The caller is responsible for teardown via ``await cleanup(db)``.
     """
     db = Database(adapter_for(kind))
     await db.connect()

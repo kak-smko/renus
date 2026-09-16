@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from types import TracebackType
 from typing import Any, ClassVar, Protocol, Self, TypeVar
 
+from renus.db.core import convert
+
 __all__ = [
     "AsyncDatabaseAdapter",
     "CompiledMutation",
@@ -17,18 +19,24 @@ __all__ = [
 
 RowT_co = TypeVar("RowT_co", covariant=True)
 
+
 class CompiledQuery(Protocol[RowT_co]):
     """Protocol describing a compiled query ready for execution."""
+
     pass
+
 
 class CompiledMutation(Protocol):
     """Protocol describing a compiled mutation ready for execution."""
+
     pass
+
 
 class QueryResult(Protocol[RowT_co]):
     """Protocol for an iterable set of returned rows."""
 
     def __iter__(self) -> Iterator[RowT_co]: ...
+
 
 @dataclass(frozen=True, slots=True)
 class MutationResult:
@@ -37,6 +45,7 @@ class MutationResult:
     rows_affected: int
     last_id: Any = None
     generated: dict[str, Any] | None = None
+
 
 class TransactionContext(Protocol):
     """Protocol for an active transactional context."""
@@ -57,6 +66,7 @@ class TransactionContext(Protocol):
     async def rollback(self) -> None:
         """Roll back the transaction."""
         ...
+
 
 class AsyncDatabaseAdapter(ABC):
     """Abstract async database adapter interface."""
@@ -240,6 +250,35 @@ class AsyncDatabaseAdapter(ABC):
     ) -> dict[str, int]:
         """Restore the database from a backup at the given path."""
         pass
+
+    def encode_value(self, value: Any, field_meta: Any = None) -> Any:
+
+        dialect = getattr(self, "dialect", None)
+        if dialect is not None and hasattr(dialect, "encode_value"):
+            return dialect.encode_value(value, field_meta)
+        return convert.encode_value(value, field_meta)
+
+    def decode_value(self, value: Any, field_meta: Any = None) -> Any:
+
+        dialect = getattr(self, "dialect", None)
+        if dialect is not None and hasattr(dialect, "decode_value"):
+            return dialect.decode_value(value, field_meta)
+        return convert.decode_value(value, field_meta)
+
+    def decode_row(self, row: dict[str, Any], meta: Any = None) -> dict[str, Any]:
+        data = dict(row)
+        if meta is None:
+            return data
+        for fname, fmeta in meta.fields.items():
+            col = fmeta.column_name
+            if col in data:
+                val = data[col]
+            elif fname in data:
+                val = data[fname]
+            else:
+                continue
+            data[fname] = self.decode_value(val, fmeta)
+        return data
 
     def __repr__(self) -> str:
         return f"<{type(self).__name__} name={getattr(self, 'name', '?')!r}>"

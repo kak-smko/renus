@@ -82,7 +82,7 @@ def test_identity_kinds():
         "string",
         "composite",
         "generated",
-        "object_id",
+        "id",
     }
 
 @pytest.mark.asyncio

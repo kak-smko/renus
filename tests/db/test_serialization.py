@@ -10,7 +10,7 @@ import pytest
 from renus.db import (
     DatabaseField,
     Field,
-    ObjectId,
+    ID,
     ReModel,
     ValidationError,
     from_dict,
@@ -42,12 +42,12 @@ class SerializedProfile(ReModel):
     birth_date: date | None = None
     avatar_bytes: bytes = b"\x89PNG\r\n"
     address: SerializedAddress | None = None
-    mongo_id: ObjectId = Field(database=DatabaseField(default_factory=ObjectId))
+    mongo_id: ID = Field(database=DatabaseField(default_factory=ID))
 
 def test_to_dict_scalars_and_models():
     addr = SerializedAddress(street="123 Main St", city="Metropolis", zip_code="10001")
     u_id = UUID("12345678-1234-5678-1234-567812345678")
-    m_id = ObjectId("507f1f77bcf86cd799439011")
+    m_id = ID("507f1f77bcf86cd799439011")
     fixed_time = datetime(2026, 9, 7, 12, 0, 0, tzinfo=timezone.utc)
     fixed_date = date(1990, 5, 20)
 
@@ -122,7 +122,7 @@ def test_from_dict_with_automatic_type_coercion():
     assert prof.uid == UUID("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
     assert prof.username == "charlie"
     assert prof.birth_date == date(1995, 12, 1)
-    assert prof.mongo_id == ObjectId("507f1f77bcf86cd799439011")
+    assert prof.mongo_id == ID("507f1f77bcf86cd799439011")
     assert isinstance(prof.address, SerializedAddress)
     assert prof.address.city == "Star City"
 

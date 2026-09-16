@@ -33,7 +33,7 @@ from renus.db.mysql.dialect import MySQLDialect
 from tests.db import _native_helpers as nh
 
 class Customer(ReModel):
-    id: int = Field(database=DatabaseField(primary_key=True, generated=True))
+    id: int = Field(database=DatabaseField(primary_key=True, generated=True, auto_inc=True))
     username: str = Field(database=DatabaseField(unique=True))
     balance: float = 0.0
     active: bool = True

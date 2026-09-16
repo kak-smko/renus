@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from renus.db.core.state import IdentityKind
 from renus.db.metadata.core import FieldMetadata
 from renus.db.sql.dialect.base import SQLDialect
 
@@ -24,7 +23,7 @@ class MySQLDialect(SQLDialect):
 
         if (
             field_meta.primary_key
-            and field_meta.identity_kind == IdentityKind.INTEGER
+            and field_meta.database.auto_inc
             and field_meta.generated
         ):
             return "INT AUTO_INCREMENT PRIMARY KEY"

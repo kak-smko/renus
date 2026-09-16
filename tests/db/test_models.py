@@ -22,7 +22,7 @@ from renus.db import (
     ManyToMany,
     ManyToOne,
     ModelMetadata,
-    ObjectId,
+    ID,
     OneToMany,
     OneToOne,
     Path,
@@ -180,33 +180,21 @@ def test_composite_identity():
     assert instance.identity_values == (10, 42)
     assert instance.identity_dict == {"org_id": 10, "user_id": 42}
 
-def test_mongo_object_id_identity():
-    oid = ObjectId()
-    assert len(oid) == 24
-    assert isinstance(oid, str)
+def test_configured_id_identity():
+    identity = ID("507f1f77bcf86cd799439011")
+    assert str(identity) == "507f1f77bcf86cd799439011"
+    assert isinstance(identity, ID)
 
     class MongoDoc(ReModel):
-        _id: ObjectId = Field(database=DatabaseField(primary_key=True, default_factory=ObjectId))
+        _id: ID = Field(database=DatabaseField(primary_key=True, default_factory=ID))
         name: str
 
     meta = MongoDoc.metadata()
-    assert meta.identity.kind == IdentityKind.OBJECT_ID
+    assert meta.identity.kind == IdentityKind.ID
     assert meta.primary_key_field == "_id"
 
-    doc = MongoDoc(_id=oid, name="Document A")
-    assert doc.identity_values == oid
-
-def test_object_id_validation():
-
-    valid_hex = "507f1f77bcf86cd799439011"
-    oid = ObjectId(valid_hex)
-    assert oid == valid_hex
-
-    with pytest.raises(ValueError):
-        ObjectId("invalid-hex-chars-here!!!")
-
-    with pytest.raises(ValueError):
-        ObjectId("12345")
+    doc = MongoDoc(_id=identity, name="Document A")
+    assert doc.identity_values == identity
 
 def test_default_auto_synthesized_identity():
     class BareModel(ReModel):

@@ -9,7 +9,7 @@ from typing import Any, get_args, get_origin
 from uuid import UUID
 
 from renus.db.core.state import IdentityKind
-from renus.db.models.db_field import ObjectId
+from renus.db.models.id import ID
 
 _OPTIONAL_RE = re.compile(r"^optional\[\s*(.+)\s*\]$", re.IGNORECASE)
 
@@ -85,8 +85,8 @@ def infer_storage_type(unwrapped_type: Any) -> type | str:
             return timedelta
         if type_str_lower == "uuid":
             return UUID
-        if type_str_lower in ("objectid", "object_id"):
-            return ObjectId
+        if type_str_lower == "id":
+            return ID
         if type_str_lower.startswith("list"):
             return list
         if type_str_lower.startswith("dict"):
@@ -109,8 +109,8 @@ def infer_storage_type(unwrapped_type: Any) -> type | str:
         if issubclass(unwrapped_type, float):
             return float
         if issubclass(unwrapped_type, str):
-            if issubclass(unwrapped_type, ObjectId) or unwrapped_type.__name__ == "ObjectId":
-                return ObjectId
+            if issubclass(unwrapped_type, ID) or unwrapped_type.__name__ == "ID":
+                return ID
             return str
         if issubclass(unwrapped_type, bytes):
             return bytes
@@ -137,8 +137,8 @@ def infer_identity_kind(
 ) -> IdentityKind:
     """Infer the identity kind for a field from its storage type."""
     type_name = str(field_type).lower()
-    if field_name == "_id" or storage_type is ObjectId or "objectid" in type_name:
-        return IdentityKind.OBJECT_ID
+    if field_name == "_id":
+        return IdentityKind.ID
     if storage_type is UUID or "uuid" in type_name:
         return IdentityKind.UUID
     if storage_type is int or "int" in type_name:
@@ -167,9 +167,9 @@ def analyze_field_type(field_type: Any) -> tuple[bool, Any, type | str]:
             "time": time,
             "timedelta": timedelta,
             "uuid": UUID,
-            "objectid": ObjectId,
             "dict": dict,
             "list": list,
+            "ID": ID,
         }
         resolved = lookup.get(base_type.strip().lower())
         if resolved is not None:

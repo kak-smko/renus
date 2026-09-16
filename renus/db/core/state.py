@@ -21,4 +21,4 @@ class IdentityKind(str, Enum):
     STRING = "string"
     COMPOSITE = "composite"
     GENERATED = "generated"
-    OBJECT_ID = "object_id"
+    ID = "id"

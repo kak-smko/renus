@@ -11,11 +11,17 @@ Run with::
 """
 
 import os
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+from uuid import UUID, uuid4
 
 import pytest
 
+from renus.config import Config
 from renus.db import (
     Avg,
+    Column,
     Count,
     Database,
     DatabaseField,
@@ -27,7 +33,10 @@ from renus.db import (
     ManyToMany,
     ManyToOne,
     Max,
+    MigrationChecksumError,
+    MigrationManager,
     Min,
+    ID,
     OneToMany,
     OneToOne,
     ReModel,
@@ -37,6 +46,7 @@ from renus.db import (
     Sum,
 )
 
+from renus.db.models.id import ID
 from tests.db._conformance import (
     Citizen,
     Dept,
@@ -49,6 +59,7 @@ from tests.db._conformance import (
     SoftUser,
     Tag,
     User,
+    cleanup,
     conformance_tests,
     database_for,
 )
@@ -84,6 +95,42 @@ async def _row_counts(db, *tables: str) -> dict[str, int]:
     """Return the number of rows stored in each table/collection.
     """
     return {t: await db.repository(_row_count_model(t)).count() for t in tables}
+
+
+async def _table_names(db) -> set[str]:
+    """Return lower-cased table/collection names on the database.
+    """
+    return {t.lower() for t in await db.tables()}
+
+
+_known_mig_models: dict[tuple[str, tuple[str, ...]], type] = {}
+
+
+def _mig_model(table: str, fields: dict[str, type]) -> type:
+    """Build a ReModel bound to a migration-created table.
+
+    The model has a string ``id`` primary key plus the requested fields, and
+    is cached so repeated builds with the same shape share one class.
+    """
+    key = (table, tuple(sorted(fields)))
+    cached = _known_mig_models.get(key)
+    if cached is not None:
+        return cached
+    annotations: dict[str, type] = {"id": str}
+    attrs: dict[str, Any] = {"id": Field(database=DatabaseField(primary_key=True))}
+    for name, typ in fields.items():
+        annotations[name] = typ
+        if typ is int:
+            attrs[name] = 0
+        elif typ is float:
+            attrs[name] = 0.0
+        else:
+            attrs[name] = ""
+    meta = type("Meta", (), {"table": table})
+    cls = type(f"_M_{table}_{'_'.join(sorted(fields))}", (ReModel,),
+               {"__annotations__": annotations, **attrs, "Meta": meta})
+    _known_mig_models[key] = cls
+    return cls
 
 
 def _o2o_pair(
@@ -272,7 +319,7 @@ async def test_create_schema_and_tables(kind):
         names = {t.lower() for t in tables}
         assert any("users" in n for n in names), f"missing users among {names}"
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +353,7 @@ async def test_create_and_read(kind):
         fetched = await db.repository(User).where(User.profile.city == "Fake").first()
         assert fetched is None
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -326,7 +373,7 @@ async def test_create_many(kind):
         assert all(u.id is not None for u in created)
         assert await repo.count() == 3
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -349,7 +396,7 @@ async def test_save_insert_and_update(kind):
         assert loaded.name == "Second"
         assert loaded.age == 6
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -369,7 +416,7 @@ async def test_update_many_rows(kind):
         assert rows == 2
         assert await repo.count(User.age == 99) == 2
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -390,7 +437,7 @@ async def test_update_single_row(kind):
         assert (await repo.where(User.username == "su1").first()).age == 99
         assert (await repo.where(User.username == "su2").first()).age == 20
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -414,7 +461,7 @@ async def test_delete_single_row(kind):
         assert {u.username for u in remaining} - {"sd1", "sd2"} == set()
         assert {u.username for u in remaining} != {"sd1", "sd2"}
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -431,7 +478,7 @@ async def test_delete_rows(kind):
         assert await repo.count() == 2
         assert await repo.count(User.username == "d0") == 0
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -455,7 +502,7 @@ async def test_delete_many_rows(kind):
         assert await repo.count(User.active == True) == 0
         assert await repo.query().with_deleted().count() == 3
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -482,7 +529,7 @@ async def test_query_limit_offset_ignored_for_update_delete(kind):
         assert await repo.count() == 1
         assert await repo.query().with_deleted().count() == 3
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -516,7 +563,7 @@ async def test_upsert_insert_then_update(kind):
         assert updated.name == "Changed2"
         assert updated.age == 1
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -537,7 +584,7 @@ async def test_count_and_exists(kind):
         assert await repo.exists(User.username == "c1") is True
         assert await repo.exists(User.username == "nope") is False
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 # ---------------------------------------------------------------------------
@@ -572,7 +619,7 @@ async def test_query_filters_and_ordering(kind):
         assert await repo.query(User.name.is_null()).count() == 0
         assert await repo.query(User.name.is_not_null()).count() == 3
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -593,7 +640,7 @@ async def test_query_update_many(kind):
         assert rows == 2
         assert await repo.count(User.age == 99) == 2
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -615,7 +662,7 @@ async def test_query_delete_many(kind):
         assert await repo.count() == 1
         assert await repo.query().with_deleted().count() == 3
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -641,7 +688,7 @@ async def test_query_upsert(kind):
         assert updated is not None
         assert updated.age == 9
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -661,7 +708,7 @@ async def test_query_pagination(kind):
         assert page1[0].username == "p00"
         assert page2[0].username == "p02"
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -680,7 +727,7 @@ async def test_query_select_returns_dicts(kind):
         assert all(isinstance(r, dict) for r in sel)
         assert {r["username"] for r in sel} == {"s1", "s2"}
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -717,7 +764,7 @@ async def test_aggregations(kind):
         assert counts[True] == 2
         assert counts[False] == 1
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -755,7 +802,7 @@ async def test_include_relationship(kind):
             assert user.profile == None
         assert user.posts == []
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -779,7 +826,7 @@ async def test_include_filter_posts_returns_all_users(kind):
         for row in loaded:
             assert all(p.title == "keep" for p in row.posts)
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 # ---------------------------------------------------------------------------
@@ -821,7 +868,7 @@ async def test_embedded_relationship(kind):
         assert after == {t: 0 for t in tables}, after
         assert await repo.count() == 0
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -850,7 +897,7 @@ async def test_embedded_many_relationship(kind):
         assert after == {t: 0 for t in tables}, after
         assert await repo.count() == 0
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -878,7 +925,7 @@ async def test_one_to_one_relationship(kind):
         }
         assert await db.repository(Passport).query().count() == 0
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -903,7 +950,7 @@ async def test_one_to_many_relationship(kind):
         assert await repo.count() == 0  # active view hides the soft-deleted row
         assert await db.repository(Post).query().count() == 0
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -923,7 +970,7 @@ async def test_many_to_one_relationship(kind):
         loaded = (await emp_repo.query().include(Employee.dept).all())[0]
         assert loaded.dept.name == "eng"
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -986,7 +1033,7 @@ async def test_many_to_many_relationship(kind):
             "r5",
         }
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1061,7 +1108,7 @@ async def test_many_to_many_filter_sort_limit_skip(kind):
         assert [r.name for r in rows] == ["alice", "bob"]
         assert all([r.name for r in row.roles] == ["admin"] for row in rows)
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 
@@ -1087,7 +1134,7 @@ async def test_cascade_on_update_one_to_many(kind):
         assert all(p.user_id == "u2" for p in posts)
         assert await db.repository(Post).query().count() == 2
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1117,7 +1164,7 @@ async def test_cascade_on_update_one_to_one(kind):
         assert len(passports) == 1
         assert passports[0].citizen_id == "c2"
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1153,7 +1200,7 @@ async def test_cascade_on_delete_one_to_one(kind):
         assert {p.id for p in remaining} in ({"p1"}, {"p2"})
         assert await db.repository(Citizen).query().count() == 1
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1178,7 +1225,7 @@ async def test_cascade_on_delete_one_to_many_isolates_siblings(kind):
         assert await db.repository(Post).exists(Post.id == "p1") is False
         assert await repo.query(User.id == "r2").count() == 1
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1210,7 +1257,7 @@ async def test_one_to_one_on_save(kind, action):
             child_table: child_count,
         }
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1258,7 +1305,7 @@ async def test_one_to_one_on_delete(kind, action):
                 else:
                     assert getattr(children[0], fk) == "p1"
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1308,7 +1355,7 @@ async def test_one_to_one_on_update(kind, action):
                 assert getattr(children[0], fk) == "p1"
             assert await _row_counts(db, owner_table, child_table) == before
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1350,7 +1397,7 @@ async def test_one_to_many_on_save(kind, action):
             child_table: child_count,
         }
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1408,7 +1455,7 @@ async def test_one_to_many_on_delete(kind, action):
                 else:
                     assert all(getattr(c, fk) == "p1" for c in children)
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1464,7 +1511,7 @@ async def test_one_to_many_on_update(kind, action):
                 assert all(getattr(c, fk) == "p1" for c in children)
             assert await _row_counts(db, owner_table, child_table) == before
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1502,7 +1549,7 @@ async def test_many_to_one_on_save(kind, action):
         else:
             assert all(getattr(o, fk) is None for o in stored)
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1531,7 +1578,7 @@ async def test_many_to_one_on_delete(kind):
         assert len(holders) == 2
         assert all(getattr(h, fk) == "p1" for h in holders)
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1564,7 +1611,7 @@ async def test_many_to_one_on_update(kind):
         assert len(holders) == 3
         assert all(getattr(h, fk) == "p1" for h in holders)
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1603,7 +1650,7 @@ async def test_many_to_many_on_save(kind, action):
         else:
             assert loaded.items == []
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1634,7 +1681,7 @@ async def test_many_to_many_on_delete(kind):
         }
         assert await repo.query().count() == 0
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1665,7 +1712,7 @@ async def test_many_to_many_on_update(kind):
         reloaded = (await repo.query().include(owner.items).all())[0]
         assert sorted(i.name for i in reloaded.items) == ["a"]
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 # ---------------------------------------------------------------------------
@@ -1690,7 +1737,7 @@ async def test_soft_delete_visibility(kind):
         assert only is not None
         assert only.username == "sd1"
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 # ---------------------------------------------------------------------------
@@ -1726,7 +1773,7 @@ async def test_hard_delete_many_ignores_soft_delete(kind):
         assert removed2 == 1
         assert await repo.query().with_deleted().count() == 0
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1748,7 +1795,7 @@ async def test_hard_delete_object_and_query(kind):
         assert qr == 1
         assert await repo.query().with_deleted().count() == 0
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 # ---------------------------------------------------------------------------
@@ -1781,7 +1828,7 @@ async def test_transaction_commit_and_rollback(kind):
             pass
         assert await repo.exists(User.username == "txr") is False
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1812,7 +1859,7 @@ async def test_unit_of_work_commit_across_repositories(kind):
         assert len(posts) == 1
         assert posts[0].title == "uow post"
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1828,7 +1875,7 @@ async def test_unit_of_work_rollback_on_uncommitted_exit(kind):
         assert await repo.exists(User.username == "uwr1") is False
         assert await repo.exists(User.username == "uwr2") is False
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1846,7 +1893,7 @@ async def test_unit_of_work_rollback_on_exception(kind):
         assert await repo.exists(User.username == "uwx1") is False
         assert await repo.exists(User.username == "uwx2") is False
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1861,7 +1908,7 @@ async def test_unit_of_work_explicit_rollback(kind):
             assert uow.is_committed is False
         assert await repo.exists(User.username == "uwz1") is False
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 # ---------------------------------------------------------------------------
@@ -1893,7 +1940,7 @@ async def test_uow_cross_repository_atomic_commit(kind):
         assert alice.profile.city == "Tehran"
         assert alice.profile.street == "one"
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1916,7 +1963,7 @@ async def test_uow_cross_repository_rollback_on_error(kind):
             "posts": 0,
         }
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 
@@ -1933,7 +1980,7 @@ async def test_uow_auto_rollback_on_uncommitted_exit(kind):
         assert uow.is_active is False
         assert await db.repository(User).count() == 0
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1958,7 +2005,7 @@ async def test_committed_row_visibility(kind):
         assert rows[0].profile.street == "five"
         assert adapter._in_active_transaction() is False
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1984,7 +2031,7 @@ async def test_uow_rollback_and_transaction_commit(kind):
         assert rows[0].name == "Outer"
         assert rows[0].profile.city == "Yazd"
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 # --- Nested transactions / no-transaction block ---------------------------
@@ -2027,7 +2074,7 @@ async def test_lone_mutation_auto_commits_without_transaction(kind):
         assert await db.repository(User).exists(User.username == "auto") is True
         assert adapter._in_active_transaction() is False
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -2052,7 +2099,7 @@ async def test_nested_transaction_not_supported(kind):
         assert await repo.exists(User.username == "outer") is True
         assert await repo.exists(User.username == "inner") is False
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -2080,7 +2127,7 @@ async def test_nested_transaction_outer_survives_rejection(kind):
         usernames = {u.username for u in await repo.query().all()}
         assert usernames == {"persist", "after-fail"}
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -2105,7 +2152,7 @@ async def test_in_transaction_read(kind):
         usernames = {u.username for u in await repo.query().all()}
         assert usernames == {"persist"}
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 # ---------------------------------------------------------------------------
 # Error translation
@@ -2121,7 +2168,7 @@ async def test_duplicate_key_translation(kind):
         with pytest.raises(DuplicateKeyError):
             await repo.create(_u("dup", "dup", age=2))
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 # ---------------------------------------------------------------------------
@@ -2186,7 +2233,7 @@ async def test_connection_pool_shared_across_repositories(kind):
         count = await db.repository(User).where(User.username == "cp_shared").count()
         assert count == 1
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 # ---------------------------------------------------------------------------
@@ -2256,7 +2303,7 @@ async def test_backup_and_restore_roundtrip_all_tables(kind, tmp_path):
         assert len(posts) == 1
         assert posts[0].title == "backup post"
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -2285,7 +2332,7 @@ async def test_backup_and_restore_selected_tables(kind, tmp_path):
         assert len(posts) == 1
         assert posts[0].title == "untouched"
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -2297,7 +2344,7 @@ async def test_restore_without_drop_existing(kind, tmp_path):
         backup_path = str(tmp_path / "append")
         await src.backup(path=backup_path, tables=["users"])
     finally:
-        await src.disconnect()
+        await cleanup(src)
 
     # A fresh database starts empty; restoring with ``drop_existing=False``
     # appends the backed-up rows into it.
@@ -2308,7 +2355,7 @@ async def test_restore_without_drop_existing(kind, tmp_path):
         users = await dst.repository(User).query().all()
         assert [u.username for u in users] == ["r1"]
     finally:
-        await dst.disconnect()
+        await cleanup(dst)
 
 
 @pytest.mark.asyncio
@@ -2333,4 +2380,641 @@ async def test_backup_and_restore_with_pagination(kind, tmp_path):
         ages = sorted(u.age for u in await db.repository(User).query().all())
         assert ages == list(range(25))
     finally:
-        await db.disconnect()
+        await cleanup(db)
+
+
+# ---------------------------------------------------------------------------
+# Migrations
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_migration_lifecycle(kind, tmp_path: Path):
+    db = await database_for(kind)
+    try:
+        mig_dir = tmp_path / "migrations"
+        mig_dir.mkdir()
+
+        (mig_dir / "0001_create_accounts.py").write_text(
+            """from renus.db.migrations import Column
+
+async def upgrade(adapter):
+    await adapter.create_table("mn_accounts", [
+        Column("id", "str", primary_key=True),
+        Column("owner", "str", nullable=False),
+        Column("balance", "float", default=0.0),
+    ])
+
+async def downgrade(adapter):
+    await adapter.drop_table("mn_accounts")
+""",
+            encoding="utf-8",
+        )
+
+        (mig_dir / "0002_add_index.py").write_text(
+            """async def upgrade(adapter):
+    await adapter.create_index("mn_accounts", ["owner"], name="idx_mn_owner")
+
+async def downgrade(adapter):
+    await adapter.drop_index("mn_accounts", "idx_mn_owner")
+""",
+            encoding="utf-8",
+        )
+
+        mm = MigrationManager(db, path=mig_dir)
+
+        assert "mn_accounts" not in await _table_names(db)
+
+        scaffold = mm.create("add audit to accounts")
+        assert scaffold.name == "0003_add_audit_to_accounts.py"
+        assert scaffold.exists()
+        content = scaffold.read_text(encoding="utf-8")
+        assert "async def upgrade(adapter)" in content
+        assert "async def downgrade(adapter)" in content
+
+        statuses = await mm.status()
+        assert len(statuses) == 3
+        assert not any(s.applied for s in statuses)
+        assert all(s.checksum for s in statuses)
+
+        applied = await mm.upgrade()
+        assert applied == [
+            "0001_create_accounts",
+            "0002_add_index",
+            "0003_add_audit_to_accounts",
+        ]
+
+        statuses = await mm.status()
+        assert all(s.applied for s in statuses)
+        assert all(s.applied_at is not None for s in statuses)
+        assert all(s.checksum for s in statuses)
+
+        assert "mn_accounts" in await _table_names(db)
+
+        Account = _mig_model("mn_accounts", {"owner": str, "balance": float})
+        repo = db.repository(Account)
+        await repo.create(Account(id="a1", owner="alice", balance=10.5))
+        rows = await repo.query().all()
+        assert len(rows) == 1
+        assert rows[0].owner == "alice"
+        assert rows[0].balance == 10.5
+
+        assert await mm.check() is True
+
+        reapply = await mm.upgrade()
+        assert reapply == []
+
+        records = await mm.tracker.get_applied_migrations()
+        assert {r.version for r in records} == {
+            "0001_create_accounts",
+            "0002_add_index",
+            "0003_add_audit_to_accounts",
+        }
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_migration_checksum_tampering(kind, tmp_path: Path):
+    db = await database_for(kind)
+    try:
+        mig_dir = tmp_path / "migrations"
+        mig_dir.mkdir()
+
+        first = mig_dir / "0001_initial.py"
+        first.write_text(
+            """from renus.db.migrations import Column
+
+async def upgrade(adapter):
+    await adapter.create_table("mn_safe", [Column("id", "int", primary_key=True)])
+
+async def downgrade(adapter):
+    await adapter.drop_table("mn_safe")
+""",
+            encoding="utf-8",
+        )
+
+        mm = MigrationManager(db, path=mig_dir)
+
+        assert "mn_safe" not in await _table_names(db)
+
+        applied = await mm.upgrade()
+        assert applied == ["0001_initial"]
+        assert "mn_safe" in await _table_names(db)
+        assert await mm.check() is True
+
+        records = await mm.tracker.get_applied_migrations()
+        assert [r.version for r in records] == ["0001_initial"]
+        assert all(r.checksum for r in records)
+
+        first.write_text(
+            """# TAMPERED
+async def upgrade(adapter):
+    pass
+
+async def downgrade(adapter):
+    pass
+""",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(MigrationChecksumError):
+            await mm.check()
+
+        with pytest.raises(MigrationChecksumError):
+            await mm.upgrade()
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_migration_downgrade_and_reset(kind, tmp_path: Path):
+    db = await database_for(kind)
+    try:
+        mig_dir = tmp_path / "migrations"
+        mig_dir.mkdir()
+
+        for i in range(1, 4):
+            (mig_dir / f"{i:04d}_step_{i}.py").write_text(
+                f"""from renus.db.migrations import Column
+
+async def upgrade(adapter):
+    await adapter.create_table("mn_step_{i}", [Column("id", "int", primary_key=True)])
+
+async def downgrade(adapter):
+    await adapter.drop_table("mn_step_{i}")
+""",
+                encoding="utf-8",
+            )
+
+        mm = MigrationManager(db, path=mig_dir)
+
+        assert not {"mn_step_1", "mn_step_2", "mn_step_3"} & await _table_names(db)
+
+        applied = await mm.upgrade()
+        assert applied == ["0001_step_1", "0002_step_2", "0003_step_3"]
+
+        names = await _table_names(db)
+        assert {"mn_step_1", "mn_step_2", "mn_step_3"} <= names
+
+        records = await mm.tracker.get_applied_migrations()
+        assert {r.version for r in records} == {"0001_step_1", "0002_step_2", "0003_step_3"}
+
+        reverted = await mm.downgrade(1)
+        assert reverted == ["0003_step_3"]
+
+        statuses = await mm.status()
+        assert statuses[0].applied
+        assert statuses[1].applied
+        assert not statuses[2].applied
+
+        names = await _table_names(db)
+        assert "mn_step_1" in names
+        assert "mn_step_2" in names
+        assert "mn_step_3" not in names
+
+        reverted_rest = await mm.reset()
+        assert reverted_rest == ["0002_step_2", "0001_step_1"]
+
+        statuses = await mm.status()
+        assert not any(s.applied for s in statuses)
+
+        names = await _table_names(db)
+        assert not {"mn_step_1", "mn_step_2", "mn_step_3"} & names
+
+        records = await mm.tracker.get_applied_migrations()
+        assert records == []
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_migration_column_operations_with_data(kind, tmp_path: Path):
+    db = await database_for(kind)
+    try:
+        mig_dir = tmp_path / "migrations"
+        mig_dir.mkdir()
+
+        (mig_dir / "0001_base.py").write_text(
+            """from renus.db.migrations import Column
+
+async def upgrade(adapter):
+    await adapter.create_table("mn_cols", [
+        Column("id", "str", primary_key=True),
+        Column("name", "str", nullable=False),
+    ])
+
+async def downgrade(adapter):
+    await adapter.drop_table("mn_cols")
+""",
+            encoding="utf-8",
+        )
+
+        (mig_dir / "0002_add_column.py").write_text(
+            """from renus.db.migrations import Column
+
+async def upgrade(adapter):
+    await adapter.add_column("mn_cols", Column("age", "int", default=18))
+
+async def downgrade(adapter):
+    await adapter.drop_column("mn_cols", "age")
+""",
+            encoding="utf-8",
+        )
+
+        (mig_dir / "0003_rename_column.py").write_text(
+            """async def upgrade(adapter):
+    await adapter.rename_column("mn_cols", "name", "full_name")
+
+async def downgrade(adapter):
+    await adapter.rename_column("mn_cols", "full_name", "name")
+""",
+            encoding="utf-8",
+        )
+
+        (mig_dir / "0004_drop_column.py").write_text(
+            """from renus.db.migrations import Column
+
+async def upgrade(adapter):
+    await adapter.drop_column("mn_cols", "full_name")
+
+async def downgrade(adapter):
+    await adapter.add_column("mn_cols", Column("full_name", "str", nullable=True))
+""",
+            encoding="utf-8",
+        )
+
+        mm = MigrationManager(db, path=mig_dir)
+
+        assert "mn_cols" not in await _table_names(db)
+
+        assert await mm.upgrade(target="0001") == ["0001_base"]
+        assert "mn_cols" in await _table_names(db)
+
+        Base = _mig_model("mn_cols", {"name": str})
+        repo = db.repository(Base)
+        await repo.create(Base(id="r1", name="Alice"))
+        before = await repo.query().all()
+        assert len(before) == 1
+        assert before[0].name == "Alice"
+
+        assert await mm.upgrade(target="0002") == ["0002_add_column"]
+        WithAge = _mig_model("mn_cols", {"name": str, "age": int})
+        rows = await db.repository(WithAge).query().all()
+        assert len(rows) == 1
+        assert rows[0].name == "Alice"
+        assert rows[0].age == 18
+
+        assert await mm.upgrade(target="0003") == ["0003_rename_column"]
+        Renamed = _mig_model("mn_cols", {"full_name": str, "age": int})
+        rows = await db.repository(Renamed).query().all()
+        assert len(rows) == 1
+        assert rows[0].full_name == "Alice"
+        assert rows[0].age == 18
+
+        assert await mm.upgrade(target="0004") == ["0004_drop_column"]
+        Dropped = _mig_model("mn_cols", {"age": int,"full_name": str,})
+        rows = await db.repository(Dropped).query().all()
+        assert len(rows) == 1
+        assert rows[0].age == 18
+        assert rows[0].full_name == ""
+
+        statuses = await mm.status()
+        assert len(statuses) == 4
+        assert all(s.applied for s in statuses)
+        assert all(s.applied_at is not None for s in statuses)
+
+        records = await mm.tracker.get_applied_migrations()
+        assert {r.version for r in records} == {
+            "0001_base",
+            "0002_add_column",
+            "0003_rename_column",
+            "0004_drop_column",
+        }
+
+        reverted = await mm.reset()
+        assert len(reverted) == 4
+        assert "mn_cols" not in await _table_names(db)
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_migration_drop_and_rename_table_with_data(kind, tmp_path: Path):
+    db = await database_for(kind)
+    try:
+        mig_dir = tmp_path / "migrations"
+        mig_dir.mkdir()
+
+        (mig_dir / "0001_people.py").write_text(
+            """from renus.db.migrations import Column
+
+async def upgrade(adapter):
+    await adapter.create_table("mn_people", [
+        Column("id", "str", primary_key=True),
+        Column("name", "str", nullable=False),
+    ])
+
+async def downgrade(adapter):
+    await adapter.drop_table("mn_people")
+""",
+            encoding="utf-8",
+        )
+
+        (mig_dir / "0002_rename_table.py").write_text(
+            """async def upgrade(adapter):
+    await adapter.rename_table("mn_people", "mn_citizens")
+
+async def downgrade(adapter):
+    await adapter.rename_table("mn_citizens", "mn_people")
+""",
+            encoding="utf-8",
+        )
+
+        (mig_dir / "0003_drop_table.py").write_text(
+            """from renus.db.migrations import Column
+
+async def upgrade(adapter):
+    await adapter.drop_table("mn_citizens")
+
+async def downgrade(adapter):
+    await adapter.create_table("mn_citizens", [
+        Column("id", "str", primary_key=True),
+        Column("name", "str", nullable=False),
+    ])
+""",
+            encoding="utf-8",
+        )
+
+        mm = MigrationManager(db, path=mig_dir)
+
+        assert not {"mn_people", "mn_citizens"} & await _table_names(db)
+
+        assert await mm.upgrade(target="0001") == ["0001_people"]
+        assert "mn_people" in await _table_names(db)
+
+        People = _mig_model("mn_people", {"name": str})
+        repo = db.repository(People)
+        await repo.create_many([People(id="p1", name="Alice"), People(id="p2", name="Bob")])
+        before = await repo.query().all()
+        assert len(before) == 2
+        assert {r.name for r in before} == {"Alice", "Bob"}
+
+        assert await mm.upgrade(target="0002") == ["0002_rename_table"]
+        assert "mn_people" not in await _table_names(db)
+        assert "mn_citizens" in await _table_names(db)
+
+        Citizens = _mig_model("mn_citizens", {"name": str})
+        after_rename = await db.repository(Citizens).query().all()
+        assert len(after_rename) == 2
+        assert {r.name for r in after_rename} == {"Alice", "Bob"}
+
+        assert await mm.upgrade(target="0003") == ["0003_drop_table"]
+        assert "mn_citizens" not in await _table_names(db)
+
+        statuses = await mm.status()
+        assert len(statuses) == 3
+        assert all(s.applied for s in statuses)
+        assert all(s.applied_at is not None for s in statuses)
+
+        records = await mm.tracker.get_applied_migrations()
+        assert {r.version for r in records} == {
+            "0001_people",
+            "0002_rename_table",
+            "0003_drop_table",
+        }
+
+        reverted = await mm.reset()
+        assert len(reverted) == 3
+        assert not {"mn_people", "mn_citizens"} & await _table_names(db)
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_migration_create_and_drop_index_with_data(kind, tmp_path: Path):
+    db = await database_for(kind)
+    try:
+        mig_dir = tmp_path / "migrations"
+        mig_dir.mkdir()
+
+        (mig_dir / "0001_items.py").write_text(
+            """from renus.db.migrations import Column
+
+async def upgrade(adapter):
+    await adapter.create_table("mn_items", [
+        Column("id", "str", primary_key=True),
+        Column("email", "str", nullable=False),
+    ])
+
+async def downgrade(adapter):
+    await adapter.drop_table("mn_items")
+""",
+            encoding="utf-8",
+        )
+
+        (mig_dir / "0002_create_index.py").write_text(
+            """async def upgrade(adapter):
+    await adapter.create_index("mn_items", ["email"], unique=True, name="idx_mn_email")
+
+async def downgrade(adapter):
+    await adapter.drop_index("mn_items", "idx_mn_email")
+""",
+            encoding="utf-8",
+        )
+
+        (mig_dir / "0003_drop_index.py").write_text(
+            """async def upgrade(adapter):
+    await adapter.drop_index("mn_items", "idx_mn_email")
+
+async def downgrade(adapter):
+    await adapter.create_index("mn_items", ["email"], unique=True, name="idx_mn_email")
+""",
+            encoding="utf-8",
+        )
+
+        mm = MigrationManager(db, path=mig_dir)
+
+        assert "mn_items" not in await _table_names(db)
+
+        assert await mm.upgrade(target="0001") == ["0001_items"]
+        assert "mn_items" in await _table_names(db)
+
+        Item = _mig_model("mn_items", {"email": str})
+        repo = db.repository(Item)
+        await repo.create_many([Item(id="i1", email="a@x.com"), Item(id="i2", email="b@x.com")])
+        before = await repo.query().all()
+        assert len(before) == 2
+        assert {i.email for i in before} == {"a@x.com", "b@x.com"}
+
+        assert await mm.upgrade(target="0002") == ["0002_create_index"]
+        after_create = await repo.query().all()
+        assert len(after_create) == 2
+        assert {i.email for i in after_create} == {"a@x.com", "b@x.com"}
+
+        assert await mm.upgrade(target="0003") == ["0003_drop_index"]
+        after_drop = await repo.query().all()
+        assert len(after_drop) == 2
+        assert {i.email for i in after_drop} == {"a@x.com", "b@x.com"}
+
+        statuses = await mm.status()
+        assert len(statuses) == 3
+        assert all(s.applied for s in statuses)
+        assert all(s.applied_at is not None for s in statuses)
+
+        records = await mm.tracker.get_applied_migrations()
+        assert {r.version for r in records} == {
+            "0001_items",
+            "0002_create_index",
+            "0003_drop_index",
+        }
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_create_auto_generates_identity_object_id(kind):
+    from tests.db._conformance import adapter_for
+    from bson import ObjectId
+    Config._cache["database"] = SimpleNamespace(ID=ObjectId)
+
+    class User(ReModel):
+        id: ID = Field(database=DatabaseField(primary_key=True, generated=True,default_factory=ID))
+        name: str
+        p_id: ID = Field(
+            database=DatabaseField(generated=False,default=ID())
+        )
+        token: UUID = Field(
+            database=DatabaseField(generated=True, default_factory=uuid4)
+        )
+
+    db = Database(adapter_for(kind))
+    await db.connect()
+    await db.create_schema([User])
+    try:
+        user = await db.repository(User).create(User(name="smko"))
+        assert isinstance(user.id, ID)
+        assert isinstance(user.p_id, ID)
+        assert isinstance(user.token, UUID)
+
+        fetched = await db.repository(User).where(User.id == user.id).first()
+        assert fetched is not None
+        assert isinstance(fetched.p_id, ID)
+        assert isinstance(fetched.token, UUID)
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_create_auto_generates_identity_str(kind):
+    from tests.db._conformance import adapter_for
+
+    Config._cache["database"] = SimpleNamespace(ID=str)
+
+    class User(ReModel):
+        id: ID = Field(database=DatabaseField(primary_key=True, generated=True,default_factory=ID))
+        name: str
+        p_id: ID = Field(
+            database=DatabaseField(generated=False,default=ID())
+        )
+        token: UUID = Field(
+            database=DatabaseField(generated=True, default_factory=uuid4)
+        )
+
+    db = Database(adapter_for(kind))
+    await db.connect()
+    await db.create_schema([User])
+    try:
+        user = await db.repository(User).create(User(name="smko"))
+        assert isinstance(user.id, ID)
+        assert isinstance(user.p_id, ID)
+        assert isinstance(user.token, UUID)
+
+        fetched = await db.repository(User).where(User.id == user.id).first()
+        assert fetched is not None
+        assert isinstance(fetched.p_id, ID)
+        assert isinstance(fetched.token, UUID)
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_create_auto_generates_identity_int(kind):
+    from tests.db._conformance import adapter_for
+
+    Config._cache["database"] = SimpleNamespace(ID=int)
+
+    class User(ReModel):
+        id: ID = Field(database=DatabaseField(primary_key=True, generated=True,auto_inc=True))
+        name: str
+        p_id: ID = Field(
+            database=DatabaseField(generated=False,default=ID(2))
+        )
+        token: UUID = Field(
+            database=DatabaseField(generated=True, default_factory=uuid4)
+        )
+
+    db = Database(adapter_for(kind))
+    await db.connect()
+    await db.create_schema([User])
+    try:
+        user = await db.repository(User).create(User(name="smko"))
+        assert isinstance(user.id, ID)
+        assert isinstance(user.p_id, ID)
+        assert isinstance(user.token, UUID)
+        fetched = await db.repository(User).where(User.id == user.id).first()
+        assert fetched.id.value == 1
+        user = await db.repository(User).create(User(name="smko"))
+        fetched = await db.repository(User).where(User.id == user.id).first()
+        assert fetched is not None
+        assert isinstance(fetched.p_id, ID)
+        assert isinstance(fetched.token, UUID)
+        assert fetched.id.value == 2
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.parametrize("kind", ADAPTERS)
+def test_auto_inc_requires_primary_key(kind):
+    Config._cache["database"] = SimpleNamespace(ID=int)
+
+    with pytest.raises(ValueError, match="auto_inc=True must be primary_key=True"):
+        class InvalidView(ReModel):
+            id: str = Field(database=DatabaseField(primary_key=True))
+            views: int = Field(database=DatabaseField(generated=True, auto_inc=True))
+
+
+def test_auto_inc_requires_integer_field():
+    from renus.db.mongodb.compiler import MongoCompiler
+    from renus.db.mutation import Insert
+
+    class InvalidView(ReModel):
+        id: str = Field(
+            database=DatabaseField(primary_key=True, generated=True, auto_inc=True)
+        )
+
+    with pytest.raises(ValueError, match="must have type int or ID"):
+        MongoCompiler().compile_mutation(Insert(InvalidView, {}))
+
+
+def test_auto_inc_requires_integer_config():
+    from renus.db.mongodb.compiler import MongoCompiler
+    from renus.db.mutation import Insert
+
+    Config._cache["database"] = SimpleNamespace(ID=str)
+
+    class InvalidConfigView(ReModel):
+        id: ID = Field(
+            database=DatabaseField(primary_key=True, generated=True, auto_inc=True)
+        )
+
+    with pytest.raises(ValueError, match=r"Config\('database'\)\.ID=int"):
+        MongoCompiler().compile_mutation(Insert(InvalidConfigView, {}))

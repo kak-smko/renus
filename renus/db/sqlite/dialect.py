@@ -24,7 +24,7 @@ class SQLiteDialect(SQLDialect):
 
         if (
             field_meta.primary_key
-            and field_meta.identity_kind == IdentityKind.INTEGER
+            and field_meta.database.auto_inc
             and field_meta.generated
         ):
             return "INTEGER PRIMARY KEY AUTOINCREMENT"

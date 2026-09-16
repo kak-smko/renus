@@ -10,7 +10,7 @@ from typing import Any, TypeVar
 from uuid import UUID
 
 from renus.db.core.exceptions import ValidationError
-from renus.db.models.db_field import ObjectId
+from renus.db.models.id import ID
 
 __all__ = [
     "from_dict",
@@ -107,7 +107,7 @@ def to_dict(
             for item in value
         ]
 
-    if isinstance(value, ObjectId):
+    if isinstance(value, ID):
         return str(value)
     if isinstance(value, UUID):
         return str(value)
@@ -152,7 +152,10 @@ def from_dict(
             target_str = str(getattr(fmeta, "inferred_type", None) or target_type).lower()
             storage_type = getattr(fmeta, "storage_type", None)
 
-            if (storage_type is UUID or target_type is UUID or (storage_type is None and "uuid" in target_str)) and isinstance(raw_val, str):
+            if target_type is ID or storage_type is ID or "id" == target_str.rsplit(".", 1)[-1]:
+                cleaned_data[fname] = ID(raw_val)
+
+            elif (storage_type is UUID or target_type is UUID or (storage_type is None and "uuid" in target_str)) and isinstance(raw_val, str):
                 try:
                     cleaned_data[fname] = UUID(raw_val)
                 except Exception:
@@ -194,9 +197,6 @@ def from_dict(
                     except Exception:
                         pass
 
-            elif (storage_type is ObjectId or "objectid" in target_str or target_type is ObjectId) and isinstance(raw_val, str):
-                cleaned_data[fname] = ObjectId(raw_val)
-
             elif isinstance(raw_val, dict):
                 target_model_cls = None
                 if isinstance(target_type, type) and issubclass(target_type, ReModel):
@@ -224,7 +224,7 @@ class _DBJSONEncoder(json.JSONEncoder):
     def default(self, o: Any) -> Any:
         if isinstance(o, (datetime, date, time)):
             return o.isoformat()
-        if isinstance(o, (UUID, ObjectId)):
+        if isinstance(o, (UUID, ID)):
             return str(o)
         if isinstance(o, Decimal):
             return float(o)
