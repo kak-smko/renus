@@ -4,10 +4,12 @@ import hashlib
 import inspect
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from renus.db.core.adapter import AsyncDatabaseAdapter
-from renus.db.database import Database
+
+if TYPE_CHECKING:
+    from renus.db.database import Database
 from renus.db.migrations.exceptions import (
     MigrationChecksumError,
     MigrationError,

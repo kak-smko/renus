@@ -3,6 +3,9 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 
+from .header import Header
+from .style_context import lookup_style
+
 from renus.config import Config
 
 _config = Config("app")
@@ -46,15 +49,10 @@ class _Style:
         print(self(txt), end=end, flush=False)
 
     def header(self, width: int = 60) -> "Header":
-        from .header import Header
-
         return Header(self, width)
 
     def __getattr__(self, name: str) -> Callable[[object], str]:
-
-        from .terminal import Terminal
-
-        parent = getattr(Terminal, name, None)
+        parent = lookup_style(name)
         if isinstance(parent, _Style):
             return self._with(parent)
         raise AttributeError(name)

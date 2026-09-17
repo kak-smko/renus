@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 
 from ._style import _Style
+from .style_context import lookup_style
 
 __all__ = ["Progress"]
 
@@ -12,9 +13,7 @@ _EMPTY = "░"
 def _resolve(name_or_style: object) -> _Style:
     if isinstance(name_or_style, _Style):
         return name_or_style
-    from .terminal import Terminal
-
-    style = getattr(Terminal, str(name_or_style), None)
+    style = lookup_style(str(name_or_style))
     return style if isinstance(style, _Style) else _Style()
 
 class Progress:

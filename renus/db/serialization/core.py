@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import importlib
 import json
-import sys
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -10,6 +10,7 @@ from typing import Any, TypeVar
 from uuid import UUID
 
 from renus.db.core.exceptions import ValidationError
+from renus.db.models.base import ReModel
 from renus.db.models.id import ID
 
 __all__ = [
@@ -21,6 +22,15 @@ __all__ = [
 ]
 
 T = TypeVar("T")
+
+
+def _resolve_declared_type(model_cls: type[Any], target_type: Any) -> Any:
+    """Resolve a string annotation from its model module namespace."""
+    if not hasattr(model_cls, "__module__"):
+        return None
+    namespace = vars(importlib.import_module(model_cls.__module__))
+    return namespace.get(str(target_type))
+
 
 def to_dict(
     value: Any,
@@ -34,8 +44,6 @@ def to_dict(
     """Convert a value into a JSON-serializable dict, optionally filtering fields."""
     inc_set = set(include) if include is not None else None
     exc_set = set(exclude) if exclude is not None else set()
-
-    from renus.db.models.base import ReModel
 
     if isinstance(value, ReModel):
         meta = getattr(value, "__db_metadata__", None)
@@ -132,8 +140,6 @@ def from_dict(
     if not isinstance(data, dict):
         raise ValidationError(f"Expected dict input for {model_cls.__name__}, got {type(data).__name__}")
 
-    from renus.db.models.base import ReModel
-
     if not issubclass(model_cls, ReModel):
         return model_cls(**data)
 
@@ -185,12 +191,10 @@ def from_dict(
                     enum_cls = target_type
                 elif isinstance(fmeta.default, Enum):
                     enum_cls = type(fmeta.default)
-                elif hasattr(model_cls, "__module__"):
-                    mod = sys.modules.get(model_cls.__module__)
-                    if mod and hasattr(mod, str(target_type)):
-                        c = getattr(mod, str(target_type))
-                        if isinstance(c, type) and issubclass(c, Enum):
-                            enum_cls = c
+                else:
+                    declared_type = _resolve_declared_type(model_cls, target_type)
+                    if isinstance(declared_type, type) and issubclass(declared_type, Enum):
+                        enum_cls = declared_type
                 if enum_cls is not None:
                     try:
                         cleaned_data[fname] = enum_cls(raw_val)
@@ -205,12 +209,10 @@ def from_dict(
                     rel = meta.relationships[fname]
                     if isinstance(rel.target, type) and issubclass(rel.target, ReModel):
                         target_model_cls = rel.target
-                elif hasattr(model_cls, "__module__"):
-                    mod = sys.modules.get(model_cls.__module__)
-                    if mod and hasattr(mod, str(target_type)):
-                        c = getattr(mod, str(target_type))
-                        if isinstance(c, type) and issubclass(c, ReModel):
-                            target_model_cls = c
+                else:
+                    declared_type = _resolve_declared_type(model_cls, target_type)
+                    if isinstance(declared_type, type) and issubclass(declared_type, ReModel):
+                        target_model_cls = declared_type
 
                 if target_model_cls is not None:
                     cleaned_data[fname] = from_dict(target_model_cls, raw_val, validate=validate)
@@ -251,8 +253,6 @@ def from_json(
 
 def sanitize_params(value: Any, *, mask: str = "***") -> Any:
     """Recursively replace sensitive field values with a mask."""
-    from renus.db.models.base import ReModel
-
     if isinstance(value, ReModel):
         meta = getattr(value, "__db_metadata__", None)
         fields = meta.fields if meta else {}

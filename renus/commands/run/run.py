@@ -5,6 +5,11 @@ import sys
 
 from renus.rich import Terminal
 
+try:
+    import uvicorn
+except ImportError:
+    uvicorn = None
+
 DESCRIPTION = "Run the Renus application server with uvicorn (run dev --reload)."
 
 MODE_DEFAULTS: dict[str, dict[str, object]] = {
@@ -55,9 +60,7 @@ def _parse_flags(argv: list[str]) -> dict[str, object]:
 
 def run(args: list[str] | None = None) -> int:
     """Serve the app with uvicorn using dev/prod defaults."""
-    try:
-        import uvicorn
-    except ImportError:
+    if uvicorn is None:
         Terminal.red.print(
             "uvicorn is required to run the server. Install it with:\n"
             "    pip install renus[server]   # or: pip install uvicorn"

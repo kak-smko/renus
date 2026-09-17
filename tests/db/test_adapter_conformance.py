@@ -20,6 +20,7 @@ import pytest
 
 from renus.config import Config
 from renus.db import (
+    ID,
     Avg,
     Column,
     Count,
@@ -37,17 +38,14 @@ from renus.db import (
     MigrationChecksumError,
     MigrationManager,
     Min,
-    ID,
-    Embedded,
     OneToMany,
     OneToOne,
-    ReModel,
     ReferentialAction,
     RelationshipKind,
+    ReModel,
     SaveAction,
     Sum,
 )
-
 from renus.db.models.id import ID
 from tests.db._conformance import (
     Citizen,
@@ -83,8 +81,7 @@ _row_count_models: dict[str, type] = {}
 
 
 def _row_count_model(table: str) -> type:
-    """Return a lightweight model bound to an existing table/collection.
-    """
+    """Return a lightweight model bound to an existing table/collection."""
     model = _row_count_models.get(table)
     if model is None:
         meta = type("Meta", (), {"table": table})
@@ -94,14 +91,12 @@ def _row_count_model(table: str) -> type:
 
 
 async def _row_counts(db, *tables: str) -> dict[str, int]:
-    """Return the number of rows stored in each table/collection.
-    """
+    """Return the number of rows stored in each table/collection."""
     return {t: await db.repository(_row_count_model(t)).count() for t in tables}
 
 
 async def _table_names(db) -> set[str]:
-    """Return lower-cased table/collection names on the database.
-    """
+    """Return lower-cased table/collection names on the database."""
     return {t.lower() for t in await db.tables()}
 
 
@@ -129,8 +124,11 @@ def _mig_model(table: str, fields: dict[str, type]) -> type:
         else:
             attrs[name] = ""
     meta = type("Meta", (), {"table": table})
-    cls = type(f"_M_{table}_{'_'.join(sorted(fields))}", (ReModel,),
-               {"__annotations__": annotations, **attrs, "Meta": meta})
+    cls = type(
+        f"_M_{table}_{'_'.join(sorted(fields))}",
+        (ReModel,),
+        {"__annotations__": annotations, **attrs, "Meta": meta},
+    )
     _known_mig_models[key] = cls
     return cls
 
@@ -143,8 +141,7 @@ def _o2o_pair(
     on_update,
     fk_default=None,
 ) -> tuple[type, type, str]:
-    """Build a one-to-one owner/child model pair for action testing.
-    """
+    """Build a one-to-one owner/child model pair for action testing."""
     fk = f"{name.lower()}_id"
     child_cls = type(
         f"{name}Detail",
@@ -183,8 +180,7 @@ def _o2m_pair(
     on_update,
     fk_default=None,
 ) -> tuple[type, type, str]:
-    """Build a one-to-many owner/child model pair for action testing.
-    """
+    """Build a one-to-many owner/child model pair for action testing."""
     fk = f"{name.lower()}_id"
     child_cls = type(
         f"{name}Child",
@@ -299,6 +295,7 @@ def _mtm_pair(
 # Lifecycle & schema
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_lifecycle_connect_health_disconnect(kind):
@@ -328,30 +325,39 @@ async def test_create_schema_and_tables(kind):
 # Repository CRUD
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_create_and_read(kind):
     db = await database_for(kind)
     try:
         repo = db.repository(User)
-        user = await repo.create(_u("u1", "alice", name="Alice", age=30,profile=Profile(city="Tehran",street="one")))
+        user = await repo.create(
+            _u(
+                "u1",
+                "alice",
+                name="Alice",
+                age=30,
+                profile=Profile(city="Tehran", street="one"),
+            )
+        )
         assert user.id is not None
         assert user.is_persisted is True
-    
+
         fetched = await db.repository(User).where(User.username == "alice").first()
         assert fetched is not None
         assert fetched.name == "Alice"
         assert fetched.age == 30
         assert fetched.active is True
         assert fetched.id == "u1"
-        
+
         fetched = await db.repository(User).where(User.profile.city == "Tehran").first()
         assert fetched is not None
         assert fetched.name == "Alice"
         assert fetched.age == 30
         assert fetched.active is True
         assert fetched.id == "u1"
-    
+
         fetched = await db.repository(User).where(User.profile.city == "Fake").first()
         assert fetched is None
     finally:
@@ -433,7 +439,7 @@ async def test_update_single_row(kind):
                 _u("su2", "su2", age=20, active=True),
             ]
         )
-        
+
         rows = await repo.update(User.active == True, values={"age": 99})
         assert rows == 1
         assert (await repo.where(User.username == "su1").first()).age == 99
@@ -454,11 +460,11 @@ async def test_delete_single_row(kind):
                 _u("sd2", "sd2", age=20, active=True),
             ]
         )
-      
+
         rows = await repo.delete(User.active == True)
         assert rows == 1
         assert await repo.count(User.active == True) == 1
-       
+
         remaining = await repo.query(User.active == True).all()
         assert {u.username for u in remaining} - {"sd1", "sd2"} == set()
         assert {u.username for u in remaining} != {"sd1", "sd2"}
@@ -521,11 +527,12 @@ async def test_query_limit_offset_ignored_for_update_delete(kind):
             ]
         )
 
-        rows = await repo.query(User.active == True).limit(1).offset(1).update({"age": 99})
+        rows = (
+            await repo.query(User.active == True).limit(1).offset(1).update({"age": 99})
+        )
         assert rows == 2
         assert await repo.count(User.age == 99) == 2
 
-      
         deleted = await repo.query(User.active == True).limit(1).offset(1).delete()
         assert deleted == 2
         assert await repo.count() == 1
@@ -593,6 +600,7 @@ async def test_count_and_exists(kind):
 # Query builder
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_query_filters_and_ordering(kind):
@@ -637,7 +645,7 @@ async def test_query_update_many(kind):
                 _u("qu3", "qu3", age=30, active=False),
             ]
         )
-        
+
         rows = await repo.query(User.active == True).update({"age": 99})
         assert rows == 2
         assert await repo.count(User.age == 99) == 2
@@ -684,7 +692,9 @@ async def test_query_upsert(kind):
         assert row.age == 5
 
         # ...and updates it on a subsequent call.
-        rows2 = await repo.where(User.username == "qu").upsert({"id": "qu", "age": 9, "active": True})
+        rows2 = await repo.where(User.username == "qu").upsert(
+            {"id": "qu", "age": 9, "active": True}
+        )
         assert rows2 in (1, 2)
         updated = await repo.where(User.username == "qu").first()
         assert updated is not None
@@ -745,13 +755,17 @@ async def test_aggregations(kind):
                 _u("g3", "g3", name="C", age=30, active=False),
             ]
         )
-        row = await repo.query().aggregate(
-            n=Count(User.id),
-            total=Sum(User.age),
-            avg=Avg(User.age),
-            lo=Min(User.age),
-            hi=Max(User.age),
-        ).all()
+        row = (
+            await repo.query()
+            .aggregate(
+                n=Count(User.id),
+                total=Sum(User.age),
+                avg=Avg(User.age),
+                lo=Min(User.age),
+                hi=Max(User.age),
+            )
+            .all()
+        )
         assert len(row) == 1
         r = row[0]
         assert r["n"] == 3
@@ -787,14 +801,16 @@ async def test_include_relationship(kind):
                 posts=[_p("p1", "keep", "home"), _p("p2", "drop", "home")],
             )
         )
-        loaded = await repo.query(User.username == "home").include(
-            Include(User.posts), User.profile
-        ).all()
+        loaded = (
+            await repo.query(User.username == "home")
+            .include(Include(User.posts), User.profile)
+            .all()
+        )
         assert len(loaded) == 1
         user = loaded[0]
         assert user.profile.city == "Oslo"
         assert sorted(p.title for p in user.posts) == ["drop", "keep"]
-        
+
         loaded = await repo.query(User.username == "home").all()
         assert len(loaded) == 1
         user = loaded[0]
@@ -820,10 +836,12 @@ async def test_include_filter_posts_returns_all_users(kind):
                 _u("u3", "u3", age=3),
             ]
         )
-        loaded = await repo.query().include(
-            Include(User.posts, filter=Post.title == "keep")
-        ).all()
-        
+        loaded = (
+            await repo.query()
+            .include(Include(User.posts, filter=Post.title == "keep"))
+            .all()
+        )
+
         assert len(loaded) == 3
         for row in loaded:
             assert all(p.title == "keep" for p in row.posts)
@@ -835,6 +853,7 @@ async def test_include_filter_posts_returns_all_users(kind):
 # Relationships: Embedded, EmbeddedMany, OneToOne, OneToMany, ManyToOne,
 # ManyToMany.
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
@@ -863,7 +882,6 @@ async def test_embedded_relationship(kind):
         assert loaded.name == "widget"
         assert loaded.address.street == "one"
         assert loaded.address.city == "two"
-
 
         await repo.delete(loaded)
         after = await _row_counts(db, *tables)
@@ -1097,26 +1115,31 @@ async def test_many_to_many_filter_sort_limit_skip(kind):
         assert sorted(r.name for r in rows[0].roles) == ["admin", "editor"]
 
         # The include filter narrows the loaded roles per employee.
-        rows = await emp_repo.query(Employee.name == "alice").include(
-            Include(Employee.roles, filter=Role.name == "editor")
-        ).all()
+        rows = (
+            await emp_repo.query(Employee.name == "alice")
+            .include(Include(Employee.roles, filter=Role.name == "editor"))
+            .all()
+        )
         assert len(rows) == 1
         assert [r.name for r in rows[0].roles] == ["editor"]
 
         # Combine a parent filter with an include filter across employees.
-        rows = await emp_repo.query(Employee.name.in_(["alice", "bob"])).order_by(
-            Employee.name
-        ).include(Include(Employee.roles, filter=Role.name == "admin")).all()
+        rows = (
+            await emp_repo.query(Employee.name.in_(["alice", "bob"]))
+            .order_by(Employee.name)
+            .include(Include(Employee.roles, filter=Role.name == "admin"))
+            .all()
+        )
         assert [r.name for r in rows] == ["alice", "bob"]
         assert all([r.name for r in row.roles] == ["admin"] for row in rows)
     finally:
         await cleanup(db)
 
 
-
 # ---------------------------------------------------------------------------
 # Cascades: on update & on delete
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
@@ -1149,7 +1172,9 @@ async def test_cascade_on_update_one_to_one(kind):
         )
 
         # Changing the parent id cascades to the one-to-one child foreign key.
-        citizen = (await db.repository(Citizen).query().include(Citizen.passport).all())[0]
+        citizen = (
+            await db.repository(Citizen).query().include(Citizen.passport).all()
+        )[0]
         assert await _row_counts(db, "citizens", "passports") == {
             "citizens": 1,
             "passports": 1,
@@ -1213,7 +1238,12 @@ async def test_cascade_on_delete_one_to_many_isolates_siblings(kind):
         repo = db.repository(User)
         await repo.create_many(
             [
-                _u("r1", "owner1", age=1, posts=[_p("p1", "x", "r1"), _p("p2", "y", "r1")]),
+                _u(
+                    "r1",
+                    "owner1",
+                    age=1,
+                    posts=[_p("p1", "x", "r1"), _p("p2", "y", "r1")],
+                ),
                 _u("r2", "owner2", age=2, posts=[_p("p3", "z", "r2")]),
             ]
         )
@@ -1602,10 +1632,8 @@ async def test_many_to_one_on_update(kind):
         )
         before = await _row_counts(db, holder_table, parent_table)
         loaded = await db.repository(holder).query().first()
-        await db.repository(holder).query(
-            holder.id == "c1"
-        ).update({"id":"cp"})
-        loaded=await db.repository(holder).query(holder.id == "cp").first()
+        await db.repository(holder).query(holder.id == "c1").update({"id": "cp"})
+        loaded = await db.repository(holder).query(holder.id == "cp").first()
         assert loaded.id == "cp"
         assert loaded.label == "x"
         assert await _row_counts(db, holder_table, parent_table) == before
@@ -1721,6 +1749,7 @@ async def test_many_to_many_on_update(kind):
 # Cascades: on update & on delete
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_soft_delete_visibility(kind):
@@ -1745,6 +1774,7 @@ async def test_soft_delete_visibility(kind):
 # ---------------------------------------------------------------------------
 # Hard delete (physical removal even for soft-delete models)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
@@ -1784,7 +1814,9 @@ async def test_hard_delete_object_and_query(kind):
     db = await database_for(kind)
     try:
         repo = db.repository(User)
-        obj = await repo.create(_u("hd3", "hd3", age=3, posts=[_p("hp1", "post", "hd3")]))
+        obj = await repo.create(
+            _u("hd3", "hd3", age=3, posts=[_p("hp1", "post", "hd3")])
+        )
 
         rows = await repo.hard_delete(obj)
         assert rows == 1
@@ -1804,6 +1836,7 @@ async def test_hard_delete_object_and_query(kind):
 # Transactions & unit of work
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_transaction_commit_and_rollback(kind):
@@ -1813,13 +1846,13 @@ async def test_transaction_commit_and_rollback(kind):
 
         async with db.transaction() as tx:
             await db.repository(User).create(_u("txc", "txc", age=1))
-        
+
         assert await repo.exists(User.username == "txc") is True
 
         async with db.transaction() as tx:
             await db.repository(User).create(_u("txr", "txr", age=2))
             await tx.rollback()
-            
+
         assert await repo.exists(User.username == "txr") is False
 
         try:
@@ -1918,6 +1951,7 @@ async def test_unit_of_work_explicit_rollback(kind):
 #
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_uow_cross_repository_atomic_commit(kind):
@@ -1927,9 +1961,17 @@ async def test_uow_cross_repository_atomic_commit(kind):
             users = uow.repository(User)
             posts = uow.repository(Post)
             await users.create(
-                _u("a1", "alice", name="Alice", age=30, profile=Profile(city="Tehran", street="one"))
+                _u(
+                    "a1",
+                    "alice",
+                    name="Alice",
+                    age=30,
+                    profile=Profile(city="Tehran", street="one"),
+                )
             )
-            await posts.create_many([_p("ap1", "Alice first post", "a1"),_p("ap2", "Alice two post", "a1")])
+            await posts.create_many(
+                [_p("ap1", "Alice first post", "a1"), _p("ap2", "Alice two post", "a1")]
+            )
             await uow.commit()
 
         assert await db.repository(User).count() == 1
@@ -1937,7 +1979,10 @@ async def test_uow_cross_repository_atomic_commit(kind):
         assert await db.repository(User).exists(User.username == "alice") is True
 
         alice = (
-            await db.repository(User).query(User.username == "alice").include(User.profile).all()
+            await db.repository(User)
+            .query(User.username == "alice")
+            .include(User.profile)
+            .all()
         )[0]
         assert alice.profile.city == "Tehran"
         assert alice.profile.street == "one"
@@ -1953,7 +1998,13 @@ async def test_uow_cross_repository_rollback_on_error(kind):
         with pytest.raises(ValueError, match="Simulated transfer failure"):
             async with db.unit_of_work() as uow:
                 await uow.repository(User).create(
-                    _u("b1", "bob", name="Bob", age=40, profile=Profile(city="Shiraz", street="two"))
+                    _u(
+                        "b1",
+                        "bob",
+                        name="Bob",
+                        age=40,
+                        profile=Profile(city="Shiraz", street="two"),
+                    )
                 )
                 await uow.repository(Post).create(_p("bp1", "Bob post", "b1"))
                 raise ValueError("Simulated transfer failure")
@@ -1968,7 +2019,6 @@ async def test_uow_cross_repository_rollback_on_error(kind):
         await cleanup(db)
 
 
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_uow_auto_rollback_on_uncommitted_exit(kind):
@@ -1976,7 +2026,13 @@ async def test_uow_auto_rollback_on_uncommitted_exit(kind):
     try:
         async with db.unit_of_work() as uow:
             await uow.repository(User).create(
-                _u("c1", "charlie", name="Charlie", age=35, profile=Profile(city="Isfahan", street="four"))
+                _u(
+                    "c1",
+                    "charlie",
+                    name="Charlie",
+                    age=35,
+                    profile=Profile(city="Isfahan", street="four"),
+                )
             )
 
         assert uow.is_active is False
@@ -1992,7 +2048,13 @@ async def test_committed_row_visibility(kind):
     try:
         adapter = db.adapter("primary")
         await db.repository(User).create(
-            _u("v1", "visible", name="Visible", age=1, profile=Profile(city="Tabriz", street="five"))
+            _u(
+                "v1",
+                "visible",
+                name="Visible",
+                age=1,
+                profile=Profile(city="Tabriz", street="five"),
+            )
         )
         assert await db.repository(User).count() == 1
         rows = (
@@ -2017,17 +2079,32 @@ async def test_uow_rollback_and_transaction_commit(kind):
     try:
         async with db.unit_of_work() as uow:
             await uow.repository(User).create(
-                _u("u1", "bob", name="Bob", age=40, profile=Profile(city="Mashhad", street="six"))
+                _u(
+                    "u1",
+                    "bob",
+                    name="Bob",
+                    age=40,
+                    profile=Profile(city="Mashhad", street="six"),
+                )
             )
         assert await db.repository(User).count() == 0
 
         async with db.transaction():
             await db.repository(User).create(
-                _u("o1", "outer", name="Outer", age=50, profile=Profile(city="Yazd", street="seven"))
+                _u(
+                    "o1",
+                    "outer",
+                    name="Outer",
+                    age=50,
+                    profile=Profile(city="Yazd", street="seven"),
+                )
             )
 
         rows = (
-            await db.repository(User).query(User.username == "outer").include(User.profile).all()
+            await db.repository(User)
+            .query(User.username == "outer")
+            .include(User.profile)
+            .all()
         )
         assert len(rows) == 1
         assert rows[0].name == "Outer"
@@ -2037,6 +2114,7 @@ async def test_uow_rollback_and_transaction_commit(kind):
 
 
 # --- Nested transactions / no-transaction block ---------------------------
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
@@ -2070,7 +2148,13 @@ async def test_lone_mutation_auto_commits_without_transaction(kind):
         assert adapter._in_active_transaction() is False
 
         await db.repository(User).create(
-            _u("auto", "auto", name="Auto", age=1, profile=Profile(city="Kerman", street="eight"))
+            _u(
+                "auto",
+                "auto",
+                name="Auto",
+                age=1,
+                profile=Profile(city="Kerman", street="eight"),
+            )
         )
         assert await db.repository(User).count() == 1
         assert await db.repository(User).exists(User.username == "auto") is True
@@ -2089,7 +2173,9 @@ async def test_nested_transaction_not_supported(kind):
 
         async with db.transaction():
             assert adapter._in_active_transaction() is True
-            await repo.create(_u("outer", "outer", age=1, profile=Profile(city="Arak", street="nine")))
+            await repo.create(
+                _u("outer", "outer", age=1, profile=Profile(city="Arak", street="nine"))
+            )
 
             with pytest.raises(Exception):
                 async with db.transaction():
@@ -2114,7 +2200,12 @@ async def test_nested_transaction_outer_survives_rejection(kind):
 
         async with db.transaction():
             await repo.create(
-                _u("persist", "persist", age=1, profile=Profile(city="Rasht", street="ten"))
+                _u(
+                    "persist",
+                    "persist",
+                    age=1,
+                    profile=Profile(city="Rasht", street="ten"),
+                )
             )
             try:
                 async with db.transaction():
@@ -2134,7 +2225,7 @@ async def test_nested_transaction_outer_survives_rejection(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_in_transaction_read(kind):
+async def test_in_transaction_error(kind):
     db = await database_for(kind)
     try:
         adapter = db.adapter("primary")
@@ -2144,11 +2235,12 @@ async def test_in_transaction_read(kind):
         )
         with pytest.raises(ValueError, match="Simulated transfer failure"):
             async with db.transaction():
-                u1=await repo.query(User.profile.city=="Rasht").update({"name":"Ali"})
-                u1=await repo.query(User.profile.city=="Rasht").first()
+                u1 = await repo.query(User.profile.city == "Rasht").update(
+                    {"name": "Ali"}
+                )
+                u1 = await repo.query(User.profile.city == "Rasht").first()
                 assert u1.name == "Ali"
                 raise ValueError("Simulated transfer failure")
-            
 
         assert adapter._in_active_transaction() is False
         usernames = {u.username for u in await repo.query().all()}
@@ -2156,9 +2248,31 @@ async def test_in_transaction_read(kind):
     finally:
         await cleanup(db)
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_in_transaction_read(kind):
+    db = await database_for(kind)
+    try:
+        adapter = db.adapter("primary")
+        repo = db.repository(User)
+        await repo.create(
+            _u("persist", "persist", age=1, profile=Profile(city="Rasht", street="ten"))
+        )
+        async with db.transaction():
+            u1 = await repo.query(User.profile.city == "Rasht").update({"name": "Ali"})
+            u1 = await repo.query(User.profile.city == "Rasht").first()
+            assert u1.name == "Ali"
+
+        assert adapter._in_active_transaction() is False
+    finally:
+        await cleanup(db)
+
+
 # ---------------------------------------------------------------------------
 # Error translation
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
@@ -2176,6 +2290,7 @@ async def test_duplicate_key_translation(kind):
 # ---------------------------------------------------------------------------
 # Connection pool
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
@@ -2242,6 +2357,7 @@ async def test_connection_pool_shared_across_repositories(kind):
 # Backup & restore
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_backup_and_restore_roundtrip_all_tables(kind, tmp_path):
@@ -2273,13 +2389,14 @@ async def test_backup_and_restore_roundtrip_all_tables(kind, tmp_path):
 
         assert counts["users"] == 2
         assert counts["posts"] == 1
-        ls=["users.json", "posts.json"]
+        ls = ["users.json", "posts.json"]
         if not db.adapter("primary").nested_documents:
             ls.append("users_profile.json")
             assert counts["users_profile"] == 2
         for name in ls:
-            assert os.path.exists(os.path.join(backup_path, name)), f"missing backup {name}"
-       
+            assert os.path.exists(os.path.join(backup_path, name)), (
+                f"missing backup {name}"
+            )
 
         # A stray row added after the backup must be discarded on restore
         # because ``restore`` drops existing rows before re-importing.
@@ -2313,7 +2430,9 @@ async def test_backup_and_restore_roundtrip_all_tables(kind, tmp_path):
 async def test_backup_and_restore_selected_tables(kind, tmp_path):
     db = await database_for(kind)
     try:
-        await db.repository(User).create_many([_u("s1", "s1", age=1), _u("s2", "s2", age=2)])
+        await db.repository(User).create_many(
+            [_u("s1", "s1", age=1), _u("s2", "s2", age=2)]
+        )
         await db.repository(Post).create(_p("sp1", "untouched", "s1"))
 
         backup_path = str(tmp_path / "only_users")
@@ -2352,7 +2471,9 @@ async def test_restore_without_drop_existing(kind, tmp_path):
     # appends the backed-up rows into it.
     dst = await database_for(kind)
     try:
-        restored = await dst.restore(path=backup_path, tables=["users"], drop_existing=False)
+        restored = await dst.restore(
+            path=backup_path, tables=["users"], drop_existing=False
+        )
         assert restored == {"users": 1}
         users = await dst.repository(User).query().all()
         assert [u.username for u in users] == ["r1"]
@@ -2388,6 +2509,7 @@ async def test_backup_and_restore_with_pagination(kind, tmp_path):
 # ---------------------------------------------------------------------------
 # Migrations
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
@@ -2562,7 +2684,11 @@ async def downgrade(adapter):
         assert {"mn_step_1", "mn_step_2", "mn_step_3"} <= names
 
         records = await mm.tracker.get_applied_migrations()
-        assert {r.version for r in records} == {"0001_step_1", "0002_step_2", "0003_step_3"}
+        assert {r.version for r in records} == {
+            "0001_step_1",
+            "0002_step_2",
+            "0003_step_3",
+        }
 
         reverted = await mm.downgrade(1)
         assert reverted == ["0003_step_3"]
@@ -2678,7 +2804,13 @@ async def downgrade(adapter):
         assert rows[0].age == 18
 
         assert await mm.upgrade(target="0004") == ["0004_drop_column"]
-        Dropped = _mig_model("mn_cols", {"age": int,"full_name": str,})
+        Dropped = _mig_model(
+            "mn_cols",
+            {
+                "age": int,
+                "full_name": str,
+            },
+        )
         rows = await db.repository(Dropped).query().all()
         assert len(rows) == 1
         assert rows[0].age == 18
@@ -2761,7 +2893,9 @@ async def downgrade(adapter):
 
         People = _mig_model("mn_people", {"name": str})
         repo = db.repository(People)
-        await repo.create_many([People(id="p1", name="Alice"), People(id="p2", name="Bob")])
+        await repo.create_many(
+            [People(id="p1", name="Alice"), People(id="p2", name="Bob")]
+        )
         before = await repo.query().all()
         assert len(before) == 2
         assert {r.name for r in before} == {"Alice", "Bob"}
@@ -2849,7 +2983,9 @@ async def downgrade(adapter):
 
         Item = _mig_model("mn_items", {"email": str})
         repo = db.repository(Item)
-        await repo.create_many([Item(id="i1", email="a@x.com"), Item(id="i2", email="b@x.com")])
+        await repo.create_many(
+            [Item(id="i1", email="a@x.com"), Item(id="i2", email="b@x.com")]
+        )
         before = await repo.query().all()
         assert len(before) == 2
         assert {i.email for i in before} == {"a@x.com", "b@x.com"}
@@ -2882,16 +3018,18 @@ async def downgrade(adapter):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_create_auto_generates_identity_object_id(kind):
-    from tests.db._conformance import adapter_for
     from bson import ObjectId
+
+    from tests.db._conformance import adapter_for
+
     Config._cache["database"] = SimpleNamespace(ID=ObjectId)
 
     class User(ReModel):
-        id: ID = Field(database=DatabaseField(primary_key=True, generated=True,default_factory=ID))
-        name: str
-        p_id: ID = Field(
-            database=DatabaseField(generated=False,default=ID())
+        id: ID = Field(
+            database=DatabaseField(primary_key=True, generated=True, default_factory=ID)
         )
+        name: str
+        p_id: ID = Field(database=DatabaseField(generated=False, default=ID()))
         token: UUID = Field(
             database=DatabaseField(generated=True, default_factory=uuid4)
         )
@@ -2921,11 +3059,11 @@ async def test_create_auto_generates_identity_str(kind):
     Config._cache["database"] = SimpleNamespace(ID=str)
 
     class User(ReModel):
-        id: ID = Field(database=DatabaseField(primary_key=True, generated=True,default_factory=ID))
-        name: str
-        p_id: ID = Field(
-            database=DatabaseField(generated=False,default=ID())
+        id: ID = Field(
+            database=DatabaseField(primary_key=True, generated=True, default_factory=ID)
         )
+        name: str
+        p_id: ID = Field(database=DatabaseField(generated=False, default=ID()))
         token: UUID = Field(
             database=DatabaseField(generated=True, default_factory=uuid4)
         )
@@ -2955,11 +3093,11 @@ async def test_create_auto_generates_identity_int(kind):
     Config._cache["database"] = SimpleNamespace(ID=int)
 
     class User(ReModel):
-        id: ID = Field(database=DatabaseField(primary_key=True, generated=True,auto_inc=True))
-        name: str
-        p_id: ID = Field(
-            database=DatabaseField(generated=False,default=ID(2))
+        id: ID = Field(
+            database=DatabaseField(primary_key=True, generated=True, auto_inc=True)
         )
+        name: str
+        p_id: ID = Field(database=DatabaseField(generated=False, default=ID(2)))
         token: UUID = Field(
             database=DatabaseField(generated=True, default_factory=uuid4)
         )
@@ -2989,6 +3127,7 @@ def test_auto_inc_requires_primary_key(kind):
     Config._cache["database"] = SimpleNamespace(ID=int)
 
     with pytest.raises(ValueError, match="auto_inc=True must be primary_key=True"):
+
         class InvalidView(ReModel):
             id: str = Field(database=DatabaseField(primary_key=True))
             views: int = Field(database=DatabaseField(generated=True, auto_inc=True))

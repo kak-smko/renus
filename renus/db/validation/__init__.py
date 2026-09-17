@@ -39,7 +39,7 @@ from renus.db.validation.rules import (
     Unique,
     Url,
 )
-from renus.db.validation.validate import Validate
+from renus.db.validation.engine import Validate
 
 __all__ = [
     "ReModel",

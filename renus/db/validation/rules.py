@@ -1,64 +1,8 @@
-from datetime import date, datetime
 import os
 import re
 
-class Default:
-    """Provide a default value when the input is ``None``."""
-    def __init__(self, data):
-        """Store the default value to apply.
-
-        Parameters
-        ----------
-        data:
-            The default value, or a callable producing it.
-        """
-        self.d = data
-
-    def __call__(self, input):
-        if input is None:
-            if callable(self.d) and not isinstance(self.d, type):
-                return self.d()
-            return self.d
-        return True
-
-class Convert:
-    """Convert the input value before further validation."""
-    def __init__(self, func=None, inputs: list = None):
-        """Configure the conversion rule.
-
-        Parameters
-        ----------
-        func:
-            Callable or type used to convert the value. Defaults to ``None``.
-        inputs:
-            Optional mapping of input-to-output pairs. Defaults to ``None``.
-        """
-        self.func = func
-        self.inputs = inputs
-
-    def __call__(self, input):
-        if input is None:
-            return None
-        if self.inputs is not None:
-            for i in self.inputs:
-                if i[0] == input:
-                    return i[1]
-            return input
-        if self.func is not None:
-            if isinstance(self.func, type) and isinstance(input, self.func):
-                return input
-            if self.func is datetime and isinstance(input, str):
-                return datetime.fromisoformat(input)
-            if self.func is date and isinstance(input, str):
-                return date.fromisoformat(input)
-            return self.func(input)
-        return input
-
-def Required(input) -> any:
-    """Pass when the input is not ``None``."""
-    if input is not None:
-        return True
-    return 'required_error'
+from renus.db.validation.primitives import Convert, Default, Required
+from renus.db.validation.schema import Schema
 
 def String(input) -> any:
     """Pass when the input is a string."""
@@ -582,38 +526,6 @@ class FileSize:
 
         return passed
 
-class Schema:
-    """Validate a dict against a schema of nested rules."""
-
-    def __init__(self, schema: dict, strict: bool = True):
-        """Configure the schema rule.
-
-        Parameters
-        ----------
-        schema:
-            Mapping of fields to their validation rules.
-        strict:
-            Reject extra fields. Defaults to ``True``.
-        """
-        self.schema = schema
-        self.strict = strict
-
-    def __call__(self, input):
-        if input is None:
-            return True
-
-        if not isinstance(input, dict):
-            return ['type_error', ['dict', str(type(input))]]
-
-        if self.strict:
-            extra_fields = set(input.keys()) - set(self.schema.keys())
-            if extra_fields:
-                return ['schema_strict_error', [list(extra_fields)]]
-
-        from renus.db.validation.validate import Validate
-        input.update(Validate(input).rules(self.schema))
-
-        return True
 
 class Each:
     """Apply a set of rules to every item of a collection."""

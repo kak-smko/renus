@@ -29,6 +29,12 @@ from renus.db.mongodb.dialect import MongoDialect
 from renus.db.mutation.ast import MutationAST
 from renus.db.query.ast import QueryAST
 
+try:
+    from pymongo import AsyncMongoClient, ReturnDocument
+except ImportError:
+    AsyncMongoClient = None
+    ReturnDocument = None
+
 __all__ = ["MongoDBAdapter", "MongoTransactionContext"]
 
 DEFAULT_MAX_POOL = 100
@@ -137,12 +143,10 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         retries = max(1, int(cfg.get("retries", CONNECT_RETRIES)))
         delay = float(cfg.get("retry_delay", CONNECT_RETRY_DELAY))
 
-        try:
-            from pymongo import AsyncMongoClient
-        except ImportError as exc:
+        if AsyncMongoClient is None:
             raise ConnectionError(
                 "pymongo>=4.9 is required for native async MongoDB access. Install 'pymongo'."
-            ) from exc
+            )
 
         last_err: Exception | None = None
         for attempt in range(1, retries + 1):
@@ -373,7 +377,10 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         Uses an upserting ``$inc`` on a shared ``__counters__`` collection so
         concurrent inserts receive distinct ids.
         """
-        from pymongo import ReturnDocument
+        if ReturnDocument is None:
+            raise ConnectionError(
+                "pymongo>=4.9 is required for native async MongoDB access. Install 'pymongo'."
+            )
 
         counters = self._mongo_db["__counters__"]
         counter = await counters.find_one_and_update(

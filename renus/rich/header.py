@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from ._style import _Style
+from typing import Any
 
 class Header:
     """Render a header line with an optional total width."""
 
     __slots__ = ("_style", "_width")
 
-    def __init__(self, style: _Style, width: int = 60) -> None:
+    def __init__(self, style: Any, width: int = 60) -> None:
         """Initialize a Header.
 
         Parameters

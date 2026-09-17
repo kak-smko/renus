@@ -180,6 +180,7 @@ class ModelMeta(type):
                 field_type=_id_type,
                 field=_id_field,
                 default=None,
+                model_base=ReModel,
             )
 
         fields_dict: dict[str, FieldMetadata] = {}
@@ -329,6 +330,7 @@ class ModelMeta(type):
                     field_type=int,
                     field=Field(default=None),
                     default=None,
+                    model_base=ReModel,
                 )
                 identity = IdentityMetadata(
                     fields=("id",),
@@ -393,7 +395,6 @@ class ModelMeta(type):
             is_deleted_field="is_deleted" if soft_delete else None,
         )
         setattr(cls, "__db_metadata__", model_meta)
-
         _MODEL_REGISTRY[name] = cls
 
         return cls
@@ -442,7 +443,7 @@ class ReModel(metaclass=ModelMeta):
                 field_type=field_type,
                 field=field_obj,
                 default=default_val,
-                module=cls.__module__,
+                model_base=ReModel,
             )
 
         cls._model_fields = fields

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 import re
+import sys
 from re import Pattern
 import types
 from collections.abc import Callable, Collection
@@ -21,10 +22,11 @@ class _Unset:
 
 _UNSET = _Unset()
 
-def find_remodel_subclass(name: str) -> type | None:
-    try:
-        from renus.db.models.base import ReModel
-    except ImportError:
+def _is_remodel_type(value: Any) -> bool:
+    return isinstance(value, type) and bool(getattr(value, "_is_remodel_class", False))
+
+def find_remodel_subclass(name: str, model_base: type | None = None) -> type | None:
+    if model_base is None:
         return None
 
     def _search(cls: type) -> type | None:
@@ -36,7 +38,7 @@ def find_remodel_subclass(name: str) -> type | None:
                 return found
         return None
 
-    return _search(ReModel)
+    return _search(model_base)
 
 def _decimal_parts(value: Any) -> tuple[int, int] | None:
     if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
@@ -231,7 +233,7 @@ class FieldInfo:
         field_type: Any,
         field: Field | None = None,
         default: Any = _UNSET,
-        module: str | None = None,
+        model_base: type | None = None,
     ) -> None:
         """Resolve the field's type, defaults, and validation setup.
 
@@ -246,8 +248,9 @@ class FieldInfo:
             created using the given default.
         default:
             Default value applied to the field when not provided.
-        module:
-            Module name used to resolve model types for this field.
+
+        model_base:
+            Base model class used to resolve forward references.
         """
         self.name = name
         self.field_type = field_type
@@ -257,57 +260,30 @@ class FieldInfo:
             self.field.default = default
 
         self.is_nullable, self.effective_types, self.is_model, self.is_model_list, self.model_cls = (
-            self._analyze_type(field_type, module=module)
+            self._analyze_type(field_type, model_base=model_base)
         )
 
         self.required = not self.is_nullable and not self.has_default
 
     @classmethod
-    def _resolve_model_name(cls, name: str, module: str | None) -> type | None:
-        import sys
-
-        from renus.db.models.base import ReModel
-
-        if module:
-            mod = sys.modules.get(module)
-            if mod is not None:
-                candidate = getattr(mod, name, None)
-                if (
-                    isinstance(candidate, type)
-                    and issubclass(candidate, ReModel)
-                    and candidate is not ReModel
-                ):
-                    return candidate
-
-        candidate = cls._locate_local_model(name)
-        if candidate is not None:
-            return candidate
-
-        return find_remodel_subclass(name)
-
-    @classmethod
-    def _locate_local_model(cls, name: str) -> type | None:
-        import sys
-
-        from renus.db.models.base import ReModel
-
+    def _resolve_model_name(
+        cls,
+        name: str,
+        model_base: type | None,
+    ) -> type | None:
         frame = sys._getframe()
         while frame is not None:
             candidate = frame.f_locals.get(name)
-            if (
-                isinstance(candidate, type)
-                and issubclass(candidate, ReModel)
-                and candidate is not ReModel
-            ):
+            if _is_remodel_type(candidate) and candidate is not model_base:
                 return candidate
             frame = frame.f_back
-        return None
+        return find_remodel_subclass(name, model_base)
 
     @classmethod
     def _analyze_type(
         cls,
         annotation: Any,
-        module: str | None = None,
+        model_base: type | None = None,
     ) -> tuple[bool, tuple[Any, ...], bool, bool, type | None]:
         if annotation is None or annotation is Any:
             return True, (object,), False, False, None
@@ -331,12 +307,12 @@ class FieldInfo:
 
             if raw.startswith("list[") and raw.endswith("]"):
                 inner = raw[5:-1].strip()
-                sub = cls._resolve_model_name(inner, module)
+                sub = cls._resolve_model_name(inner, model_base)
                 if sub is not None:
                     return is_nullable, (list,), False, True, sub
                 return is_nullable, (list,), False, False, None
 
-            sub = cls._resolve_model_name(raw, module)
+            sub = cls._resolve_model_name(raw, model_base)
             if sub is not None:
                 return is_nullable, (sub,), True, False, sub
 
@@ -366,7 +342,7 @@ class FieldInfo:
                     is_nullable = True
                 elif isinstance(arg, str):
                     _, sub_types, sub_is_model, sub_is_list, sub_model_cls = cls._analyze_type(
-                        arg, module=module
+                        arg, model_base=model_base
                     )
                     types_to_check.extend(sub_types)
                     if sub_is_model:
@@ -385,7 +361,7 @@ class FieldInfo:
                     is_model_list = True
                     model_cls = elem_type
                 elif isinstance(elem_type, str):
-                    sub = find_remodel_subclass(elem_type.strip())
+                    sub = find_remodel_subclass(elem_type.strip(), model_base)
                     if sub is not None:
                         is_model_list = True
                         model_cls = sub

@@ -1,5 +1,10 @@
 import traceback
 
+try:
+    import uvicorn
+except ImportError:
+    uvicorn = None
+
 from renus.config import Config
 from renus.router import Router
 
@@ -167,9 +172,7 @@ class App:
         options:
             Extra options passed to ``uvicorn.run``.
         """
-        try:
-            import uvicorn
-        except ImportError:
+        if uvicorn is None:
             traceback.print_exc()
             raise RuntimeError(
                 "uvicorn is required to run the server. "

@@ -22,6 +22,11 @@ from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
 from renus.db.mysql.dialect import MySQLDialect
 from renus.db.sql.mutation import SQLMutationCompiler
 
+try:
+    import aiomysql
+except ImportError:
+    aiomysql = None
+
 __all__ = ["MySQLAdapter", "MySQLTransactionContext"]
 
 DEFAULT_MYSQL_MIN_POOL = 5
@@ -122,7 +127,8 @@ class MySQLAdapter(SQLAdapter):
         user = params["user"]
         password = params["password"]
 
-        import aiomysql
+        if aiomysql is None:
+            raise ConnectionError("No MySQL async driver available. Install 'aiomysql'.")
 
         return await aiomysql.create_pool(
             host=host,
@@ -166,13 +172,8 @@ class MySQLAdapter(SQLAdapter):
             ),
         }
 
-        try:
-            import aiomysql
-
-        except ImportError as exec:
-            raise ConnectionError(
-                    "No MySQL async driver available. Install 'aiomysql'."
-                ) from exec
+        if aiomysql is None:
+            raise ConnectionError("No MySQL async driver available. Install 'aiomysql'.")
 
         retries = max(1, int(cfg.get("retries", CONNECT_RETRIES)))
         retry_delay = float(cfg.get("retry_delay", CONNECT_RETRY_DELAY))
@@ -281,11 +282,7 @@ class MySQLAdapter(SQLAdapter):
         else:
             sql_compiled = compiled
 
-        try:
-            import aiomysql
-            cursor_cls = aiomysql.DictCursor
-        except Exception:
-            cursor_cls = None
+        cursor_cls = aiomysql.DictCursor if aiomysql is not None else None
 
         try:
             return await self._query_pool(sql_compiled, cursor_cls)

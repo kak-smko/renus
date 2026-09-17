@@ -29,6 +29,7 @@ from renus.db.query.ast import (
     RelationAny,
 )
 from renus.db.query.builder import Count, Query
+from renus.db.repository.relationships import RelationshipCoordinator
 from renus.db.serialization.core import from_dict
 from renus.db.models.id import ID
 from renus.db.transaction.core import Transaction
@@ -72,8 +73,6 @@ class Repository(Generic[T]):
                 self._adapter = adapter_or_database._adapter
             else:
                 self._adapter = adapter_or_database
-
-        from renus.db.repository.relationships import RelationshipCoordinator
 
         self._rel_coordinator = RelationshipCoordinator(self)
 

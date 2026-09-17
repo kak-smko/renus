@@ -9,6 +9,8 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
+from renus.db.models.id import ID
+
 try:
     import orjson as _orjson
 except ImportError:
@@ -43,8 +45,6 @@ def _encode_datetime(value: datetime.datetime) -> str:
     return base + "Z"
 
 def _encode_default_value(o: Any) -> Any:
-    from renus.db.models.id import ID
-
     if isinstance(o, datetime.datetime):
         return _encode_datetime(o)
     if isinstance(o, datetime.date):
@@ -73,8 +73,6 @@ def json_decoder(value: Any) -> Any:
     if isinstance(value, dict):
         return {k: json_decoder(v) for k, v in value.items()}
     if isinstance(value, str) and value.startswith(_ID_PREFIX):
-        from renus.db.models.id import ID
-
         return ID(value[len(_ID_PREFIX):])
     if isinstance(value, list):
         return [json_decoder(item) for item in value]

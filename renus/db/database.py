@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Self, TypeVar
 
+from renus.db.migrations.manager import MigrationManager
+from renus.db.plugins.registry import get_adapter
+
 from renus.config import Config
 from renus.db.core.adapter import AsyncDatabaseAdapter
 from renus.db.core.exceptions import ConfigurationError
@@ -82,7 +85,6 @@ class Database:
 
         if isinstance(raw, str):
             driver_name = raw.strip().lower()
-            from renus.db.plugins.registry import get_adapter
             try:
                 factory = get_adapter(driver_name)
             except ConfigurationError:
@@ -210,8 +212,6 @@ class Database:
         connection: str = "primary",
     ) -> Any:
         """Create a migration manager bound to this database."""
-        from renus.db.migrations.manager import MigrationManager
-
         return MigrationManager(self, path=path, connection=connection)
 
     async def tables(self, connection: str = "primary") -> list[str]:

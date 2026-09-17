@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Any
+from collections.abc import Mapping
+
+from renus.db.query.ast import Path
 
 __all__ = [
     "Embedded",
@@ -210,11 +213,16 @@ class Relationship:
         self._owner = owner
         self._name = name
 
+    def resolve_target(self, registry: Mapping[str, type] | None = None) -> type | None:
+        """Resolve a string target using the supplied model registry."""
+        if isinstance(self.target, type):
+            return self.target
+        if registry is None:
+            return None
+        return registry.get(str(self.target))
+
     def __get__(self, instance: Any, owner: type | None = None) -> Any:
         if instance is None:
-
-            from renus.db.query.ast import Path
-
             model = owner or self._owner or object
             return Path(model, (self._name or "",))
 

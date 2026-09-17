@@ -6,6 +6,7 @@ from ._style import _Style
 from .header import Header
 from .markdown import Markdown
 from .progress import Progress
+from .style_context import configure_styles
 from .table import Table
 
 __all__ = ["Terminal"]
@@ -123,3 +124,12 @@ class Terminal:
             bar_style=bar_style,
             label_style=label_style,
         )
+
+
+configure_styles(
+    {
+        name: value
+        for name, value in vars(Terminal).items()
+        if isinstance(value, _Style)
+    }
+)

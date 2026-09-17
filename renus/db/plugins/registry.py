@@ -6,6 +6,9 @@ from typing import Any
 
 from renus.db.core.adapter import AsyncDatabaseAdapter
 from renus.db.core.exceptions import ConfigurationError
+from renus.db.mongodb import MongoDBAdapter
+from renus.db.mysql import MySQLAdapter
+from renus.db.sqlite import SQLiteAdapter
 
 __all__ = [
     "adapters",
@@ -102,23 +105,12 @@ def clear_adapters() -> None:
 def reset_builtin_adapters() -> None:
     """Reset the registry to only the built-in adapters."""
     clear_adapters()
-    try:
-        from renus.db.sqlite import SQLiteAdapter
-
-        register_adapter("sqlite", SQLiteAdapter)
-    except Exception:
-        pass
-
-    try:
-        from renus.db.mysql import MySQLAdapter
-
-        register_adapter("mysql", MySQLAdapter)
-    except Exception:
-        pass
-
-    try:
-        from renus.db.mongodb import MongoDBAdapter
-
-        register_adapter("mongodb", MongoDBAdapter)
-    except Exception:
-        pass
+    for name, factory in (
+        ("sqlite", SQLiteAdapter),
+        ("mysql", MySQLAdapter),
+        ("mongodb", MongoDBAdapter),
+    ):
+        try:
+            register_adapter(name, factory)
+        except Exception:
+            pass

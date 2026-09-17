@@ -8,8 +8,9 @@ import os
 from typing import Any
 
 from renus.config import Config
-from renus.rich import Terminal
 from renus.db.database import Database
+from renus.db.plugins.registry import get_adapter
+from renus.rich import Terminal
 try:
     from bson import (
         Binary,
@@ -231,8 +232,6 @@ def resolve_driver(driver: str | None = None) -> str:
 def get_database(connection: str = "primary") -> Database:
     """Build a Database instance for the resolved driver."""
     driver = resolve_driver()
-    from renus.db.plugins.registry import get_adapter
-
     config = Config("database")
     factory = get_adapter(driver)
     adapter = factory()

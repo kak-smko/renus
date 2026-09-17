@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy as _copy
 from typing import (
     Any,
     Generic,
@@ -107,8 +108,6 @@ class MultiDict(Mapping[KT, VT], Generic[KT, VT]):
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "MultiDict[KT, VT]":
         """Return a deep copy of this mapping."""
-        import copy as _copy
-
         cls = type(self)
         result = cls.__new__(cls)
         result._list = _copy.deepcopy(self._list, memo)

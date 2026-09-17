@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import importlib
 import os
+from importlib.metadata import version
+
+import renus
 import shutil
 import urllib.error
 import urllib.request
@@ -117,16 +120,12 @@ def is_upgrade(target_version: str, current_version: str) -> bool:
 
 def get_renus_version() -> str:
     try:
-        import renus
-
         if hasattr(renus, "__version__") and renus.__version__:
             return str(renus.__version__)
     except Exception:
         pass
 
     try:
-        from importlib.metadata import version
-
         return version("renus")
     except Exception:
         return "2.7.1"

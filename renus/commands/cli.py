@@ -5,24 +5,24 @@ import importlib
 import inspect
 import os
 import sys
+from importlib.metadata import version
 from typing import Any
 
+import renus
+
 from renus.commands.base import BaseCommand
+from renus.commands.help import Help, discover_commands
 from renus.rich import Terminal
 
 def get_version() -> str:
     """Return the installed Renus version string."""
     try:
-        import renus
-
         if hasattr(renus, "__version__") and renus.__version__:
             return str(renus.__version__)
     except Exception:
         pass
 
     try:
-        from importlib.metadata import version
-
         return version("renus")
     except Exception:
         return "2.7.1"
@@ -90,16 +90,12 @@ def run(argv: list[str] | None = None) -> int:
     args = sys.argv if argv is None else argv
 
     if len(args) < 2:
-        from renus.commands.help import Help
-
         Help()
         return 0
 
     command_name = args[1]
 
     if command_name in ("--help", "-h", "help"):
-        from renus.commands.help import Help
-
         Help()
         return 0
 
@@ -114,8 +110,6 @@ def run(argv: list[str] | None = None) -> int:
         return 1
 
     if handler is None:
-        from renus.commands.help import Help, discover_commands
-
         Terminal.red.print(f"Error: Command '{command_name}' not found.")
 
         all_commands = list(discover_commands().keys())

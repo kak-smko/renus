@@ -8,7 +8,14 @@ import subprocess
 import sys
 import tarfile
 import urllib.request
+import zipfile
 from io import BytesIO
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import termios
+    import tty
 
 from renus.rich import Terminal
 
@@ -27,16 +34,11 @@ def _read_key() -> str:
     if not _is_tty():
         return sys.stdin.readline()
     if os.name == "nt":
-        import msvcrt
-
         ch = msvcrt.getwch()
         if ch in ("\x00", "\xe0"):
             ch2 = msvcrt.getwch()
             return f"\x1b[{ch2}"
         return ch
-
-    import termios
-    import tty
 
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)

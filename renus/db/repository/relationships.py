@@ -12,7 +12,7 @@ from renus.db.mutation.ast import (
     Update,
     UpdateMany,
 )
-from renus.db.query.ast import Condition, Include, Path
+from renus.db.query.ast import Condition, Include, Path, QueryAST
 from renus.db.relationships import RelationshipKind
 from renus.db.serialization.core import to_dict
 from renus.db.transaction.core import Transaction
@@ -722,7 +722,6 @@ class RelationshipCoordinator:
         local_col, foreign_col = _junction_columns(meta, rel, target_meta)
         junction_source = _junction_source(through_table)
 
-        from renus.db.query.ast import QueryAST
         q_ast = QueryAST(
             source=junction_source,
             filters=(Path(junction_source, (local_col,)).in_(parent_ids),),
@@ -772,7 +771,6 @@ class RelationshipCoordinator:
         table_name = f"{meta.table}_{rel_name}"
         embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
 
-        from renus.db.query.ast import QueryAST
         q_ast = QueryAST(
             source=embedded_source,
             filters=(Path(embedded_source, ("parent_id",)).in_(parent_ids),),
@@ -815,7 +813,6 @@ class RelationshipCoordinator:
         table_name = f"{meta.table}_{rel_name}"
         embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
 
-        from renus.db.query.ast import QueryAST
         q_ast = QueryAST(
             source=embedded_source,
             filters=(Path(embedded_source, ("parent_id",)).in_(parent_ids),),
