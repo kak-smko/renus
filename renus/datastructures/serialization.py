@@ -9,6 +9,8 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
+from renus.db.models.id import ID
+
 try:
     import orjson as _orjson
 except ImportError:
@@ -49,7 +51,7 @@ def _encode_default_value(o: Any) -> Any:
     if isinstance(o, datetime.time):
         encoded = o.isoformat()
         return encoded[:8] if o.microsecond == 0 else encoded
-    if isinstance(o, uuid.UUID):
+    if isinstance(o, (uuid.UUID, ID)):
         return str(o)
     if isinstance(o, decimal.Decimal):
         return str(o)

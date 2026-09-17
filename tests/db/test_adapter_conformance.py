@@ -26,6 +26,7 @@ from renus.db import (
     Database,
     DatabaseField,
     DuplicateKeyError,
+    Embedded,
     Field,
     Include,
     IntegrityError,
@@ -37,6 +38,7 @@ from renus.db import (
     MigrationManager,
     Min,
     ID,
+    Embedded,
     OneToMany,
     OneToOne,
     ReModel,
@@ -3018,3 +3020,69 @@ def test_auto_inc_requires_integer_config():
 
     with pytest.raises(ValueError, match=r"Config\('database'\)\.ID=int"):
         MongoCompiler().compile_mutation(Insert(InvalidConfigView, {}))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_single_table_create_does_not_start_transaction(kind):
+    from tests.db._conformance import adapter_for
+
+    class PlainRecord(ReModel):
+        id: str = Field(database=DatabaseField(primary_key=True))
+        name: str
+
+    adapter = adapter_for(kind)
+    db = Database(adapter)
+    await db.connect()
+    await db.create_schema([PlainRecord])
+    transaction_calls: list[None] = []
+    original_factory = adapter.transaction_factory
+
+    def transaction_factory():
+        transaction_calls.append(None)
+        return original_factory()
+
+    adapter.transaction_factory = transaction_factory
+    try:
+        await db.repository(PlainRecord).create(
+            PlainRecord(id="plain-1", name="single table")
+        )
+        assert transaction_calls == []
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_relationship_create_starts_transaction_only_for_multiple_tables(kind):
+    from tests.db._conformance import adapter_for
+
+    class RelatedRecord(ReModel):
+        id: str = Field(database=DatabaseField(primary_key=True))
+        name: str
+        profile: Profile = Embedded(Profile)
+
+    adapter = adapter_for(kind)
+    db = Database(adapter)
+    await db.connect()
+    await db.create_schema([RelatedRecord])
+    transaction_calls: list[None] = []
+    original_factory = adapter.transaction_factory
+
+    def transaction_factory():
+        transaction_calls.append(None)
+        return original_factory()
+
+    adapter.transaction_factory = transaction_factory
+    try:
+        await db.repository(RelatedRecord).create(
+            RelatedRecord(
+                id="related-1",
+                name="relationship",
+                profile=Profile(city="Tehran", street="one"),
+            )
+        )
+        expected_calls = 0 if adapter.nested_documents else 1
+        assert len(transaction_calls) == expected_calls
+    finally:
+        await cleanup(db)

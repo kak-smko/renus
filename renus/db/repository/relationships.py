@@ -79,6 +79,42 @@ class RelationshipCoordinator:
         async with Transaction(self.adapter):
             yield
 
+    def requires_transaction(self, obj: Any) -> bool:
+        """Return whether saving ``obj`` can write more than its main table."""
+        meta = getattr(self.model, "__db_metadata__", None)
+        if not meta:
+            return False
+
+        is_new = bool(getattr(obj, "is_new", False))
+        for rname, rel in meta.relationships.items():
+            value = getattr(obj, rname, None)
+            if value is None:
+                continue
+
+            if rel.kind in (
+                RelationshipKind.EMBEDDED_ONE,
+                RelationshipKind.EMBEDDED_MANY,
+            ):
+                if self.adapter.nested_documents:
+                    continue
+                if rel.kind == RelationshipKind.EMBEDDED_MANY and is_new and not value:
+                    continue
+                return True
+
+            if rel.kind in (
+                RelationshipKind.ONE_TO_MANY,
+                RelationshipKind.ONE_TO_ONE,
+            ) and rel.on_save == "cascade" and value:
+                return True
+
+            if rel.kind == RelationshipKind.MANY_TO_ONE and rel.on_save == "cascade":
+                return True
+
+            if rel.kind == RelationshipKind.MANY_TO_MANY and value:
+                return True
+
+        return False
+
     async def persist_relationships(self, obj: Any) -> None:
         """Persist all configured relationships for the given model object."""
         meta = getattr(self.model, "__db_metadata__", None)
@@ -104,7 +140,7 @@ class RelationshipCoordinator:
             elif rel.kind == RelationshipKind.EMBEDDED_MANY:
                 if self.adapter.nested_documents:
                     await self._embed_many_in_document(meta, rname, obj)
-                else:
+                elif not (getattr(obj, "is_new", False) and not val):
                     await self._persist_embedded_many(meta, rname, rel, parent_id, val)
 
             elif rel.kind == RelationshipKind.ONE_TO_MANY and (

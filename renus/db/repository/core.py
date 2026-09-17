@@ -83,8 +83,8 @@ class Repository(Generic[T]):
         return self._adapter
 
     @asynccontextmanager
-    async def _atomic(self) -> AsyncIterator[None]:
-        if self.adapter._in_active_transaction():
+    async def _atomic(self, required: bool = True) -> AsyncIterator[None]:
+        if not required or self.adapter._in_active_transaction():
             yield
             return
         async with Transaction(self.adapter):
@@ -107,7 +107,7 @@ class Repository(Generic[T]):
 
     async def create(self, obj: T) -> T:
         """Insert a single model and return it with generated keys."""
-        async with self._atomic():
+        async with self._atomic(self._rel_coordinator.requires_transaction(obj)):
             insert_ast = Insert.from_model(obj)
             result = await self._execute_mutation(insert_ast)
 
@@ -142,7 +142,10 @@ class Repository(Generic[T]):
         if not obj_list:
             return []
 
-        async with self._atomic():
+        needs_transaction = any(
+            self._rel_coordinator.requires_transaction(obj) for obj in obj_list
+        )
+        async with self._atomic(needs_transaction):
             insert_many_ast = InsertMany.from_models(obj_list)
             res = await self._execute_mutation(insert_many_ast)
             meta = getattr(self.model, "__db_metadata__", None)
@@ -191,7 +194,7 @@ class Repository(Generic[T]):
         if getattr(obj, "is_persisted", False) and not getattr(obj, "is_dirty", True):
             return obj
 
-        async with self._atomic():
+        async with self._atomic(self._rel_coordinator.requires_transaction(obj)):
             await self._rel_coordinator.cascade_on_update(obj)
             update_ast = Update.from_model(obj)
             if update_ast.values:
