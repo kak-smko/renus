@@ -22,11 +22,13 @@ from renus.config import Config
 from renus.db import (
     ID,
     Avg,
+
     Column,
     Count,
     Database,
     DatabaseField,
     DuplicateKeyError,
+
     Embedded,
     EmbeddedMany,
     Field,
@@ -46,6 +48,7 @@ from renus.db import (
     Model,
     SaveAction,
     Sum,
+
 )
 from renus.db.models.id import ID
 from renus.db.query.ast import Path, QueryAST
@@ -341,6 +344,7 @@ async def test_create_schema_and_tables(kind):
         assert any("users" in n for n in names), f"missing users among {names}"
     finally:
         await cleanup(db)
+
 
 
 # ---------------------------------------------------------------------------

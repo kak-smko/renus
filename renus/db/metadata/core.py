@@ -9,15 +9,11 @@ from renus.db.models.db_field import UNSET, DatabaseField
 from renus.db.relationships import RelationshipKind
 
 __all__ = [
-    "CheckConstraint",
-    "Constraint",
     "FieldMetadata",
-    "ForeignKeyConstraint",
     "IdentityMetadata",
     "Index",
     "ModelMetadata",
     "RelationshipMetadata",
-    "UniqueConstraint",
 ]
 
 @dataclass(frozen=True, slots=True)
@@ -131,92 +127,6 @@ class Index:
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "type", type)
 
-@dataclass(frozen=True, slots=True)
-class Constraint:
-    """Base class for model constraints."""
-
-    name: str | None = None
-
-@dataclass(frozen=True, slots=True)
-class UniqueConstraint(Constraint):
-    """A uniqueness constraint over one or more fields."""
-
-    fields: tuple[str, ...] = ()
-
-    def __init__(self, *fields: str, name: str | None = None) -> None:
-        """Initialize a unique constraint.
-
-        Parameters
-        ----------
-        fields:
-            Column field names constrained to be unique.
-        name:
-            Optional constraint name.
-        """
-        object.__setattr__(self, "name", name)
-        object.__setattr__(self, "fields", tuple(fields))
-
-@dataclass(frozen=True, slots=True)
-class CheckConstraint(Constraint):
-    """A check constraint with a SQL expression."""
-
-    expression: str = ""
-
-    def __init__(self, expression: str, name: str | None = None) -> None:
-        """Initialize a check constraint.
-
-        Parameters
-        ----------
-        expression:
-            SQL check expression the constraint enforces.
-        name:
-            Optional constraint name.
-        """
-        object.__setattr__(self, "expression", expression)
-        object.__setattr__(self, "name", name)
-
-@dataclass(frozen=True, slots=True)
-class ForeignKeyConstraint(Constraint):
-    """A foreign key constraint referencing another table."""
-
-    fields: tuple[str, ...] = ()
-    reference_table: str = ""
-    reference_fields: tuple[str, ...] = ()
-    on_delete: str = "RESTRICT"
-    on_update: str = "CASCADE"
-
-    def __init__(
-        self,
-        fields: tuple[str, ...],
-        reference_table: str,
-        reference_fields: tuple[str, ...],
-        on_delete: str = "RESTRICT",
-        on_update: str = "CASCADE",
-        name: str | None = None,
-    ) -> None:
-        """Initialize a foreign key constraint.
-
-        Parameters
-        ----------
-        fields:
-            Local column field names in the constraint.
-        reference_table:
-            Name of the referenced table.
-        reference_fields:
-            Column names referenced in the target table.
-        on_delete:
-            Referential action on delete. Defaults to ``"RESTRICT"``.
-        on_update:
-            Referential action on update. Defaults to ``"CASCADE"``.
-        name:
-            Optional constraint name.
-        """
-        object.__setattr__(self, "fields", tuple(fields))
-        object.__setattr__(self, "reference_table", reference_table)
-        object.__setattr__(self, "reference_fields", tuple(reference_fields))
-        object.__setattr__(self, "on_delete", on_delete)
-        object.__setattr__(self, "on_update", on_update)
-        object.__setattr__(self, "name", name)
 
 @dataclass(frozen=True, slots=True)
 class ModelMetadata:
@@ -229,7 +139,6 @@ class ModelMetadata:
     identity: IdentityMetadata
     relationships: dict[str, RelationshipMetadata] = field(default_factory=dict)
     indexes: tuple[Index, ...] = ()
-    constraints: tuple[Constraint, ...] = ()
     timestamps: bool = False
     soft_delete: bool = False
     created_at_field: str | None = None

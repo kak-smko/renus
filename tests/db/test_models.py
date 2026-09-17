@@ -7,14 +7,14 @@ from uuid import UUID, uuid4
 import pytest
 
 from renus.db import (
-    CheckConstraint,
+
     DatabaseField,
     Embedded,
     EmbeddedMany,
     EmbeddedOne,
     Field,
     FieldMetadata,
-    ForeignKeyConstraint,
+
     IdentityKind,
     IdentityMetadata,
     Index,
@@ -30,7 +30,7 @@ from renus.db import (
     Reference,
     RelationshipKind,
     RelationshipMetadata,
-    UniqueConstraint,
+
     ValidationError,
 )
 from renus.db.query.ast import Operator
@@ -465,18 +465,9 @@ class IndexedModel(Model):
 
     class Meta:
         indexes = (Index("dept", "code", unique=True, name="idx_dept_code"),)
-        constraints = (
-            UniqueConstraint("dept", "code", name="uq_dept_code"),
-            CheckConstraint("id > 0", name="chk_positive_id"),
-            ForeignKeyConstraint(
-                fields=("dept",),
-                reference_table="departments",
-                reference_fields=("id",),
-                name="fk_dept",
-            ),
-        )
 
-def test_declarative_indexes_and_constraints():
+
+def test_declarative_indexes():
     meta = IndexedModel.metadata()
     assert len(meta.indexes) == 1
     idx = meta.indexes[0]
@@ -484,10 +475,7 @@ def test_declarative_indexes_and_constraints():
     assert idx.unique is True
     assert idx.name == "idx_dept_code"
 
-    assert len(meta.constraints) == 3
-    assert any(isinstance(c, UniqueConstraint) for c in meta.constraints)
-    assert any(isinstance(c, CheckConstraint) for c in meta.constraints)
-    assert any(isinstance(c, ForeignKeyConstraint) for c in meta.constraints)
+
 
 def test_relationship_forward_reference_resolution():
     class ParentModel(Model):

@@ -7,7 +7,6 @@ from typing import Any, ClassVar
 from renus.db.core.exceptions import ValidationError
 from renus.db.core.state import IdentityKind, Lifecycle
 from renus.db.metadata.core import (
-    Constraint,
     FieldMetadata,
     IdentityMetadata,
     Index,
@@ -370,12 +369,6 @@ class ModelMeta(type):
                 if isinstance(idx, Index):
                     indexes.append(idx)
 
-        constraints: list[Constraint] = []
-        meta_constraints = getattr(meta_cls, "constraints", ())
-        if isinstance(meta_constraints, (list, tuple)):
-            for c in meta_constraints:
-                if isinstance(c, Constraint):
-                    constraints.append(c)
 
         model_meta = ModelMetadata(
             model=cls,
@@ -385,7 +378,6 @@ class ModelMeta(type):
             identity=identity,
             relationships=rel_metadata,
             indexes=tuple(indexes),
-            constraints=tuple(constraints),
             timestamps=timestamps,
             soft_delete=soft_delete,
             created_at_field="created_at" if timestamps else None,
