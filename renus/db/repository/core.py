@@ -457,7 +457,18 @@ class Repository(Generic[T]):
 
         objects = [self._hydrate(r) for r in rows]
         includes = list(ast.includes)
-        includes.extend(self._includes_for_relation_filters(relation_filters))
+        included_paths = {include.path.parts for include in includes}
+
+        for include in self._includes_for_relation_filters(relation_filters):
+            if include.path.parts not in included_paths:
+                includes.append(include)
+                included_paths.add(include.path.parts)
+
+        for include in self._includes_for_joined_relationships():
+            if include.path.parts not in included_paths:
+                includes.append(include)
+                included_paths.add(include.path.parts)
+
         if includes:
             await self._rel_coordinator.load_includes(objects, tuple(includes))
         if relation_filters:
@@ -489,6 +500,23 @@ class Repository(Generic[T]):
             if include is not None:
                 includes.append(include)
         return includes
+
+    def _includes_for_joined_relationships(self) -> list[Include]:
+        """Return relationships configured for automatic eager loading.
+
+        ``joined`` is represented by the same relationship coordinator used for
+        explicit includes. This keeps loading consistent across SQL and document
+        adapters while making the relationship part of every normal model result.
+        """
+        meta = getattr(self.model, "__db_metadata__", None)
+        if not meta:
+            return []
+
+        return [
+            Include(Path(self.model, (name,)))
+            for name, relationship in meta.relationships.items()
+            if getattr(relationship.loading, "value", relationship.loading) == "joined"
+        ]
 
     def _include_path(self, model: type, parts: tuple[str, ...]):
         relationships = model.__db_metadata__.relationships
