@@ -26,7 +26,7 @@ from renus.db import (
     OneToMany,
     OneToOne,
     Path,
-    ReModel,
+    Model,
     Reference,
     RelationshipKind,
     RelationshipMetadata,
@@ -38,7 +38,7 @@ from renus.db.validation.rules import Email, MinLen
 
 from tests.db import _native_helpers as nh
 
-class ComprehensiveTypesModel(ReModel):
+class ComprehensiveTypesModel(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     name: str
     age: int
@@ -87,14 +87,14 @@ def test_type_annotation_schema_inference():
     assert meta.relationships["tags"].is_collection
 
 def test_custom_storage_type_override():
-    class CustomTypeModel(ReModel):
+    class CustomTypeModel(Model):
         id: int = Field(database=DatabaseField(primary_key=True))
         code: str = Field(database=DatabaseField(storage_type="VARCHAR(64)"))
 
     meta = CustomTypeModel.metadata()
     assert meta.fields["code"].storage_type == "VARCHAR(64)"
 
-class UserSeparatedModel(ReModel):
+class UserSeparatedModel(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     username: str = Field(MinLen(3), database=DatabaseField(unique=True, column_name="u_name"))
     email: str = Field(Email(), db=DatabaseField(indexed=True))
@@ -128,7 +128,7 @@ def test_validation_enforcement():
     assert user.status == "active"
 
 def test_integer_auto_increment_identity():
-    class IntModel(ReModel):
+    class IntModel(Model):
         id: int = Field(database=DatabaseField(primary_key=True, generated=True))
         title: str
 
@@ -141,7 +141,7 @@ def test_integer_auto_increment_identity():
 def test_uuid_identity():
     uid = uuid4()
 
-    class UuidModel(ReModel):
+    class UuidModel(Model):
         id: UUID = Field(database=DatabaseField(primary_key=True, default_factory=uuid4))
         title: str
 
@@ -154,7 +154,7 @@ def test_uuid_identity():
     assert instance.identity_dict == {"id": uid}
 
 def test_string_identity():
-    class SlugModel(ReModel):
+    class SlugModel(Model):
         slug: str = Field(database=DatabaseField(primary_key=True))
         name: str
 
@@ -166,7 +166,7 @@ def test_string_identity():
     assert item.identity_values == "portable-orm"
 
 def test_composite_identity():
-    class CompositeModel(ReModel):
+    class CompositeModel(Model):
         org_id: int = Field(database=DatabaseField(primary_key=True))
         user_id: int = Field(database=DatabaseField(primary_key=True))
         role: str
@@ -185,7 +185,7 @@ def test_configured_id_identity():
     assert str(identity) == "507f1f77bcf86cd799439011"
     assert isinstance(identity, ID)
 
-    class MongoDoc(ReModel):
+    class MongoDoc(Model):
         _id: ID = Field(database=DatabaseField(primary_key=True, default_factory=ID))
         name: str
 
@@ -197,7 +197,7 @@ def test_configured_id_identity():
     assert doc.identity_values == identity
 
 def test_default_auto_synthesized_identity():
-    class BareModel(ReModel):
+    class BareModel(Model):
         name: str
 
     meta = BareModel.metadata()
@@ -206,7 +206,7 @@ def test_default_auto_synthesized_identity():
     assert meta.identity.kind == IdentityKind.INTEGER
     assert meta.identity.generated is True
 
-class Article(ReModel):
+class Article(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     title: str
     views: int = 0
@@ -258,7 +258,7 @@ def test_lifecycle_transitions():
     assert article.state == Lifecycle.DETACHED
 
 def test_immutable_field_enforcement():
-    class ImmutableRecord(ReModel):
+    class ImmutableRecord(Model):
         id: int = Field(database=DatabaseField(primary_key=True))
         account_number: str = Field(database=DatabaseField(immutable=True))
         balance: int = 0
@@ -275,7 +275,7 @@ def test_immutable_field_enforcement():
     assert record.balance == 600
     assert record.is_dirty is True
 
-class Product(ReModel):
+class Product(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     sku: str
     price: float
@@ -311,30 +311,30 @@ def test_timestamps_and_soft_delete():
     assert prod.deleted_at is None
     assert prod.state == Lifecycle.DIRTY
 
-class Address(ReModel):
+class Address(Model):
     street: str
     city: str
 
-class OrderItem(ReModel):
+class OrderItem(Model):
     product_name: str
     quantity: int
     price: float
 
-class Post(ReModel):
+class Post(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     title: str
     user_id: int = Field(database=DatabaseField(foreign_key="users.id"))
 
-class Profile(ReModel):
+class Profile(Model):
     id: int = Field(database=DatabaseField(primary_key=True))
     bio: str
     user_id: int
 
-class Role(ReModel):
+class Role(Model):
     id: int = Field(database=DatabaseField(primary_key=True))
     name: str
 
-class Customer(ReModel):
+class Customer(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     name: str
 
@@ -375,11 +375,11 @@ def test_relationship_metadata():
 def test_reference_and_many_to_one_and_embedded_one():
     assert EmbeddedOne is Embedded
 
-    class Department(ReModel):
+    class Department(Model):
         id: int = Field(database=DatabaseField(primary_key=True))
         name: str
 
-    class Employee(ReModel):
+    class Employee(Model):
         id: int = Field(database=DatabaseField(primary_key=True))
         dept_id: int
         department: Department = ManyToOne(Department, foreign_key="dept_id")
@@ -455,7 +455,7 @@ def test_query_ast_path_integration():
     assert desc_ord.descending
     assert desc_ord.path == Customer.name
 
-class IndexedModel(ReModel):
+class IndexedModel(Model):
     id: int = Field(database=DatabaseField(primary_key=True))
     dept: str
     code: str
@@ -487,11 +487,11 @@ def test_declarative_indexes_and_constraints():
     assert any(isinstance(c, ForeignKeyConstraint) for c in meta.constraints)
 
 def test_relationship_forward_reference_resolution():
-    class ParentModel(ReModel):
+    class ParentModel(Model):
         id: int = Field(database=DatabaseField(primary_key=True))
         children: list[ChildModel] = OneToMany("ChildModel", foreign_key="parent_id")
 
-    class ChildModel(ReModel):
+    class ChildModel(Model):
         id: int = Field(database=DatabaseField(primary_key=True))
         parent_id: int
 
@@ -505,7 +505,7 @@ def test_relationship_forward_reference_resolution():
     assert resolved is ChildModel
 
 def test_soft_delete_disabled_error():
-    class HardDeleteOnly(ReModel):
+    class HardDeleteOnly(Model):
         id: int = Field(database=DatabaseField(primary_key=True))
         name: str
 
@@ -517,7 +517,7 @@ def test_soft_delete_disabled_error():
         item.restore()
 
 def test_composite_primary_key_field_error():
-    class MultiPK(ReModel):
+    class MultiPK(Model):
         k1: int = Field(database=DatabaseField(primary_key=True))
         k2: str = Field(database=DatabaseField(primary_key=True))
 
@@ -543,11 +543,11 @@ def test_model_dict_and_to_dict_parity():
     assert d1["name"] == "Bob"
     assert d1["address"]["street"] == "456 Elm St"
 
-class NativeAddr(ReModel):
+class NativeAddr(Model):
     street: str
     city: str
 
-class NativeCust(ReModel):
+class NativeCust(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
     address: NativeAddr = Embedded(NativeAddr)

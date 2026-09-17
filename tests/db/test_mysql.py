@@ -14,7 +14,7 @@ from renus.db import (
     MutationResult,
     MySQLAdapter,
     Path,
-    ReModel,
+    Model,
     Repository,
     Delete,
     Insert,
@@ -32,7 +32,7 @@ from renus.db.mysql.dialect import MySQLDialect
 
 from tests.db import _native_helpers as nh
 
-class Customer(ReModel):
+class Customer(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True, auto_inc=True))
     username: str = Field(database=DatabaseField(unique=True))
     balance: float = 0.0
@@ -262,7 +262,7 @@ async def test_mysql_error_translation():
     with pytest.raises(DatabaseError, match="MySQL mutation error"):
         await adapter.execute_mutation(Insert(Customer, values={"username": "test"}))
 
-class NativeCustomer(ReModel):
+class NativeCustomer(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     username: str
     balance: float = 0.0

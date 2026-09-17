@@ -8,18 +8,18 @@ from renus.db import (
     Embedded,
     EmbeddedMany,
     Field,
-    ReModel,
+    Model,
     SQLiteAdapter,
 )
 from renus.db.mutation.ast import Insert, InsertMany
 
-class Addr(ReModel):
+class Addr(Model):
     city: str
 
-class Tag(ReModel):
+class Tag(Model):
     label: str
 
-class Item(ReModel):
+class Item(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str = ""
     address: Addr = Embedded(Addr)

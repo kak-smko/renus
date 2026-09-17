@@ -16,7 +16,7 @@ from renus.db import (
     Min,
     MutationResult,
     PortabilityKind,
-    ReModel,
+    Model,
     Repository,
     SQLiteAdapter,
     Sum,
@@ -32,11 +32,11 @@ from renus.db.sqlite.dialect import  SQLiteDialect
 
 from tests.db import _native_helpers as nh
 
-class GeoAddress(ReModel):
+class GeoAddress(Model):
     street: str
     city: str
 
-class Employee(ReModel):
+class Employee(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     name: str = Field(database=DatabaseField(unique=True))
     department: str = Field(database=DatabaseField(indexed=True))
@@ -49,7 +49,7 @@ class Employee(ReModel):
         timestamps = True
         soft_delete = True
 
-class Project(ReModel):
+class Project(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     code: str = Field(database=DatabaseField(unique=True))
     budget: float = 0.0
@@ -368,7 +368,7 @@ async def test_native_physical_schema_and_stored_rows():
 
     await db.disconnect()
 
-class NativeWare(ReModel):
+class NativeWare(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     sku: str
     qty: int

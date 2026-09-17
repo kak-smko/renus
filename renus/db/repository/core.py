@@ -25,6 +25,7 @@ from renus.db.query.ast import (
     Logical,
     Operator,
     Path,
+    Include,
     QueryAST,
     RelationAny,
 )
@@ -442,17 +443,105 @@ class Repository(Generic[T]):
         return await self.query(*conditions).exists()
 
     async def _query(self, ast: QueryAST) -> list[Any]:
+        relation_filters = self._relation_filters(ast.filters)
+        backend_filters = tuple(
+            cond for cond in ast.filters if cond not in relation_filters
+        )
+        backend_ast = replace(ast, filters=backend_filters)
         compile_fn = getattr(self.adapter, "compile_query", None)
-        compiled = compile_fn(ast) if compile_fn is not None else ast
+        compiled = compile_fn(backend_ast) if compile_fn is not None else backend_ast
         rows = await self.adapter.execute_query(compiled)
 
         if ast.projection or ast.aggregates:
             return [dict(r) if not isinstance(r, dict) else r for r in rows]
 
         objects = [self._hydrate(r) for r in rows]
-        if ast.includes:
-            await self._rel_coordinator.load_includes(objects, ast.includes)
+        includes = list(ast.includes)
+        includes.extend(self._includes_for_relation_filters(relation_filters))
+        if includes:
+            await self._rel_coordinator.load_includes(objects, tuple(includes))
+        if relation_filters:
+            objects = [
+                obj for obj in objects
+                if all(self._matches_relation_filter(obj, cond) for cond in relation_filters)
+            ]
         return objects
+
+    def _relation_filters(self, filters: tuple[Condition, ...]) -> list[Condition]:
+        relationships = self.model.__db_metadata__.relationships
+        return [
+            cond for cond in filters
+            if isinstance(cond, Condition)
+            and not isinstance(cond, Logical)
+            and cond.path is not None
+            and cond.path.parts
+            and (rel := relationships.get(cond.path.parts[0])) is not None
+            and (not rel.is_embedded or rel.target not in (dict, list))
+        ]
+
+    def _includes_for_relation_filters(self, filters: list[Condition]) -> list[Any]:
+        includes = []
+        for cond in filters:
+            path = cond.path
+            if path is None or not path.parts:
+                continue
+            include = self._include_path(self.model, path.parts)
+            if include is not None:
+                includes.append(include)
+        return includes
+
+    def _include_path(self, model: type, parts: tuple[str, ...]):
+        relationships = model.__db_metadata__.relationships
+        if not parts or parts[0] not in relationships:
+            return None
+        rel_path = Path(model, (parts[0],))
+        if len(parts) == 1:
+            return Include(rel_path)
+        target = relationships[parts[0]].target
+        if not isinstance(target, type):
+            return Include(rel_path)
+        nested = self._include_path(target, parts[1:])
+        return Include(rel_path) if nested is None else Include(rel_path, nested=(nested,))
+
+    @staticmethod
+    def _path_value(obj: Any, parts: tuple[str, ...]) -> Any:
+        if not parts:
+            return obj
+        if isinstance(obj, list):
+            values = [Repository._path_value(item, parts) for item in obj]
+            return [value for item in values for value in (item if isinstance(item, list) else [item])]
+        if isinstance(obj, dict):
+            return Repository._path_value(obj.get(parts[0]), parts[1:])
+        return Repository._path_value(getattr(obj, parts[0], None), parts[1:])
+
+    def _matches_relation_filter(self, obj: Any, cond: Condition) -> bool:
+        value = self._path_value(obj, cond.path.parts)
+        values = value if isinstance(value, list) else [value]
+        if cond.operator == Operator.EQ:
+            return any(item == cond.value for item in values)
+        if cond.operator == Operator.IN:
+            return any(item in cond.value for item in values)
+        if cond.operator == Operator.NE:
+            return all(item != cond.value for item in values)
+        if cond.operator == Operator.NOT_IN:
+            return all(item not in cond.value for item in values)
+        if cond.operator == Operator.GT:
+            return any(item > cond.value for item in values if item is not None)
+        if cond.operator == Operator.GE:
+            return any(item >= cond.value for item in values if item is not None)
+        if cond.operator == Operator.LT:
+            return any(item < cond.value for item in values if item is not None)
+        if cond.operator == Operator.LE:
+            return any(item <= cond.value for item in values if item is not None)
+        if cond.operator == Operator.LIKE:
+            pattern = str(cond.value).replace("%", "")
+            return any(pattern in str(item) for item in values if item is not None)
+        if cond.operator == Operator.BETWEEN:
+            lower, upper = cond.value
+            return any(
+                lower <= item <= upper for item in values if item is not None
+            )
+        raise ValueError(f"Unsupported relation filter operator: {cond.operator}")
 
     async def _count(self, ast: QueryAST) -> int:
         count_ast = replace(

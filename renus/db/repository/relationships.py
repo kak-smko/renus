@@ -327,6 +327,8 @@ class RelationshipCoordinator:
         rel: Any,
         parent_id: Any,
         child: Any,
+        *,
+        table_prefix: str | None = None,
     ) -> None:
         if rel.target is dict:
             return await self._persist_raw_embedded_one(
@@ -334,15 +336,24 @@ class RelationshipCoordinator:
             )
 
         child_dict = child.to_dict() if hasattr(child, "to_dict") else dict(child)
-        child_dict["parent_id"] = parent_id
 
         child_meta = getattr(child, "__db_metadata__", None)
         if child_meta is not None:
+            child_dict = {
+                fname: child_dict[fname]
+                for fname in child_meta.fields
+                if fname in child_dict
+            }
             pk_fmeta = child_meta.fields.get(child_meta.primary_key_field)
             if pk_fmeta is not None and pk_fmeta.generated:
                 child_dict.pop("id", None)
 
-        table_name = f"{parent_meta.table}_{rel_name}"
+        child_dict["parent_id"] = parent_id
+        table_name = (
+            f"{table_prefix}_{rel_name}"
+            if table_prefix is not None
+            else f"{parent_meta.table}_{rel_name}"
+        )
 
         embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
 
@@ -356,6 +367,30 @@ class RelationshipCoordinator:
             ins_ast = Insert(source=embedded_source, values=child_dict)
             await self.adapter.execute_mutation(ins_ast)
 
+        if child_meta is not None:
+            for nested_name, nested_rel in child_meta.relationships.items():
+                nested_value = getattr(child, nested_name, None)
+                if nested_value is None:
+                    continue
+                if nested_rel.kind == RelationshipKind.EMBEDDED_ONE:
+                    await self._persist_embedded_one(
+                        child_meta,
+                        nested_name,
+                        nested_rel,
+                        parent_id,
+                        nested_value,
+                        table_prefix=table_name,
+                    )
+                elif nested_rel.kind == RelationshipKind.EMBEDDED_MANY:
+                    await self._persist_embedded_many(
+                        child_meta,
+                        nested_name,
+                        nested_rel,
+                        parent_id,
+                        nested_value,
+                        table_prefix=table_name,
+                    )
+
     async def _persist_embedded_many(
         self,
         parent_meta: Any,
@@ -363,24 +398,31 @@ class RelationshipCoordinator:
         rel: Any,
         parent_id: Any,
         items: Iterable[Any],
+        *,
+        table_prefix: str | None = None,
     ) -> None:
         if rel.target is list:
             return await self._persist_raw_embedded_many(
                 parent_meta, rel_name, parent_id, items
             )
 
-        table_name = f"{parent_meta.table}_{rel_name}"
+        table_name = (
+            f"{table_prefix}_{rel_name}"
+            if table_prefix is not None
+            else f"{parent_meta.table}_{rel_name}"
+        )
         embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
 
         records: list[dict[str, Any]] = []
         for idx, item in enumerate(items):
             d = item.to_dict() if hasattr(item, "to_dict") else dict(item)
-            d["parent_id"] = parent_id
             item_meta = getattr(item, "__db_metadata__", None)
             if item_meta is not None:
+                d = {fname: d[fname] for fname in item_meta.fields if fname in d}
                 pk_fmeta = item_meta.fields.get(item_meta.primary_key_field)
                 if pk_fmeta is not None and pk_fmeta.generated:
                     d.pop("id", None)
+            d["parent_id"] = parent_id
             records.append(d)
 
         async with self._atomic():
@@ -393,6 +435,33 @@ class RelationshipCoordinator:
             if records:
                 ins_many = InsertMany(source=embedded_source, records=records)
                 await self.adapter.execute_mutation(ins_many)
+
+        for item in items:
+            item_meta = getattr(item, "__db_metadata__", None)
+            if item_meta is None:
+                continue
+            for nested_name, nested_rel in item_meta.relationships.items():
+                nested_value = getattr(item, nested_name, None)
+                if nested_value is None:
+                    continue
+                if nested_rel.kind == RelationshipKind.EMBEDDED_ONE:
+                    await self._persist_embedded_one(
+                        item_meta,
+                        nested_name,
+                        nested_rel,
+                        parent_id,
+                        nested_value,
+                        table_prefix=table_name,
+                    )
+                elif nested_rel.kind == RelationshipKind.EMBEDDED_MANY:
+                    await self._persist_embedded_many(
+                        item_meta,
+                        nested_name,
+                        nested_rel,
+                        parent_id,
+                        nested_value,
+                        table_prefix=table_name,
+                    )
 
     async def _persist_raw_embedded_one(
         self,
@@ -681,10 +750,26 @@ class RelationshipCoordinator:
             if rel.kind == RelationshipKind.EMBEDDED_ONE:
                 if not self.adapter.nested_documents:
                     await self._load_embedded_one_batch(meta, rel_name, rel, parent_ids, objects)
+                if not self.adapter.nested_documents and inc.nested:
+                    await self._load_nested_embedded(
+                        objects,
+                        rel_name,
+                        inc.nested,
+                        parent_ids,
+                        f"{meta.table}_{rel_name}",
+                    )
 
             elif rel.kind == RelationshipKind.EMBEDDED_MANY:
                 if not self.adapter.nested_documents:
                     await self._load_embedded_many_batch(meta, rel_name, rel, parent_ids, objects)
+                if not self.adapter.nested_documents and inc.nested:
+                    await self._load_nested_embedded(
+                        objects,
+                        rel_name,
+                        inc.nested,
+                        parent_ids,
+                        f"{meta.table}_{rel_name}",
+                    )
 
             elif rel.kind == RelationshipKind.ONE_TO_MANY:
                 await self._load_one_to_many_batch(meta, rel_name, rel, parent_ids, objects, inc)
@@ -760,6 +845,59 @@ class RelationshipCoordinator:
                 [target_map[fk] for fk in fks if fk in target_map],
             )
 
+    async def _load_nested_embedded(
+        self,
+        objects: list[Any],
+        rel_name: str,
+        includes: tuple[Include, ...],
+        parent_ids: list[Any],
+        table_prefix: str,
+    ) -> None:
+        children: list[Any] = []
+        for obj in objects:
+            value = getattr(obj, rel_name, None)
+            if isinstance(value, list):
+                children.extend(value)
+            elif value is not None:
+                children.append(value)
+        if not children:
+            return
+
+        child_meta = getattr(children[0], "__db_metadata__", None)
+        if child_meta is None:
+            return
+        for inc in includes:
+            nested_name = inc.path.parts[0]
+            nested_rel = child_meta.relationships.get(nested_name)
+            if nested_rel is None:
+                continue
+            if nested_rel.kind == RelationshipKind.EMBEDDED_ONE:
+                await self._load_embedded_one_batch(
+                    child_meta,
+                    nested_name,
+                    nested_rel,
+                    parent_ids,
+                    children,
+                    table_prefix=table_prefix,
+                )
+            elif nested_rel.kind == RelationshipKind.EMBEDDED_MANY:
+                await self._load_embedded_many_batch(
+                    child_meta,
+                    nested_name,
+                    nested_rel,
+                    parent_ids,
+                    children,
+                    table_prefix=table_prefix,
+                )
+            if inc.nested:
+                await self._load_nested_embedded(
+                    children,
+                    nested_name,
+                    inc.nested,
+                    parent_ids,
+                    f"{table_prefix}_{nested_name}",
+                )
+
     async def _load_embedded_one_batch(
         self,
         meta: Any,
@@ -767,8 +905,10 @@ class RelationshipCoordinator:
         rel: Any,
         parent_ids: list[Any],
         objects: list[Any],
+        *,
+        table_prefix: str | None = None,
     ) -> None:
-        table_name = f"{meta.table}_{rel_name}"
+        table_name = f"{table_prefix}_{rel_name}" if table_prefix else f"{meta.table}_{rel_name}"
         embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
 
         q_ast = QueryAST(
@@ -797,10 +937,15 @@ class RelationshipCoordinator:
             if pid is not None:
                 child_map[pid] = target_cls(row_dict)
 
-        for obj in objects:
-            pid = getattr(obj, meta.primary_key_field, None)
-            if pid in child_map:
-                object.__setattr__(obj, rel_name, child_map[pid])
+        if table_prefix and len(parent_ids) == 1 and child_map:
+            child = next(iter(child_map.values()))
+            for obj in objects:
+                object.__setattr__(obj, rel_name, child)
+        else:
+            for obj in objects:
+                pid = getattr(obj, meta.primary_key_field, None)
+                if pid in child_map:
+                    object.__setattr__(obj, rel_name, child_map[pid])
 
     async def _load_embedded_many_batch(
         self,
@@ -809,8 +954,10 @@ class RelationshipCoordinator:
         rel: Any,
         parent_ids: list[Any],
         objects: list[Any],
+        *,
+        table_prefix: str | None = None,
     ) -> None:
-        table_name = f"{meta.table}_{rel_name}"
+        table_name = f"{table_prefix}_{rel_name}" if table_prefix else f"{meta.table}_{rel_name}"
         embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
 
         q_ast = QueryAST(
@@ -842,9 +989,14 @@ class RelationshipCoordinator:
             if pid in items_map:
                 items_map[pid].append(target_cls(row_dict))
 
-        for obj in objects:
-            pid = getattr(obj, meta.primary_key_field, None)
-            object.__setattr__(obj, rel_name, items_map.get(pid, []))
+        if table_prefix and len(parent_ids) == 1 and items_map:
+            items = next(iter(items_map.values()))
+            for obj in objects:
+                object.__setattr__(obj, rel_name, items)
+        else:
+            for obj in objects:
+                pid = getattr(obj, meta.primary_key_field, None)
+                object.__setattr__(obj, rel_name, items_map.get(pid, []))
 
     async def _load_one_to_many_batch(
         self,
@@ -920,7 +1072,10 @@ class RelationshipCoordinator:
         fk_name = rel.foreign_key or f"{to_plural_lower(meta.table)}_id"
         child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
 
-        children = await child_repo.query(Path(target_cls, (fk_name,)).in_(parent_ids)).all()
+        q = child_repo.query(Path(target_cls, (fk_name,)).in_(parent_ids))
+        if inc.nested:
+            q = q.include(*inc.nested)
+        children = await q.all()
         child_map = {getattr(c, fk_name): c for c in children}
 
         for obj in objects:

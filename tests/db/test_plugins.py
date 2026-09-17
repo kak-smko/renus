@@ -17,7 +17,7 @@ from renus.db import (
     PluginManager,
     Field,
     QueryResult,
-    ReModel,
+    Model,
     SQLiteAdapter,
     adapters,
     clear_adapters,
@@ -175,7 +175,7 @@ async def test_database_use_plugin_integration():
     await db.disconnect()
     assert plugin.disconnected_events == ["primary"]
 
-class Article(ReModel):
+class Article(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     title: str
 
@@ -214,7 +214,7 @@ class MutationEventPlugin(Plugin):
         self.after.append(ast.__class__.__name__)
         self.after_rows_affected.append(result.rows_affected)
 
-class EventItem(ReModel):
+class EventItem(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     title: str
 

@@ -58,9 +58,9 @@ class {name_camel}Controller:
 
 model_temp = '''from __future__ import annotations
 
-from renus.db import DatabaseField, Field, ReModel
+from renus.db import DatabaseField, Field, Model
 
-class {name_camel}(ReModel):
+class {name_camel}(Model):
     """Domain model for {name}.
 
     Field rules run during :meth:`validate` and on instantiation; metadata is

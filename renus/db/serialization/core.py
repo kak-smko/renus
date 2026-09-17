@@ -10,7 +10,7 @@ from typing import Any, TypeVar
 from uuid import UUID
 
 from renus.db.core.exceptions import ValidationError
-from renus.db.models.base import ReModel
+from renus.db.models.base import Model
 from renus.db.models.id import ID
 
 __all__ = [
@@ -45,7 +45,7 @@ def to_dict(
     inc_set = set(include) if include is not None else None
     exc_set = set(exclude) if exclude is not None else set()
 
-    if isinstance(value, ReModel):
+    if isinstance(value, Model):
         meta = getattr(value, "__db_metadata__", None)
         out: dict[str, Any] = {}
         fields_to_process = meta.fields.keys() if meta else value.__dict__.keys()
@@ -140,7 +140,7 @@ def from_dict(
     if not isinstance(data, dict):
         raise ValidationError(f"Expected dict input for {model_cls.__name__}, got {type(data).__name__}")
 
-    if not issubclass(model_cls, ReModel):
+    if not issubclass(model_cls, Model):
         return model_cls(**data)
 
     meta = getattr(model_cls, "__db_metadata__", None)
@@ -203,15 +203,15 @@ def from_dict(
 
             elif isinstance(raw_val, dict):
                 target_model_cls = None
-                if isinstance(target_type, type) and issubclass(target_type, ReModel):
+                if isinstance(target_type, type) and issubclass(target_type, Model):
                     target_model_cls = target_type
                 elif fname in meta.relationships:
                     rel = meta.relationships[fname]
-                    if isinstance(rel.target, type) and issubclass(rel.target, ReModel):
+                    if isinstance(rel.target, type) and issubclass(rel.target, Model):
                         target_model_cls = rel.target
                 else:
                     declared_type = _resolve_declared_type(model_cls, target_type)
-                    if isinstance(declared_type, type) and issubclass(declared_type, ReModel):
+                    if isinstance(declared_type, type) and issubclass(declared_type, Model):
                         target_model_cls = declared_type
 
                 if target_model_cls is not None:
@@ -253,7 +253,7 @@ def from_json(
 
 def sanitize_params(value: Any, *, mask: str = "***") -> Any:
     """Recursively replace sensitive field values with a mask."""
-    if isinstance(value, ReModel):
+    if isinstance(value, Model):
         meta = getattr(value, "__db_metadata__", None)
         fields = meta.fields if meta else {}
         out: dict[str, Any] = {}

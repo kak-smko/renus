@@ -12,17 +12,17 @@ from renus.db import (
     Field,
     MongoDBAdapter,
     MySQLAdapter,
-    ReModel,
+    Model,
     SQLiteAdapter,
 )
 
 from tests.db import _native_helpers as nh
 
-class DocCountry(ReModel):
+class DocCountry(Model):
     name: str
     code: int
 
-class DocTrans(ReModel):
+class DocTrans(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     key: str
     trans: dict

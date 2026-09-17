@@ -28,6 +28,7 @@ from renus.db import (
     DatabaseField,
     DuplicateKeyError,
     Embedded,
+    EmbeddedMany,
     Field,
     Include,
     IntegrityError,
@@ -42,14 +43,35 @@ from renus.db import (
     OneToOne,
     ReferentialAction,
     RelationshipKind,
-    ReModel,
+    Model,
     SaveAction,
     Sum,
 )
 from renus.db.models.id import ID
+from renus.db.query.ast import Path, QueryAST
+from tests.db.deep_relation_models import DEEP_RELATION_FAMILIES
+from tests.db.deep_embedded_models import (
+    DeepEmbedded1,
+    DeepEmbedded2,
+    DeepEmbedded3,
+    DeepEmbedded4,
+    DeepEmbedded5,
+    DeepEmbedded6,
+    DeepEmbedded7,
+    DeepMany1,
+    DeepMany2,
+    DeepMany3,
+    DeepMany4,
+    DeepMany5,
+    DeepMany6,
+    DeepManyLeaf,
+    DeepRoot,
+)
 from tests.db._conformance import (
     Citizen,
+    Contact,
     Dept,
+    Version,
     Employee,
     Item,
     Passport,
@@ -85,7 +107,7 @@ def _row_count_model(table: str) -> type:
     model = _row_count_models.get(table)
     if model is None:
         meta = type("Meta", (), {"table": table})
-        model = type(f"_RowCount_{table}", (ReModel,), {"Meta": meta})
+        model = type(f"_RowCount_{table}", (Model,), {"Meta": meta})
         _row_count_models[table] = model
     return model
 
@@ -104,7 +126,7 @@ _known_mig_models: dict[tuple[str, tuple[str, ...]], type] = {}
 
 
 def _mig_model(table: str, fields: dict[str, type]) -> type:
-    """Build a ReModel bound to a migration-created table.
+    """Build a Model bound to a migration-created table.
 
     The model has a string ``id`` primary key plus the requested fields, and
     is cached so repeated builds with the same shape share one class.
@@ -126,7 +148,7 @@ def _mig_model(table: str, fields: dict[str, type]) -> type:
     meta = type("Meta", (), {"table": table})
     cls = type(
         f"_M_{table}_{'_'.join(sorted(fields))}",
-        (ReModel,),
+        (Model,),
         {"__annotations__": annotations, **attrs, "Meta": meta},
     )
     _known_mig_models[key] = cls
@@ -145,7 +167,7 @@ def _o2o_pair(
     fk = f"{name.lower()}_id"
     child_cls = type(
         f"{name}Detail",
-        (ReModel,),
+        (Model,),
         {
             "__annotations__": {"id": str, fk: (str | None), "label": str},
             "id": Field(database=DatabaseField(primary_key=True)),
@@ -155,7 +177,7 @@ def _o2o_pair(
     )
     owner_cls = type(
         f"{name}Owner",
-        (ReModel,),
+        (Model,),
         {
             "__annotations__": {"id": str, "name": str, "detail": child_cls},
             "id": Field(database=DatabaseField(primary_key=True)),
@@ -184,7 +206,7 @@ def _o2m_pair(
     fk = f"{name.lower()}_id"
     child_cls = type(
         f"{name}Child",
-        (ReModel,),
+        (Model,),
         {
             "__annotations__": {"id": str, fk: (str | None), "label": str},
             "id": Field(database=DatabaseField(primary_key=True)),
@@ -194,7 +216,7 @@ def _o2m_pair(
     )
     owner_cls = type(
         f"{name}Owner",
-        (ReModel,),
+        (Model,),
         {
             "__annotations__": {"id": str, "name": str, "children": list[child_cls]},
             "id": Field(database=DatabaseField(primary_key=True)),
@@ -224,7 +246,7 @@ def _m2o_pair(
     fk = f"{name.lower()}_id"
     parent_cls = type(
         f"{name}Parent",
-        (ReModel,),
+        (Model,),
         {
             "__annotations__": {"id": str, "name": str},
             "id": Field(database=DatabaseField(primary_key=True)),
@@ -233,7 +255,7 @@ def _m2o_pair(
     )
     holder_cls = type(
         f"{name}Item",
-        (ReModel,),
+        (Model,),
         {
             "__annotations__": {
                 "id": str,
@@ -267,7 +289,7 @@ def _mtm_pair(
     through = f"{name.lower()}_links"
     target_cls = type(
         f"{name}Role",
-        (ReModel,),
+        (Model,),
         {
             "__annotations__": {"id": str, "name": str},
             "id": Field(database=DatabaseField(primary_key=True)),
@@ -276,7 +298,7 @@ def _mtm_pair(
     )
     owner_cls = type(
         f"{name}Owner",
-        (ReModel,),
+        (Model,),
         {
             "__annotations__": {"id": str, "name": str, "items": list[target_cls]},
             "id": Field(database=DatabaseField(primary_key=True)),
@@ -883,10 +905,127 @@ async def test_embedded_relationship(kind):
         assert loaded.address.street == "one"
         assert loaded.address.city == "two"
 
+        assert [row.id for row in await repo.query(Item.address.street == "one").all()] == ["e1"]
+        assert [row.id for row in await repo.query(Item.address.city.in_("two")).all()] == ["e1"]
+
         await repo.delete(loaded)
         after = await _row_counts(db, *tables)
         assert after == {t: 0 for t in tables}, after
         assert await repo.count() == 0
+    finally:
+        await cleanup(db)
+
+
+def _deep_embedded_tables(model: type, prefix: str | None = None) -> list[str]:
+    """Return all flat-table names created by embedded relationships."""
+    meta = model.metadata()
+    tables: list[str] = []
+    for rel_name, rel in meta.relationships.items():
+        if not rel.is_embedded or rel.target in (dict, list):
+            continue
+        table = f"{prefix}_{rel_name}" if prefix else f"{meta.table}_{rel_name}"
+        tables.append(table)
+        tables.extend(_deep_embedded_tables(rel.target, table))
+    return tables
+
+
+def _deep_embedded_value() -> DeepEmbedded1:
+    value: Any = DeepEmbedded7(value="embedded-7")
+    for model in (
+        DeepEmbedded6,
+        DeepEmbedded5,
+        DeepEmbedded4,
+        DeepEmbedded3,
+        DeepEmbedded2,
+    ):
+        value = model(child=value)
+    return DeepEmbedded1(child=value)
+
+
+def _deep_many_value() -> list[DeepMany1]:
+    value: Any = DeepManyLeaf(value="many-leaf")
+    for model in (
+        DeepMany6,
+        DeepMany5,
+        DeepMany4,
+        DeepMany3,
+        DeepMany2,
+    ):
+        value = model(children=[value])
+    return [DeepMany1(children=[value])]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_seven_level_embedded_and_embedded_many_relationships(kind):
+    db = await database_for(kind, [DeepRoot])
+    try:
+        root_repo = db.repository(DeepRoot)
+        root = DeepRoot(
+            id="deep-1",
+            embedded=_deep_embedded_value(),
+            many=_deep_many_value(),
+        )
+        await root_repo.create(root)
+
+        nested = db.adapter("primary").nested_documents
+        embedded_tables = _deep_embedded_tables(DeepRoot)
+        if nested:
+            assert await _row_counts(db, "deeproots") == {"deeproots": 1}
+        else:
+            tables = ["deeproots", *embedded_tables]
+            assert await _row_counts(db, *tables) == {table: 1 for table in tables}
+            assert embedded_tables == [
+                "deeproots_embedded",
+                "deeproots_embedded_child",
+                "deeproots_embedded_child_child",
+                "deeproots_embedded_child_child_child",
+                "deeproots_embedded_child_child_child_child",
+                "deeproots_embedded_child_child_child_child_child",
+                "deeproots_embedded_child_child_child_child_child_child",
+                "deeproots_many",
+                "deeproots_many_children",
+                "deeproots_many_children_children",
+                "deeproots_many_children_children_children",
+                "deeproots_many_children_children_children_children",
+                "deeproots_many_children_children_children_children_children",
+                "deeproots_many_children_children_children_children_children_children",
+            ]
+
+        embedded_path = DeepRoot.embedded
+        for _ in range(6):
+            embedded_path = embedded_path.child
+        assert [row.id for row in await root_repo.query(embedded_path.value == "embedded-7").all()] == ["deep-1"]
+
+        many_path = DeepRoot.many
+        for _ in range(6):
+            many_path = many_path.children
+        assert [row.id for row in await root_repo.query(many_path.value.in_("many-leaf")).all()] == ["deep-1"]
+
+        if nested:
+            loaded = (await root_repo.query().all())[0]
+            assert loaded.id == "deep-1"
+            embedded = loaded.embedded
+            for _ in range(6):
+                embedded = embedded["child"]
+            assert embedded["value"] == "embedded-7"
+            many = loaded.many[0]
+            for _ in range(6):
+                many = many["children"][0]
+            assert many["value"] == "many-leaf"
+        else:
+            assert await _row_counts(db, *embedded_tables) == {
+                table: 1 for table in embedded_tables
+            }
+            for table in embedded_tables:
+                rows = await db.adapter("primary").execute_query(
+                    QueryAST(
+                        source=_row_count_model(table),
+                        filters=(Path(_row_count_model(table), ("parent_id",)) == "deep-1",),
+                    )
+                )
+                assert len(rows) == 1
+                assert dict(rows[0])["parent_id"] == "deep-1"
     finally:
         await cleanup(db)
 
@@ -911,6 +1050,9 @@ async def test_embedded_many_relationship(kind):
 
         loaded = (await repo.query().include(Item.tags).all())[0]
         assert sorted(t.name for t in loaded.tags) == ["a", "b"]
+
+        assert [row.id for row in await repo.query(Item.tags.name == "a").all()] == ["m1"]
+        assert [row.id for row in await repo.query(Item.tags.name.in_("b")).all()] == ["m1"]
 
         await repo.delete_many()
         after = await _row_counts(db, *tables)
@@ -989,6 +1131,97 @@ async def test_many_to_one_relationship(kind):
 
         loaded = (await emp_repo.query().include(Employee.dept).all())[0]
         assert loaded.dept.name == "eng"
+    finally:
+        await cleanup(db)
+
+
+def _deep_relation_value(family_name: str):
+    family = DEEP_RELATION_FAMILIES[family_name]
+    relation_name = {
+        "one_to_one": "child",
+        "one_to_many": "children",
+        "many_to_one": "parent",
+        "many_to_many": "children",
+    }[family_name]
+    current: Any = family[-1](id=f"{family_name}-7")
+    for model in reversed(family[:-1]):
+        current = model(id=f"{family_name}-{len(family) - len(model.__name__)}", **{relation_name: [current] if relation_name in ("children",) else current})
+    return current
+
+
+def _deep_relation_include(family_name: str):
+    family = DEEP_RELATION_FAMILIES[family_name]
+    relation_name = {
+        "one_to_one": "child",
+        "one_to_many": "children",
+        "many_to_one": "parent",
+        "many_to_many": "children",
+    }[family_name]
+    nested = None
+    for owner in reversed(family[:-1]):
+        path = getattr(owner, relation_name)
+        nested = Include(path) if nested is None else Include(path, nested=(nested,))
+    return nested
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+@pytest.mark.parametrize("family_name", sorted(DEEP_RELATION_FAMILIES))
+async def test_seven_level_relations_and_nested_queries(kind, family_name):
+    family = DEEP_RELATION_FAMILIES[family_name]
+    db = await database_for(kind, list(family))
+    try:
+        root_cls = family[0]
+        root = _deep_relation_value(family_name)
+        await db.repository(root_cls).create(root)
+
+        tables = [model.metadata().table for model in family]
+        if family_name == "many_to_many":
+            tables.extend(
+                rel.through
+                for model in family[:-1]
+                for rel in model.metadata().relationships.values()
+                if rel.through
+            )
+        counts = await _row_counts(db, *tables)
+        assert counts == {table: 1 for table in tables}
+
+        include = _deep_relation_include(family_name)
+        relation_name = {
+            "one_to_one": "child",
+            "one_to_many": "children",
+            "many_to_one": "parent",
+            "many_to_many": "children",
+        }[family_name]
+        path = getattr(root_cls, relation_name)
+        for _ in range(5):
+            path = getattr(path, relation_name)
+        scalar_path = path.value
+        scalar_matches = await db.repository(root_cls).query(scalar_path == f"{family_name.replace('_', '-')}-7").all()
+        assert [row.id for row in scalar_matches] == [root.id]
+
+        collection_path = getattr(root_cls, relation_name)
+        for _ in range(5):
+            collection_path = getattr(collection_path, relation_name)
+        collection_matches = await db.repository(root_cls).query(
+            collection_path.value.in_(f"{family_name.replace('_', '-')}-7")
+        ).all()
+        assert [row.id for row in collection_matches] == [root.id]
+
+        loaded = (await db.repository(root_cls).query().include(include).all())[0]
+        current = loaded
+        relation_name = {
+            "one_to_one": "child",
+            "one_to_many": "children",
+            "many_to_one": "parent",
+            "many_to_many": "children",
+        }[family_name]
+        for _ in range(6):
+            current = getattr(current, relation_name)
+            if relation_name in ("children",):
+                assert len(current) == 1
+                current = current[0]
+        assert current.value == f"{family_name.replace('_', '-')}-7"
     finally:
         await cleanup(db)
 
@@ -2370,7 +2603,12 @@ async def test_backup_and_restore_roundtrip_all_tables(kind, tmp_path):
                 "b1",
                 name="Backy",
                 age=31,
-                profile=Profile(city="Tehran", street="main"),
+                profile=Profile(
+                                    city="Tehran",
+                                    street="main",
+                                    contact=Contact(phone="123456789", version=Version(name="contact-v1")),
+                                    version=Version(name="profile-v1"),
+                                ),
             )
         )
         await repo.create(
@@ -2391,8 +2629,15 @@ async def test_backup_and_restore_roundtrip_all_tables(kind, tmp_path):
         assert counts["posts"] == 1
         ls = ["users.json", "posts.json"]
         if not db.adapter("primary").nested_documents:
-            ls.append("users_profile.json")
-            assert counts["users_profile"] == 2
+            embedded_tables = {
+                "users_profile": 2,
+                "users_profile_contact": 1,
+                "users_profile_version": 1,
+                "users_profile_contact_version": 1,
+            }
+            ls.extend(f"{table}.json" for table in embedded_tables)
+            for table, expected_count in embedded_tables.items():
+                assert counts[table] == expected_count
         for name in ls:
             assert os.path.exists(os.path.join(backup_path, name)), (
                 f"missing backup {name}"
@@ -2407,6 +2652,9 @@ async def test_backup_and_restore_roundtrip_all_tables(kind, tmp_path):
         assert restored["posts"] == 1
         if not db.adapter("primary").nested_documents:
             assert restored["users_profile"] == 2
+            assert restored["users_profile_contact"] == 1
+            assert restored["users_profile_version"] == 1
+            assert restored["users_profile_contact_version"] == 1
 
         usernames = {u.username for u in await repo.query().all()}
         assert usernames == {"b1", "b2"}
@@ -3024,7 +3272,7 @@ async def test_create_auto_generates_identity_object_id(kind):
 
     Config._cache["database"] = SimpleNamespace(ID=ObjectId)
 
-    class User(ReModel):
+    class User(Model):
         id: ID = Field(
             database=DatabaseField(primary_key=True, generated=True, default_factory=ID)
         )
@@ -3058,7 +3306,7 @@ async def test_create_auto_generates_identity_str(kind):
 
     Config._cache["database"] = SimpleNamespace(ID=str)
 
-    class User(ReModel):
+    class User(Model):
         id: ID = Field(
             database=DatabaseField(primary_key=True, generated=True, default_factory=ID)
         )
@@ -3092,7 +3340,7 @@ async def test_create_auto_generates_identity_int(kind):
 
     Config._cache["database"] = SimpleNamespace(ID=int)
 
-    class User(ReModel):
+    class User(Model):
         id: ID = Field(
             database=DatabaseField(primary_key=True, generated=True, auto_inc=True)
         )
@@ -3128,7 +3376,7 @@ def test_auto_inc_requires_primary_key(kind):
 
     with pytest.raises(ValueError, match="auto_inc=True must be primary_key=True"):
 
-        class InvalidView(ReModel):
+        class InvalidView(Model):
             id: str = Field(database=DatabaseField(primary_key=True))
             views: int = Field(database=DatabaseField(generated=True, auto_inc=True))
 
@@ -3137,7 +3385,7 @@ def test_auto_inc_requires_integer_field():
     from renus.db.mongodb.compiler import MongoCompiler
     from renus.db.mutation import Insert
 
-    class InvalidView(ReModel):
+    class InvalidView(Model):
         id: str = Field(
             database=DatabaseField(primary_key=True, generated=True, auto_inc=True)
         )
@@ -3152,7 +3400,7 @@ def test_auto_inc_requires_integer_config():
 
     Config._cache["database"] = SimpleNamespace(ID=str)
 
-    class InvalidConfigView(ReModel):
+    class InvalidConfigView(Model):
         id: ID = Field(
             database=DatabaseField(primary_key=True, generated=True, auto_inc=True)
         )
@@ -3166,7 +3414,7 @@ def test_auto_inc_requires_integer_config():
 async def test_single_table_create_does_not_start_transaction(kind):
     from tests.db._conformance import adapter_for
 
-    class PlainRecord(ReModel):
+    class PlainRecord(Model):
         id: str = Field(database=DatabaseField(primary_key=True))
         name: str
 
@@ -3196,7 +3444,7 @@ async def test_single_table_create_does_not_start_transaction(kind):
 async def test_relationship_create_starts_transaction_only_for_multiple_tables(kind):
     from tests.db._conformance import adapter_for
 
-    class RelatedRecord(ReModel):
+    class RelatedRecord(Model):
         id: str = Field(database=DatabaseField(primary_key=True))
         name: str
         profile: Profile = Embedded(Profile)

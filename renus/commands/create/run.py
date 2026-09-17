@@ -140,9 +140,9 @@ INIT_TEMPLATE = '"""The {pkg} application package."""\n'
 
 MODEL_TEMPLATE = '''from __future__ import annotations
 
-from renus.db import DatabaseField, Field, ReModel
+from renus.db import DatabaseField, Field, Model
 
-class Item(ReModel):
+class Item(Model):
     """A portable domain model (validation + persistence).
 
     A natural string primary key keeps the model portable across SQL and

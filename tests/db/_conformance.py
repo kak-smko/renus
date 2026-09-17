@@ -46,7 +46,7 @@ from renus.db import (
     ManyToOne,
     OneToMany,
     OneToOne,
-    ReModel,
+    Model,
     Reference,
 )
 from renus.db.mongodb import MongoDBAdapter
@@ -78,19 +78,26 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Standard models exercised by every conformance test.
 # ---------------------------------------------------------------------------
+class Version(Model):
+    name:str="1"
 
-class Profile(ReModel):
+class Contact(Model):
+    phone:str
+    version:Version=Embedded(Version)
+    
+class Profile(Model):
     street: str
     city: str
+    contact:Contact=Embedded(Contact)
+    version:Version=Embedded(Version)
 
-
-class Post(ReModel):
+class Post(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     title: str
     user_id: str = ""
 
 
-class User(ReModel):
+class User(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     username: str = Field(database=DatabaseField(unique=True))
     name: str | None = None
@@ -106,7 +113,7 @@ class User(ReModel):
         soft_delete = True
 
 
-class SoftUser(ReModel):
+class SoftUser(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     username: str
 
@@ -120,27 +127,27 @@ class SoftUser(ReModel):
 # ManyToMany, and Reference.
 # ---------------------------------------------------------------------------
 
-class Tag(ReModel):
+class Tag(Model):
     name: str
 
 
-class Passport(ReModel):
+class Passport(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     citizen_id: str = ""
     number: str
 
 
-class Dept(ReModel):
+class Dept(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
 
 
-class Role(ReModel):
+class Role(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
 
 
-class Citizen(ReModel):
+class Citizen(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
     passport: Passport = OneToOne(
@@ -148,14 +155,14 @@ class Citizen(ReModel):
     )
 
 
-class Item(ReModel):
+class Item(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
     address: Profile = Embedded(Profile)
     tags: list[Tag] = EmbeddedMany(Tag)
 
 
-class Employee(ReModel):
+class Employee(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
     dept_id: str = ""

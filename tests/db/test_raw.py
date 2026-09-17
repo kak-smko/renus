@@ -8,13 +8,13 @@ from renus.db import (
     Database,
     DatabaseField,
     Field,
-    ReModel,
+    Model,
     SQLiteAdapter,
 )
 
 from tests.db import _native_helpers as nh
 
-class Worker(ReModel):
+class Worker(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     name: str
     salary: float
@@ -75,7 +75,7 @@ async def test_native_ddl():
 
     await db.disconnect()
 
-class RawItem(ReModel):
+class RawItem(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
     salary: float = 0.0

@@ -22,12 +22,12 @@ from renus.db import (
     Field,
     Include,
     OneToMany,
-    ReModel,
+    Model,
     SQLiteAdapter,
 )
 
 
-class Post(ReModel):
+class Post(Model):
     """A post owned by a user (one-to-many target)."""
 
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
@@ -35,7 +35,7 @@ class Post(ReModel):
     user_id: int = 0
 
 
-class User(ReModel):
+class User(Model):
     """The primary model under test."""
 
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
@@ -48,7 +48,7 @@ class User(ReModel):
     )
 
 
-class SoftUser(ReModel):
+class SoftUser(Model):
     """A soft-deletable model used for deleted-count checks."""
 
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))

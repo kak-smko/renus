@@ -44,9 +44,9 @@ from renus.db.metadata import (
 from renus.db.models import (
     DatabaseField,
     Field,
+    Model,
     ModelMeta,
     ID,
-    ReModel,
 )
 from renus.db.mutation import (
     Delete,
@@ -206,7 +206,7 @@ __all__ = [
     "QueryError",
     "QueryEvent",
     "QueryResult",
-    "ReModel",
+    "Model",
     "Reference",
     "ReferentialAction",
     "RelationAny",

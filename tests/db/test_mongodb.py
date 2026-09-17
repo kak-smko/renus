@@ -20,7 +20,7 @@ from renus.db import (
     MongoDBAdapter,
     MutationResult,
     Path,
-    ReModel,
+    Model,
     Repository,
     Sum,
     Delete,
@@ -36,16 +36,16 @@ from renus.db.mongodb.compiler import MongoCompiledQuery, MongoCompiler
 
 from tests.db import _native_helpers as nh
 
-class Location(ReModel):
+class Location(Model):
     city: str
     country: str
 
-class OrderItem(ReModel):
+class OrderItem(Model):
     name: str
     price: float
     qty: int
 
-class AccountDoc(ReModel):
+class AccountDoc(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     username: str = Field(database=DatabaseField(unique=True))
     age: int
@@ -374,7 +374,7 @@ async def test_native_raw_documents_in_collection():
         client.drop_database(MONGO_DB)
         client.close()
 
-class DualDoc(ReModel):
+class DualDoc(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     username: str
     profile: Location = Embedded(Location)

@@ -22,10 +22,10 @@ class _Unset:
 
 _UNSET = _Unset()
 
-def _is_remodel_type(value: Any) -> bool:
-    return isinstance(value, type) and bool(getattr(value, "_is_remodel_class", False))
+def _is_model_type(value: Any) -> bool:
+    return isinstance(value, type) and bool(getattr(value, "_is_model_class", False))
 
-def find_remodel_subclass(name: str, model_base: type | None = None) -> type | None:
+def find_model_subclass(name: str, model_base: type | None = None) -> type | None:
     if model_base is None:
         return None
 
@@ -274,10 +274,10 @@ class FieldInfo:
         frame = sys._getframe()
         while frame is not None:
             candidate = frame.f_locals.get(name)
-            if _is_remodel_type(candidate) and candidate is not model_base:
+            if _is_model_type(candidate) and candidate is not model_base:
                 return candidate
             frame = frame.f_back
-        return find_remodel_subclass(name, model_base)
+        return find_model_subclass(name, model_base)
 
     @classmethod
     def _analyze_type(
@@ -357,11 +357,11 @@ class FieldInfo:
             types_to_check.append(list)
             if args:
                 elem_type = args[0]
-                if isinstance(elem_type, type) and hasattr(elem_type, "_is_remodel_class"):
+                if isinstance(elem_type, type) and hasattr(elem_type, "_is_model_class"):
                     is_model_list = True
                     model_cls = elem_type
                 elif isinstance(elem_type, str):
-                    sub = find_remodel_subclass(elem_type.strip(), model_base)
+                    sub = find_model_subclass(elem_type.strip(), model_base)
                     if sub is not None:
                         is_model_list = True
                         model_cls = sub
@@ -369,7 +369,7 @@ class FieldInfo:
             types_to_check.append(annotation)
 
         for t in types_to_check:
-            if isinstance(t, type) and hasattr(t, "_is_remodel_class"):
+            if isinstance(t, type) and hasattr(t, "_is_model_class"):
                 is_model = True
                 model_cls = t
                 break

@@ -11,7 +11,7 @@ from renus.db import (
     DatabaseField,
     Field,
     ID,
-    ReModel,
+    Model,
     ValidationError,
     from_dict,
     from_json,
@@ -26,12 +26,12 @@ class RoleEnum(Enum):
     ADMIN = "admin"
     USER = "user"
 
-class SerializedAddress(ReModel):
+class SerializedAddress(Model):
     street: str
     city: str
     zip_code: str
 
-class SerializedProfile(ReModel):
+class SerializedProfile(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     uid: UUID = Field(database=DatabaseField(default_factory=uuid4))
     username: str
@@ -153,7 +153,7 @@ def test_json_roundtrip():
     assert restored.username == "homer"
     assert restored.address is not None and restored.address.city == "Springfield"
 
-class SensitiveUser(ReModel):
+class SensitiveUser(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     username: str
     email: str
@@ -248,7 +248,7 @@ def test_sensitive_fields_validate_and_roundtrip():
     rt = from_dict(SensitiveUser, to_dict(direct, include_sensitive=True))
     assert rt.get_sensitive("password") == "$2b$12$explicit"
 
-class NativeItem(ReModel):
+class NativeItem(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
     qty: int

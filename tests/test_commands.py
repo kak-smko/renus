@@ -290,7 +290,7 @@ class TestAppScaffolding:
         assert to_plural("post") == "posts"
         assert to_plural("user") == "users"
 
-    def test_add_temp_generates_remodel_validation_and_repository(self, tmp_path):
+    def test_add_temp_generates_model_validation_and_repository(self, tmp_path):
         add_temp(
             name="article",
             names="articles",
@@ -322,8 +322,8 @@ class TestAppScaffolding:
 
         model_code = (app_dir / "model.py").read_text()
 
-        assert "class Article(ReModel):" in model_code
-        assert "from renus.db import DatabaseField, Field, ReModel" in model_code
+        assert "class Article(Model):" in model_code
+        assert "from renus.db import DatabaseField, Field, Model" in model_code
         assert "id: str = Field(database=DatabaseField(primary_key=True))" in model_code
         assert "class Meta:" in model_code
         assert "timestamps = True" in model_code

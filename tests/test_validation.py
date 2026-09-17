@@ -9,7 +9,7 @@ from renus.db.validation import (
     Default,
     Email,
     Field,
-    ReModel,
+    Model,
     Required,
     Validate,
     ValidationError,
@@ -18,13 +18,13 @@ from renus.db.validation import (
 def custom_username_validator(val: str) -> str:
     return val.strip().lower()
 
-class Address(ReModel):
+class Address(Model):
     street: str
     city: str
     country: str = "Test"
     postal_code: str | None = None
 
-class User(ReModel):
+class User(Model):
     id: int
     username: str = Field(custom_username_validator, min_length=3, max_length=50)
     email: str = Field(Email("gmail"))
@@ -151,11 +151,11 @@ def test_updating_a_model_with_runtime_validation():
     assert "username" in exc_info.value.errors
 
 def test_nested_models_simple():
-    class SimpleAddress(ReModel):
+    class SimpleAddress(Model):
         street: str
         city: str
 
-    class SimpleUser(ReModel):
+    class SimpleUser(Model):
         id: int
         username: str
         email: str
@@ -179,7 +179,7 @@ def test_nested_models_simple():
     assert dict(user)["address"] == {"street": "Some Street", "city": "Baku", "id": None}
 
 def test_field_keyword_validator():
-    class Profile(ReModel):
+    class Profile(Model):
         handle: str = Field(validator=lambda s: s.strip().lower(), min_length=3)
 
     p = Profile(handle="  CoolGuy  ")
@@ -189,7 +189,7 @@ def test_field_keyword_validator():
         Profile(handle="hi")
 
 def test_field_constraints():
-    class Product(ReModel):
+    class Product(Model):
         title: str = Field(min_length=2, max_length=10)
         price: float = Field(ge=0.01, le=1000.0)
         category: str = Field(in_=["books", "electronics"])
@@ -208,11 +208,11 @@ def test_field_constraints():
     assert "sku" in err
 
 def test_nested_list_of_models():
-    class Item(ReModel):
+    class Item(Model):
         name: str
         quantity: int
 
-    class Order(ReModel):
+    class Order(Model):
         id: int
         items: list[Item]
 
@@ -227,7 +227,7 @@ def test_nested_list_of_models():
         {"name": "Banana", "quantity": 5, "id": None},
     ]
 
-def test_remodel_dict_access_and_membership():
+def test_model_dict_access_and_membership():
     user = User(
         id=1,
         username="John",
@@ -247,7 +247,7 @@ def test_remodel_dict_access_and_membership():
     assert "id" in user
     assert "non_existent" not in user
 
-def test_remodel_equality():
+def test_model_equality():
     u1 = User(id=1, username="John", email="john@example.com", age=25, address={"street": "Main", "city": "Baku"})
     u2 = User(id=1, username="John", email="john@example.com", age=25, address={"street": "Main", "city": "Baku"})
     assert u1 == u2
@@ -263,7 +263,7 @@ def test_legacy_validate_rules_still_works():
     assert res == {"username": "admin"}
 
 def test_email_with_domain_restrictions():
-    class RestrictedUser(ReModel):
+    class RestrictedUser(Model):
         email: str = Field(Email(["gmail.com", "google.com"]))
 
     u = RestrictedUser(email="test@gmail.com")
@@ -273,7 +273,7 @@ def test_email_with_domain_restrictions():
         RestrictedUser(email="test@yahoo.com")
 
 def test_convert_datetime_string():
-    class Event(ReModel):
+    class Event(Model):
         title: str
         event_time: datetime = Field(Convert(datetime))
 
@@ -325,7 +325,7 @@ def test_required_derived_from_type_optionality():
     user.birth_date = None
     assert user.birth_date is None
 
-class RequiredModel(ReModel):
+class RequiredModel(Model):
     alpha: int
     beta: int | None = None
     gamma: str = "fallback"
@@ -344,7 +344,7 @@ def test_field_has_no_required_parameter():
     assert "required" not in sig.parameters
 
 def test_field_numeric_comparison_constraints():
-    class Stats(ReModel):
+    class Stats(Model):
         a: int = Field(gt=0)
         b: int = Field(ge=10)
         c: int = Field(lt=100)
@@ -362,7 +362,7 @@ def test_field_numeric_comparison_constraints():
     assert "d" in errors
 
 def test_field_max_digits_and_decimal_places():
-    class Money(ReModel):
+    class Money(Model):
         amount: float = Field(max_digits=5, decimal_places=2)
 
     ok = Money(amount=123.45)
@@ -384,7 +384,7 @@ def test_field_max_digits_and_decimal_places():
     assert any("decimal" in err for err in exc_info.value.errors["amount"])
 
 def test_field_custom_error_template():
-    class Score(ReModel):
+    class Score(Model):
         value: int = Field(ge=10, error="{0} error {1} msg {2}.")
 
     with pytest.raises(ValidationError) as exc:

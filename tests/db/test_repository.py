@@ -19,7 +19,7 @@ from renus.db import (
     InsertMany,
     MutationResult,
     QueryResult,
-    ReModel,
+    Model,
     Repository,
     TransactionContext,
     UnitOfWork,
@@ -32,13 +32,13 @@ from renus.db import (
 from tests.db import _native_helpers as nh
 from tests.db._fakes import DDLFakeMixin
 
-class Account(ReModel):
+class Account(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     owner: str
     balance: float = 0.0
     active: bool = True
 
-class LogEntry(ReModel):
+class LogEntry(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     message: str
 
@@ -510,7 +510,7 @@ async def test_database_no_adapter_and_no_config_raises(monkeypatch: Any):
     with pytest.raises(ConfigurationError, match="No adapter configured for connection 'primary'"):
         Database()
 
-class NativeRepo(ReModel):
+class NativeRepo(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     owner: str
     balance: float = 0.0

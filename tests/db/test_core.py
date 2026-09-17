@@ -29,7 +29,7 @@ from renus.db.core import (
     UnsupportedOperationError,
     ValidationError,
 )
-from renus.db import DatabaseField, Field, ReModel
+from renus.db import DatabaseField, Field, Model
 from renus.db.core.exceptions import MutationError
 
 from tests.db import _native_helpers as nh
@@ -229,7 +229,7 @@ def test_adapter_nested_documents_class_attribute_override():
 
     assert WithNested.nested_documents is True
 
-class NativeCoreItem(ReModel):
+class NativeCoreItem(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     label: str
 

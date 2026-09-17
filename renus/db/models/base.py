@@ -22,7 +22,7 @@ from renus.db.query.ast import Path
 from renus.db.relationships import EmbeddedMany, EmbeddedOne, Relationship
 from renus.util.codec import json_decode
 
-__all__ = ["ModelMeta", "ReModel"]
+__all__ = ["ModelMeta", "Model"]
 
 _MODEL_REGISTRY: dict[str, type] = {}
 
@@ -122,7 +122,7 @@ class ModelMeta(type):
 
         cls = super().__new__(mcls, name, bases, ns)
 
-        if name == "ReModel" and not bases:
+        if name == "Model" and not bases:
             return cls
 
         table = getattr(meta_cls, "table", None)
@@ -180,7 +180,7 @@ class ModelMeta(type):
                 field_type=_id_type,
                 field=_id_field,
                 default=None,
-                model_base=ReModel,
+                model_base=Model,
             )
 
         fields_dict: dict[str, FieldMetadata] = {}
@@ -330,7 +330,7 @@ class ModelMeta(type):
                     field_type=int,
                     field=Field(default=None),
                     default=None,
-                    model_base=ReModel,
+                    model_base=Model,
                 )
                 identity = IdentityMetadata(
                     fields=("id",),
@@ -399,10 +399,10 @@ class ModelMeta(type):
 
         return cls
 
-class ReModel(metaclass=ModelMeta):
+class Model(metaclass=ModelMeta):
     """Base class for declarative database models."""
 
-    _is_remodel_class = True
+    _is_model_class = True
     _model_fields: ClassVar[dict[str, FieldInfo]] = {}
 
     __db_metadata__: ClassVar[ModelMetadata]
@@ -443,13 +443,13 @@ class ReModel(metaclass=ModelMeta):
                 field_type=field_type,
                 field=field_obj,
                 default=default_val,
-                model_base=ReModel,
+                model_base=Model,
             )
 
         cls._model_fields = fields
 
     @classmethod
-    def validate(cls, data: Any) -> ReModel:
+    def validate(cls, data: Any) -> Model:
         """Validate input data and construct a new model instance."""
         if isinstance(data, (str, bytes)):
             try:
@@ -464,11 +464,11 @@ class ReModel(metaclass=ModelMeta):
 
     @staticmethod
     def _is_model_type(field_type: Any) -> bool:
-        return bool(field_type) and isinstance(field_type, type) and issubclass(field_type, ReModel)
+        return bool(field_type) and isinstance(field_type, type) and issubclass(field_type, Model)
 
     @classmethod
     def _dump_value(cls, val: Any) -> Any:
-        if isinstance(val, ReModel):
+        if isinstance(val, Model):
             return dict(val)
         elif isinstance(val, list):
             return [cls._dump_value(item) for item in val]
@@ -535,7 +535,7 @@ class ReModel(metaclass=ModelMeta):
         return self.__repr__()
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, ReModel):
+        if isinstance(other, Model):
             return dict(self) == dict(other)
         if isinstance(other, dict):
             return dict(self) == other
@@ -819,7 +819,9 @@ class ReModel(metaclass=ModelMeta):
         meta = self.__db_metadata__
         return {f: getattr(self, f, None) for f in meta.identity.fields}
 
+
     @classmethod
     def metadata(cls) -> ModelMetadata:
         """Return the model's metadata object."""
         return cls.__db_metadata__
+

@@ -22,23 +22,23 @@ from renus.db import (
     Q,
     Query,
     QueryAST,
-    ReModel,
+    Model,
     RelationAny,
     Sum,
 )
 
 from tests.db import _native_helpers as nh
 
-class UserAddress(ReModel):
+class UserAddress(Model):
     street: str
     city: str
 
-class Post(ReModel):
+class Post(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     title: str
     user_id: int
 
-class User(ReModel):
+class User(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     name: str
     age: int
@@ -388,7 +388,7 @@ async def test_bound_query_execution():
     assert await q.exists() is True
 
 
-class NativeUser(ReModel):
+class NativeUser(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
     age: int

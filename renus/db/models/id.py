@@ -2,7 +2,7 @@
 
 ``ID`` is the annotation used for generated primary keys::
 
-    class User(ReModel):
+    class User(Model):
         id: ID
 
 The concrete identity object is read from ``Config("database")`` under ``ID``

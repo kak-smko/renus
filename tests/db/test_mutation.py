@@ -12,7 +12,7 @@ from renus.db import (
     InsertMany,
     MutationAST,
     Operator,
-    ReModel,
+    Model,
     Update,
     UpdateMany,
     Upsert,
@@ -24,7 +24,7 @@ from renus.db.mutation.ast import (
 
 from tests.db import _native_helpers as nh
 
-class Member(ReModel):
+class Member(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     username: str = Field(database=DatabaseField(unique=True))
     email: str = Field(database=DatabaseField(unique=True))
@@ -226,7 +226,7 @@ def test_normalize_conflict_target():
     norm = normalize_conflict_target(targets)
     assert norm == ("username", "email", "id")
 
-class NativeMember(ReModel):
+class NativeMember(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     username: str
     points: int = 0
