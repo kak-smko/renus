@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import importlib
 import os
-from importlib.metadata import version
-
-import renus
 import shutil
 import urllib.error
 import urllib.request
@@ -25,6 +22,7 @@ from renus.commands.extension.build import (
 from renus.commands.extension.remove import remove, remove_all
 from renus.rich import Terminal
 from renus.util.codec import json_decode, json_encode
+from renus.util.version import get_version
 
 DESCRIPTION = """Install/update/remove extensions.
   renus extension codenus/user
@@ -118,17 +116,6 @@ def is_upgrade(target_version: str, current_version: str) -> bool:
         return False
     return parse_version_tuple(target_version) > parse_version_tuple(current_version)
 
-def get_renus_version() -> str:
-    try:
-        if hasattr(renus, "__version__") and renus.__version__:
-            return str(renus.__version__)
-    except Exception:
-        pass
-
-    try:
-        return version("renus")
-    except Exception:
-        return "2.7.1"
 
 def download(
     app: str,
@@ -227,7 +214,7 @@ def check_version(install: Any, app: str) -> None:
     if not renus_requires:
         return
 
-    current_ver = get_renus_version()
+    current_ver = get_version()
     current_tuple = parse_version_tuple(current_ver)
 
     if "min" in renus_requires:

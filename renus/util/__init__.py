@@ -18,6 +18,7 @@ from renus.util.concurrency import (
 from renus.util.naming import to_camel_case, to_plural, to_plural_lower
 from renus.util.random import DEFAULT_ALPHABET, get_random_string, get_random_token
 from renus.util.security import DEFAULT_SALT, hash_new_password, is_correct_password
+from renus.util.version import get_version
 
 __all__ = [
     "DEFAULT_ALPHABET",
@@ -28,6 +29,7 @@ __all__ = [
     "encode64",
     "get_random_string",
     "get_random_token",
+    "get_version",
     "hash_new_password",
     "is_correct_password",
     "iterate_in_threadpool",
