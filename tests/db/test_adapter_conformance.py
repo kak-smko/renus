@@ -364,7 +364,7 @@ async def test_create_and_read(kind):
             )
         )
         assert user.id is not None
-        assert user.is_persisted is True
+        assert user.is_persisted() is True
 
         fetched = await db.repository(User).where(User.username == "alice").first()
         assert fetched is not None
@@ -414,12 +414,12 @@ async def test_save_insert_and_update(kind):
         repo = db.repository(User)
         obj = _u("s1", "saved", name="First", age=5)
         await repo.save(obj)  # insert path
-        assert obj.is_persisted is True
+        assert obj.is_persisted() is True
 
         obj.name = "Second"
         obj.age = 6
         await repo.save(obj)  # update path
-        assert obj.is_dirty is False
+        assert obj.is_dirty() is False
 
         loaded = await repo.where(User.username == "saved").first()
         assert loaded is not None
@@ -3317,13 +3317,12 @@ async def test_create_auto_generates_identity_object_id(kind):
 
     class User(Model):
         id: ID = Field(
-            database=DatabaseField(primary_key=True, generated=True, default_factory=ID)
+            default_factory=ID,
+            database=DatabaseField(primary_key=True, generated=True),
         )
         name: str
-        p_id: ID = Field(database=DatabaseField(generated=False, default=ID()))
-        token: UUID = Field(
-            database=DatabaseField(generated=True, default_factory=uuid4)
-        )
+        p_id: ID = Field(default=ID(), database=DatabaseField(generated=False))
+        token: UUID = Field(default_factory=uuid4, database=DatabaseField(generated=True))
 
     db = Database(adapter_for(kind))
     await db.connect()
@@ -3351,13 +3350,12 @@ async def test_create_auto_generates_identity_str(kind):
 
     class User(Model):
         id: ID = Field(
-            database=DatabaseField(primary_key=True, generated=True, default_factory=ID)
+            default_factory=ID,
+            database=DatabaseField(primary_key=True, generated=True),
         )
         name: str
-        p_id: ID = Field(database=DatabaseField(generated=False, default=ID()))
-        token: UUID = Field(
-            database=DatabaseField(generated=True, default_factory=uuid4)
-        )
+        p_id: ID = Field(default=ID(), database=DatabaseField(generated=False))
+        token: UUID = Field(default_factory=uuid4, database=DatabaseField(generated=True))
 
     db = Database(adapter_for(kind))
     await db.connect()
@@ -3388,10 +3386,8 @@ async def test_create_auto_generates_identity_int(kind):
             database=DatabaseField(primary_key=True, generated=True, auto_inc=True)
         )
         name: str
-        p_id: ID = Field(database=DatabaseField(generated=False, default=ID(2)))
-        token: UUID = Field(
-            database=DatabaseField(generated=True, default_factory=uuid4)
-        )
+        p_id: ID = Field(default=ID(2), database=DatabaseField(generated=False))
+        token: UUID = Field(default_factory=uuid4, database=DatabaseField(generated=True))
 
     db = Database(adapter_for(kind))
     await db.connect()

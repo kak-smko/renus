@@ -188,10 +188,10 @@ class Repository(Generic[T]):
 
     async def save(self, obj: T) -> T:
         """Insert or update the model depending on its persistence state."""
-        if getattr(obj, "is_new", False):
+        if obj.is_new():
             return await self.create(obj)
 
-        if getattr(obj, "is_persisted", False) and not getattr(obj, "is_dirty", True):
+        if obj.is_persisted() and not obj.is_dirty():
             return obj
 
         async with self._atomic(self._rel_coordinator.requires_transaction(obj)):
@@ -271,7 +271,7 @@ class Repository(Generic[T]):
 
                     pk_filters: list[Condition] = []
                     if hasattr(obj, "identity_dict"):
-                        for pk_name, pk_val in obj.identity_dict.items():
+                        for pk_name, pk_val in obj.identity_dict().items():
                             pk_filters.append(Path(self.model, (pk_name,)) == pk_val)
 
                     update_ast = Update(source=self.model, values=soft_vals, filters=tuple(pk_filters))

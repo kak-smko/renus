@@ -215,7 +215,7 @@ async def test_sqlite_end_to_end_repository_operations():
         )
     )
     assert emp.id == 1
-    assert emp.is_persisted is True
+    assert emp.is_persisted() is True
 
     p1 = Project(code="PRJ-A", budget=10000.0)
     p2 = Project(code="PRJ-B", budget=20000.0)
@@ -259,9 +259,9 @@ async def test_sqlite_end_to_end_repository_operations():
     assert row["count_prjs"] == 2
 
     emp.salary = 95000.0
-    assert emp.is_dirty is True
+    assert emp.is_dirty() is True
     await emp_repo.save(emp)
-    assert emp.is_dirty is False
+    assert emp.is_dirty() is False
 
     refetched = await emp_repo.query(Employee.name == "Alice").first()
     assert refetched is not None
@@ -272,7 +272,7 @@ async def test_sqlite_end_to_end_repository_operations():
 
     del_rows = await emp_repo.delete(emp)
     assert del_rows == 1
-    assert emp.is_deleted is True
+    assert emp.is_deleted() is True
 
     assert await emp_repo.count() == 0
 

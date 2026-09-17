@@ -80,7 +80,7 @@ class RelationshipMetadata:
 
     name: str
     kind: RelationshipKind | str
-    target: type | str
+    target: type
     local_key: str | None = None
     foreign_key: str | None = None
     through: type | str | None = None
@@ -91,13 +91,11 @@ class RelationshipMetadata:
     is_embedded: bool = False
     is_collection: bool = False
 
-    def resolve_target(self, model_registry: dict[str, type] | None = None) -> type:
-        """Resolve the relationship target type from the registry."""
-        if isinstance(self.target, type):
-            return self.target
-        if model_registry and self.target in model_registry:
-            return model_registry[self.target]
-        raise ValueError(f"Unable to resolve relationship target '{self.target}' for '{self.name}'")
+    def resolve_target(self) -> type:
+        """Return the relationship target model class."""
+        if not isinstance(self.target, type):
+            raise TypeError(f"Relationship target for '{self.name}' must be a model class")
+        return self.target
 
 @dataclass(frozen=True, slots=True)
 class Index:

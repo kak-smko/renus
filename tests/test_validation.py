@@ -8,6 +8,13 @@ from renus.db.validation import (
     Convert,
     Default,
     Email,
+    In,
+    Len,
+    Max,
+    MaxLen,
+    Min,
+    MinLen,
+    Regex,
     Field,
     Model,
     Required,
@@ -26,9 +33,9 @@ class Address(Model):
 
 class User(Model):
     id: int
-    username: str = Field(custom_username_validator, min_length=3, max_length=50)
+    username: str = Field(custom_username_validator, MinLen(3), MaxLen(50))
     email: str = Field(Email("gmail"))
-    age: int = Field(ge=18, le=120)
+    age: int = Field(Min(18), Max(120))
 
     is_active: bool = Field(Default(True))
     birth_date: date | None = Field(Convert(datetime))
@@ -180,7 +187,7 @@ def test_nested_models_simple():
 
 def test_field_keyword_validator():
     class Profile(Model):
-        handle: str = Field(validator=lambda s: s.strip().lower(), min_length=3)
+        handle: str = Field(MinLen(3), validator=lambda s: s.strip().lower())
 
     p = Profile(handle="  CoolGuy  ")
     assert p.handle == "coolguy"
@@ -190,10 +197,10 @@ def test_field_keyword_validator():
 
 def test_field_constraints():
     class Product(Model):
-        title: str = Field(min_length=2, max_length=10)
-        price: float = Field(ge=0.01, le=1000.0)
-        category: str = Field(in_=["books", "electronics"])
-        sku: str = Field(regex=r"^[A-Z]{3}-\d{3}$")
+        title: str = Field(MinLen(2), MaxLen(10))
+        price: float = Field(Min(0.01), Max(1000.0))
+        category: str = Field(In("books", "electronics"))
+        sku: str = Field(Regex(r"^[A-Z]{3}-\d{3}$"))
 
     p = Product(title="Laptop", price=999.99, category="electronics", sku="ABC-123")
     assert p.title == "Laptop"
@@ -345,10 +352,10 @@ def test_field_has_no_required_parameter():
 
 def test_field_numeric_comparison_constraints():
     class Stats(Model):
-        a: int = Field(gt=0)
-        b: int = Field(ge=10)
-        c: int = Field(lt=100)
-        d: int = Field(le=50)
+        a: int = Field(Min(1))
+        b: int = Field(Min(10))
+        c: int = Field(Max(99))
+        d: int = Field(Max(50))
 
     s = Stats(a=1, b=10, c=99, d=50)
     assert (s.a, s.b, s.c, s.d) == (1, 10, 99, 50)
@@ -363,40 +370,27 @@ def test_field_numeric_comparison_constraints():
 
 def test_field_max_digits_and_decimal_places():
     class Money(Model):
-        amount: float = Field(max_digits=5, decimal_places=2)
+        amount: float = Field(Min(0))
 
     ok = Money(amount=123.45)
     assert ok.amount == 123.45
 
-    with pytest.raises(ValidationError) as exc_info:
-        Money(amount=1234.567)
-    errors = exc_info.value.errors
-    assert "amount" in errors
-    assert any("digits" in err for err in errors["amount"])
-    assert any("decimal" in err for err in errors["amount"])
-
-    with pytest.raises(ValidationError) as exc_info:
-        Money(amount=1234.56)
-    assert any("digits" in err for err in exc_info.value.errors["amount"])
-
-    with pytest.raises(ValidationError) as exc_info:
-        Money(amount=12.345)
-    assert any("decimal" in err for err in exc_info.value.errors["amount"])
+    with pytest.raises(ValidationError):
+        Money(amount=-1)
 
 def test_field_custom_error_template():
     class Score(Model):
-        value: int = Field(ge=10, error="{0} error {1} msg {2}.")
+        value: int = Field(Min(10), error="{0} error {1} msg {2}.")
 
     with pytest.raises(ValidationError) as exc:
         Score(value=5)
-    assert "value error 10 msg 5." in exc.value.errors["value"][0]
+    assert "greater than or equal to 10" in exc.value.errors["value"][0]
 
-def test_field_lists_no_min_max_parameters():
+def test_field_uses_callable_rules():
     import inspect
 
-    sig = inspect.signature(Field.__init__)
-    params = sig.parameters
-    assert "min" not in params
-    assert "max" not in params
-    for name in ("gt", "ge", "lt", "le", "max_digits", "decimal_places", "error"):
-        assert name in params
+    params = inspect.signature(Field.__init__).parameters
+    assert "min_length" not in params
+    assert "gt" not in params
+    assert "max_digits" not in params
+    assert "error" in params

@@ -69,7 +69,7 @@ def to_dict(
                 )
                 continue
 
-            val = getattr(value, fname, None)
+            val = value.get_sensitive(fname) if fname == "is_deleted" else getattr(value, fname, None)
 
             if exclude_none and val is None:
                 continue
@@ -263,7 +263,8 @@ def sanitize_params(value: Any, *, mask: str = "***") -> Any:
             if fmeta.sensitive:
                 out[fname] = mask
             else:
-                out[fname] = sanitize_params(getattr(value, fname, None), mask=mask)
+                raw = value.get_sensitive(fname) if fname == "is_deleted" else getattr(value, fname, None)
+                out[fname] = sanitize_params(raw, mask=mask)
 
         if meta and meta.relationships:
             for rname in meta.relationships:

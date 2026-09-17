@@ -19,8 +19,6 @@ class SQLiteDialect(SQLDialect):
 
     def type_to_sql(self, field_meta: FieldMetadata) -> str:
         """Map a field metadata type to a SQLite SQL type."""
-        if field_meta.database.storage_type is not None:
-            return str(field_meta.database.storage_type)
 
         if (
             field_meta.primary_key

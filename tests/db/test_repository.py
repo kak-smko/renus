@@ -197,12 +197,12 @@ async def test_repository_create():
     repo = Repository(adapter, Account)
 
     acc = Account(owner="Alice", balance=100.0)
-    assert acc.is_new is True
+    assert acc.is_new() is True
 
     created = await repo.create(acc)
     assert created.id == 1
-    assert created.is_persisted is True
-    assert created.is_new is False
+    assert created.is_persisted() is True
+    assert created.is_new() is False
     assert len(adapter.executed_mutations) == 1
     assert isinstance(adapter.executed_mutations[0], Insert)
 
@@ -216,8 +216,8 @@ async def test_repository_create_many():
 
     created_list = await repo.create_many([acc1, acc2])
     assert len(created_list) == 2
-    assert created_list[0].is_persisted is True
-    assert created_list[1].is_persisted is True
+    assert created_list[0].is_persisted() is True
+    assert created_list[1].is_persisted() is True
     assert len(adapter.executed_mutations) == 1
     assert isinstance(adapter.executed_mutations[0], InsertMany)
 
@@ -233,7 +233,7 @@ async def test_repository_query_and_hydration():
     results = await q.all()
     assert len(results) == 1
     assert results[0].owner == "Dave"
-    assert results[0].is_persisted is True
+    assert results[0].is_persisted() is True
 
 @pytest.mark.asyncio
 async def test_repository_save():
@@ -242,7 +242,7 @@ async def test_repository_save():
 
     acc = Account(owner="Frank", balance=500.0)
     await repo.save(acc)
-    assert acc.is_persisted is True
+    assert acc.is_persisted() is True
     assert acc.id is not None
 
     initial_mutations = len(adapter.executed_mutations)
@@ -250,10 +250,10 @@ async def test_repository_save():
     assert len(adapter.executed_mutations) == initial_mutations
 
     acc.balance = 600.0
-    assert acc.is_dirty is True
+    assert acc.is_dirty() is True
     await repo.save(acc)
-    assert acc.is_persisted is True
-    assert acc.is_dirty is False
+    assert acc.is_persisted() is True
+    assert acc.is_dirty() is False
     assert len(adapter.executed_mutations) == initial_mutations + 1
     assert isinstance(adapter.executed_mutations[-1], Update)
 
@@ -279,7 +279,7 @@ async def test_repository_delete_and_delete_many():
 
     rows = await repo.delete(acc)
     assert rows == 1
-    assert acc.is_deleted is True
+    assert acc.is_deleted() is True
 
     await repo.create(Account(owner="Ivan", balance=0.0))
     del_rows = await repo.delete_many(Account.owner == "Ivan")
@@ -291,11 +291,11 @@ async def test_repository_soft_delete():
     repo = Repository(adapter, LogEntry)
 
     log = await repo.create(LogEntry(message="System started"))
-    assert not log.is_deleted
+    assert not log.is_deleted()
 
     rows = await repo.delete(log)
     assert rows == 1
-    assert log.is_deleted is True
+    assert log.is_deleted() is True
     assert isinstance(adapter.executed_mutations[-1], Update)
     assert "deleted_at" in adapter.executed_mutations[-1].values
 

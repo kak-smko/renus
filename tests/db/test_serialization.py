@@ -32,16 +32,16 @@ class SerializedAddress(Model):
 
 class SerializedProfile(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
-    uid: UUID = Field(database=DatabaseField(default_factory=uuid4))
+    uid: UUID = Field(default_factory=uuid4)
     username: str
     role: RoleEnum = RoleEnum.USER
     rating: Decimal = Decimal("4.95")
     bio: str | None = None
-    created_at: datetime = Field(database=DatabaseField(default_factory=lambda: datetime.now(timezone.utc)))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     birth_date: date | None = None
     avatar_bytes: bytes = b"\x89PNG\r\n"
     address: SerializedAddress | None = None
-    mongo_id: ID = Field(database=DatabaseField(default_factory=ID))
+    mongo_id: ID = Field(default_factory=ID)
 
 def test_to_dict_scalars_and_models():
     addr = SerializedAddress(street="123 Main St", city="Metropolis", zip_code="10001")

@@ -179,6 +179,8 @@ class Relationship:
         | **NO ACTION** | No Action. |
 
         """
+        if not isinstance(target, type):
+            raise TypeError("relationship target must be a Model class, not a string")
         self.kind = RelationshipKind(kind) if isinstance(kind, str) else kind
         self.target = target
         self.on_save = _resolve_save_action(on_save)
@@ -213,13 +215,9 @@ class Relationship:
         self._owner = owner
         self._name = name
 
-    def resolve_target(self, registry: Mapping[str, type] | None = None) -> type | None:
-        """Resolve a string target using the supplied model registry."""
-        if isinstance(self.target, type):
-            return self.target
-        if registry is None:
-            return None
-        return registry.get(str(self.target))
+    def resolve_target(self) -> type:
+        """Return the related model class."""
+        return self.target
 
     def __get__(self, instance: Any, owner: type | None = None) -> Any:
         if instance is None:
@@ -239,7 +237,7 @@ class EmbeddedOne(Relationship):
 
     def __init__(
         self,
-        target: type | str,
+        target: type,
         *,
         loading: str | LoadingStrategy = "selectin",
     ) -> None:
@@ -271,7 +269,7 @@ class EmbeddedMany(Relationship):
 
     def __init__(
         self,
-        target: type | str,
+        target: type,
         *,
 
         loading: str | LoadingStrategy = "selectin",
@@ -302,7 +300,7 @@ class Reference(Relationship):
 
     def __init__(
         self,
-        target: type | str,
+        target: type,
         *,
         local_key: str | None = None,
         foreign_key: str | None = None,
@@ -360,7 +358,7 @@ class OneToOne(Reference):
 
     def __init__(
         self,
-        target: type | str,
+        target: type,
         *,
         local_key: str | None = None,
         foreign_key: str | None = None,
@@ -411,7 +409,7 @@ class OneToMany(Reference):
 
     def __init__(
         self,
-        target: type | str,
+        target: type,
         *,
         local_key: str | None = None,
         foreign_key: str | None = None,
@@ -462,7 +460,7 @@ class ManyToOne(Reference):
 
     def __init__(
         self,
-        target: type | str,
+        target: type,
         *,
         local_key: str | None = None,
         foreign_key: str | None = None,
@@ -503,7 +501,7 @@ class ManyToMany(Reference):
 
     def __init__(
         self,
-        target: type | str,
+        target: type,
         *,
         through: type | str | None = None,
         local_key: str | None = None,

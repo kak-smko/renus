@@ -100,18 +100,18 @@ async def _full_checklist(
         User(username="zz_new", name="New", age=10, active=True)
     )
     assert created.id is not None
-    assert created.is_persisted is True
+    assert created.is_persisted() is True
     total += 1
     active += 1
 
     # --- save (create-then-update on a single instance) -------------------
     obj = User(username="zz_saved", name="First", age=5, active=True)
     await u_repo.save(obj)
-    assert obj.is_persisted is True
+    assert obj.is_persisted() is True
     obj.name = "Second"
     obj.age = 6
     await u_repo.save(obj)
-    assert obj.is_dirty is False
+    assert obj.is_dirty() is False
     saved = await u_repo.where(User.username == "zz_saved").first()
     assert saved is not None
     assert saved.name == "Second"

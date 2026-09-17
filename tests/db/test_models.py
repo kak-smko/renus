@@ -88,16 +88,16 @@ def test_type_annotation_schema_inference():
 def test_custom_storage_type_override():
     class CustomTypeModel(Model):
         id: int = Field(database=DatabaseField(primary_key=True))
-        code: str = Field(database=DatabaseField(storage_type="VARCHAR(64)"))
+        code: str = Field(database=DatabaseField())
 
     meta = CustomTypeModel.metadata()
-    assert meta.fields["code"].storage_type == "VARCHAR(64)"
+    assert meta.fields["code"].storage_type is str
 
 class UserSeparatedModel(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     username: str = Field(MinLen(3), database=DatabaseField(unique=True, column_name="u_name"))
     email: str = Field(Email(), db=DatabaseField(indexed=True))
-    status: str = Field(database=DatabaseField(default="active", indexed=True))
+    status: str = Field(default="active", database=DatabaseField(indexed=True))
 
 def test_separation_of_validation_and_persistence():
     meta = UserSeparatedModel.metadata()
@@ -141,7 +141,7 @@ def test_uuid_identity():
     uid = uuid4()
 
     class UuidModel(Model):
-        id: UUID = Field(database=DatabaseField(primary_key=True, default_factory=uuid4))
+        id: UUID = Field(default_factory=uuid4, database=DatabaseField(primary_key=True))
         title: str
 
     meta = UuidModel.metadata()
@@ -149,8 +149,8 @@ def test_uuid_identity():
     assert meta.primary_key_field == "id"
 
     instance = UuidModel(id=uid, title="Test UUID")
-    assert instance.identity_values == uid
-    assert instance.identity_dict == {"id": uid}
+    assert instance.identity_values() == uid
+    assert instance.identity_dict() == {"id": uid}
 
 def test_string_identity():
     class SlugModel(Model):
@@ -162,7 +162,7 @@ def test_string_identity():
     assert meta.primary_key_field == "slug"
 
     item = SlugModel(slug="portable-orm", name="Portable ORM")
-    assert item.identity_values == "portable-orm"
+    assert item.identity_values() == "portable-orm"
 
 def test_composite_identity():
     class CompositeModel(Model):
@@ -176,16 +176,20 @@ def test_composite_identity():
     assert meta.identity.fields == ("org_id", "user_id")
 
     instance = CompositeModel(org_id=10, user_id=42, role="admin")
-    assert instance.identity_values == (10, 42)
-    assert instance.identity_dict == {"org_id": 10, "user_id": 42}
+    assert instance.identity_values() == (10, 42)
+    assert instance.identity_dict() == {"org_id": 10, "user_id": 42}
 
 def test_configured_id_identity():
+    from types import SimpleNamespace
+    from renus.config import Config
+
+    Config._cache["database"] = SimpleNamespace(ID=str)
     identity = ID("507f1f77bcf86cd799439011")
     assert str(identity) == "507f1f77bcf86cd799439011"
     assert isinstance(identity, ID)
 
     class MongoDoc(Model):
-        _id: ID = Field(database=DatabaseField(primary_key=True, default_factory=ID))
+        _id: ID = Field(default_factory=ID, database=DatabaseField(primary_key=True))
         name: str
 
     meta = MongoDoc.metadata()
@@ -193,7 +197,7 @@ def test_configured_id_identity():
     assert meta.primary_key_field == "_id"
 
     doc = MongoDoc(_id=identity, name="Document A")
-    assert doc.identity_values == identity
+    assert doc.identity_values() == identity
 
 def test_default_auto_synthesized_identity():
     class BareModel(Model):
@@ -214,47 +218,47 @@ class Article(Model):
 def test_lifecycle_transitions():
     article = Article(title="First Draft", views=0)
 
-    assert article.state == Lifecycle.NEW
-    assert article.is_new is True
-    assert article.is_persisted is False
-    assert article.is_dirty is False
+    assert article.state() == Lifecycle.NEW
+    assert article.is_new() is True
+    assert article.is_persisted() is False
+    assert article.is_dirty() is False
 
     article._mark_persisted()
-    assert article.state == Lifecycle.PERSISTED
-    assert article.is_new is False
-    assert article.is_persisted is True
-    assert article.is_dirty is False
-    assert article.dirty_fields == set()
+    assert article.state() == Lifecycle.PERSISTED
+    assert article.is_new() is False
+    assert article.is_persisted() is True
+    assert article.is_dirty() is False
+    assert article.dirty_fields() == set()
 
     article.title = "Published Title"
-    assert article.state == Lifecycle.DIRTY
-    assert article.is_dirty is True
-    assert article.dirty_fields == {"title"}
+    assert article.state() == Lifecycle.DIRTY
+    assert article.is_dirty() is True
+    assert article.dirty_fields() == {"title"}
     assert article.get_dirty_changes() == {"title": ("First Draft", "Published Title")}
 
     article.title = "First Draft"
-    assert article.is_dirty is False
-    assert article.state == Lifecycle.PERSISTED
-    assert article.dirty_fields == set()
+    assert article.is_dirty() is False
+    assert article.state() == Lifecycle.PERSISTED
+    assert article.dirty_fields() == set()
 
     article.title = "New Title"
     article.views = 100
-    assert article.dirty_fields == {"title", "views"}
+    assert article.dirty_fields() == {"title", "views"}
     assert article.get_dirty_changes() == {
         "title": ("First Draft", "New Title"),
         "views": (0, 100),
     }
 
     article._mark_persisted()
-    assert article.state == Lifecycle.PERSISTED
-    assert article.is_dirty is False
-    assert article.dirty_fields == set()
+    assert article.state() == Lifecycle.PERSISTED
+    assert article.is_dirty() is False
+    assert article.dirty_fields() == set()
 
     article._mark_deleted()
-    assert article.state == Lifecycle.DELETED
+    assert article.state() == Lifecycle.DELETED
 
     article._mark_detached()
-    assert article.state == Lifecycle.DETACHED
+    assert article.state() == Lifecycle.DETACHED
 
 def test_immutable_field_enforcement():
     class ImmutableRecord(Model):
@@ -272,7 +276,7 @@ def test_immutable_field_enforcement():
 
     record.balance = 600
     assert record.balance == 600
-    assert record.is_dirty is True
+    assert record.is_dirty() is True
 
 class Product(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
@@ -298,17 +302,17 @@ def test_timestamps_and_soft_delete():
     assert isinstance(prod.updated_at, datetime)
     assert prod.updated_at.tzinfo == timezone.utc
     assert prod.deleted_at is None
-    assert prod.is_deleted is False
+    assert prod.is_deleted() is False
 
     prod.soft_delete()
-    assert prod.is_deleted is True
+    assert prod.is_deleted() is True
     assert isinstance(prod.deleted_at, datetime)
-    assert prod.state == Lifecycle.DELETED
+    assert prod.state() == Lifecycle.DELETED
 
     prod.restore()
-    assert prod.is_deleted is False
+    assert prod.is_deleted() is False
     assert prod.deleted_at is None
-    assert prod.state == Lifecycle.DIRTY
+    assert prod.state() == Lifecycle.DIRTY
 
 class Address(Model):
     street: str
@@ -488,20 +492,14 @@ def test_declarative_indexes_and_constraints():
 def test_relationship_forward_reference_resolution():
     class ParentModel(Model):
         id: int = Field(database=DatabaseField(primary_key=True))
-        children: list[ChildModel] = OneToMany("ChildModel", foreign_key="parent_id")
+        children: list["ChildModel"]
 
     class ChildModel(Model):
         id: int = Field(database=DatabaseField(primary_key=True))
         parent_id: int
 
     meta = ParentModel.metadata()
-    rel = meta.relationships["children"]
-    assert rel.target == "ChildModel"
-
-    from renus.db.models.base import _MODEL_REGISTRY
-
-    resolved = rel.resolve_target(_MODEL_REGISTRY)
-    assert resolved is ChildModel
+    assert "children" not in meta.relationships
 
 def test_soft_delete_disabled_error():
     class HardDeleteOnly(Model):

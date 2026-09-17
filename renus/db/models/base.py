@@ -69,32 +69,15 @@ class ModelMeta(type):
                 ns[key] = Field(default=None if not val.is_collection else [])
             elif isinstance(val, DatabaseField):
                 declared_db_fields[key] = val
-
-                if val.has_default:
-                    default_val = val.default
-                elif val.generated or val.primary_key:
-                    default_val = None
-                else:
-                    default_val = _UNSET
-
-                ns[key] = Field(
-                    default=default_val,
-                    default_factory=val.default_factory,
-                    database=val,
-                )
+                default_val = None if val.generated or val.primary_key else _UNSET
+                ns[key] = Field(default=default_val, database=val)
             elif isinstance(val, Field):
                 extra = getattr(val, "extra", {}) or {}
                 db = getattr(val, "database", None) or extra.get("database") or extra.get("db")
                 if isinstance(db, DatabaseField):
                     declared_db_fields[key] = db
 
-                    if db.has_default and not (
-                        val.default is not _UNSET or val.default_factory is not None
-                    ):
-                        if db.default is not UNSET:
-                            val.default = db.default
-                        elif db.default_factory is not None:
-                            val.default_factory = db.default_factory
+
 
         meta_cls = ns.get("Meta")
         timestamps = bool(getattr(meta_cls, "timestamps", False))
@@ -145,13 +128,6 @@ class ModelMeta(type):
                 continue
 
             raw_field = ns.get(fname)
-            db = getattr(raw_field, "database", None) if isinstance(raw_field, Field) else None
-            if isinstance(db, DatabaseField) and db.storage_type is not None:
-                raise TypeError(
-                    f"Field '{fname}: {field_type}' must be an embedded relationship "
-                    f"({rel_kind}(...)); dict/list cannot be stored as a raw column. "
-                    f"Remove the storage_type override or declare it explicitly."
-                )
 
             rel = (
                 EmbeddedOne(dict)
@@ -171,10 +147,8 @@ class ModelMeta(type):
 
         if "_id" in annotations or "_id" in declared_db_fields:
             _id_type = annotations.get("_id", ID)
-            _id_db = declared_db_fields.get("_id") or DatabaseField(
-                primary_key=True, default_factory=ID
-            )
-            _id_field = Field(default=None, default_factory=_id_db.default_factory, database=_id_db)
+            _id_db = declared_db_fields.get("_id") or DatabaseField(primary_key=True)
+            _id_field = Field(default=None, default_factory=ID, database=_id_db)
             validation_fields["_id"] = FieldInfo(
                 name="_id",
                 field_type=_id_type,
@@ -183,10 +157,15 @@ class ModelMeta(type):
                 model_base=Model,
             )
 
+        if soft_delete and "is_deleted" in cls.__dict__:
+            delattr(cls, "is_deleted")
+
         fields_dict: dict[str, FieldMetadata] = {}
         column_to_field: dict[str, str] = {}
 
         for fname, fi in list(validation_fields.items()):
+            if soft_delete and fname == "is_deleted":
+                continue
             if (fname.startswith("_") and fname != "_id") or fname in all_relationships:
                 continue
 
@@ -204,8 +183,8 @@ class ModelMeta(type):
 
             is_nullable, base_type, storage_type = analyze_field_type(fi.field_type)
 
-            effective_nullable = db.nullable if db.nullable is not None else is_nullable
-            effective_storage_type = db.storage_type or storage_type
+            effective_nullable = is_nullable
+            effective_storage_type = storage_type
             col_name = db.column_name or fname
 
             pk = db.primary_key or (fname in ("id", "_id") and not any(
@@ -230,12 +209,8 @@ class ModelMeta(type):
                         fname, fi.field_type, effective_storage_type, db.generated
                     )
 
-            def_val = db.default if db.default is not UNSET else (
-                fi.get_default() if fi.has_default else UNSET
-            )
-            def_factory = db.default_factory or (
-                raw_field.default_factory if raw_field else None
-            )
+            def_val = fi.get_default() if fi.has_default else UNSET
+            def_factory = raw_field.default_factory if raw_field else None
 
             if pk or db.generated:
                 fi.required = False
@@ -269,7 +244,31 @@ class ModelMeta(type):
             fields_dict[fname] = field_meta
             column_to_field[col_name] = fname
 
-            setattr(cls, fname, Path(cls, (fname,)))
+            if fname not in {
+                "state",
+                "is_new",
+                "is_persisted",
+                "is_dirty",
+                "is_deleted",
+                "dirty_fields",
+                "identity_values",
+                "identity_dict",
+            }:
+                setattr(cls, fname, Path(cls, (fname,)))
+
+        if soft_delete and "is_deleted" not in fields_dict:
+            fields_dict["is_deleted"] = FieldMetadata(
+                name="is_deleted",
+                column_name="is_deleted",
+                python_type=bool,
+                inferred_type=bool,
+                storage_type=bool,
+                nullable=False,
+                required=False,
+                database=DatabaseField(),
+                default=False,
+            )
+            column_to_field["is_deleted"] = "is_deleted"
 
         pk_fields = [k for k, v in fields_dict.items() if v.primary_key]
         if len(pk_fields) > 1:
@@ -488,6 +487,8 @@ class Model(metaclass=ModelMeta):
 
     def get_sensitive(self, name: str) -> Any:
         """Return a field's raw value, bypassing sensitive masking."""
+        if name == "is_deleted":
+            return self.__dict__.get("_is_deleted_value", False)
         return object.__getattribute__(self, name)
 
     def __getattribute__(self, name: str) -> Any:
@@ -512,7 +513,7 @@ class Model(metaclass=ModelMeta):
                 keys.append(k)
 
         for key in keys:
-            val = getattr(self, key, None)
+            val = self.get_sensitive(key)
             yield (key, self._dump_value(val))
 
     def __getitem__(self, item: str) -> Any:
@@ -528,7 +529,7 @@ class Model(metaclass=ModelMeta):
         return hasattr(self, item)
 
     def __repr__(self) -> str:
-        attrs = ", ".join(f"{k}={getattr(self, k, None)!r}" for k in self._model_fields)
+        attrs = ", ".join(f"{k}={self.get_sensitive(k)!r}" for k in self._model_fields)
         return f"{self.__class__.__name__}({attrs})"
 
     def __str__(self) -> str:
@@ -618,7 +619,10 @@ class Model(metaclass=ModelMeta):
                 raise ValidationError(errors)
 
             for key, val in values.items():
-                object.__setattr__(self, key, val)
+                if key == "is_deleted":
+                    object.__setattr__(self, "_is_deleted_value", val)
+                else:
+                    object.__setattr__(self, key, val)
 
             object.__setattr__(self, "_initialized", True)
         except Exception as e:
@@ -637,8 +641,8 @@ class Model(metaclass=ModelMeta):
                 object.__setattr__(self, "updated_at", now)
 
         if meta and meta.soft_delete:
-            if getattr(self, "is_deleted", None) is None:
-                object.__setattr__(self, "is_deleted", False)
+            if "_is_deleted_value" not in self.__dict__:
+                object.__setattr__(self, "_is_deleted_value", False)
 
         object.__setattr__(self, "_db_original_snapshot", self._take_field_snapshot())
 
@@ -647,15 +651,25 @@ class Model(metaclass=ModelMeta):
         meta = getattr(self, "__db_metadata__", None)
         if meta:
             for fname in meta.fields:
-                if fname in self.__dict__:
+                if fname == "is_deleted":
+                    val = self.__dict__.get("_is_deleted_value", False)
+                elif fname in self.__dict__:
                     val = self.__dict__[fname]
-                    try:
-                        snapshot[fname] = copy.deepcopy(val)
-                    except Exception:
-                        snapshot[fname] = val
+                else:
+                    continue
+                try:
+                    snapshot[fname] = copy.deepcopy(val)
+                except Exception:
+                    snapshot[fname] = val
         return snapshot
 
     def __setattr__(self, name: str, value: Any) -> None:
+
+        if name == "is_deleted":
+            object.__setattr__(self, "_is_deleted_value", value)
+            if getattr(self, "_initialized", False):
+                object.__setattr__(self, "_db_state", Lifecycle.DIRTY)
+            return
 
         if getattr(self, "_initialized", False) and hasattr(self, "__db_metadata__"):
             meta = self.__db_metadata__
@@ -679,7 +693,10 @@ class Model(metaclass=ModelMeta):
                     cleaned_val, field_errors = field_info.clean_and_validate(value, self.__class__)
                     if field_errors:
                         raise ValidationError({name: field_errors})
-                    object.__setattr__(self, name, cleaned_val)
+                    if name == "is_deleted":
+                        object.__setattr__(self, "_is_deleted_value", cleaned_val)
+                    else:
+                        object.__setattr__(self, name, cleaned_val)
                 else:
                     object.__setattr__(self, name, value)
             except Exception as e:
@@ -703,7 +720,7 @@ class Model(metaclass=ModelMeta):
             object.__setattr__(self, name, value)
 
     def _is_field_dirty(self, name: str) -> bool:
-        current = self.__dict__.get(name)
+        current = self.get_sensitive(name) if name == "is_deleted" else self.__dict__.get(name)
         original = self._db_original_snapshot.get(name)
         return current != original
 
@@ -714,43 +731,37 @@ class Model(metaclass=ModelMeta):
                 return True
         return False
 
-    @property
     def state(self) -> Lifecycle:
         """Return the model's current lifecycle state."""
         return getattr(self, "_db_state", Lifecycle.NEW)
 
-    @property
     def is_new(self) -> bool:
         """Return whether the model has not yet been persisted."""
-        return self.state == Lifecycle.NEW
+        return self.state() == Lifecycle.NEW
 
-    @property
     def is_persisted(self) -> bool:
         """Return whether the model has been persisted and is clean."""
-        return self.state == Lifecycle.PERSISTED
+        return self.state() == Lifecycle.PERSISTED
 
-    @property
     def is_dirty(self) -> bool:
         """Return whether any field differs from its persisted snapshot."""
-        if self.state == Lifecycle.DIRTY:
+        if self.state() == Lifecycle.DIRTY:
             return True
-        if self.state == Lifecycle.NEW:
+        if self.state() == Lifecycle.NEW:
             return False
         return self._any_field_dirty()
 
-    @property
     def is_deleted(self) -> bool:
         """Return whether the model has been deleted."""
-        if self.state == Lifecycle.DELETED:
+        if self.state() == Lifecycle.DELETED:
             return True
         if getattr(self, "deleted_at", None) is not None:
             return True
-        return bool(getattr(self, "is_deleted", False))
+        return bool(self.__dict__.get("_is_deleted_value", False))
 
-    @property
     def dirty_fields(self) -> set[str]:
         """Return the set of field names that have changed."""
-        if self.state == Lifecycle.NEW:
+        if self.state() == Lifecycle.NEW:
             return set(self.__db_metadata__.fields.keys()) & set(self.__dict__.keys())
 
         dirty: set[str] = set()
@@ -762,9 +773,9 @@ class Model(metaclass=ModelMeta):
     def get_dirty_changes(self) -> dict[str, tuple[Any, Any]]:
         """Return changed fields mapped to their original and current values."""
         changes: dict[str, tuple[Any, Any]] = {}
-        for fname in self.dirty_fields:
+        for fname in self.dirty_fields():
             original = self._db_original_snapshot.get(fname)
-            current = self.__dict__.get(fname)
+            current = self.get_sensitive(fname) if fname == "is_deleted" else self.__dict__.get(fname)
             changes[fname] = (original, current)
         return changes
 
@@ -790,7 +801,7 @@ class Model(metaclass=ModelMeta):
             )
         now = datetime.now(timezone.utc)
         object.__setattr__(self, "deleted_at", now)
-        object.__setattr__(self, "is_deleted", True)
+        object.__setattr__(self, "_is_deleted_value", True)
         self._mark_deleted()
 
     def restore(self) -> None:
@@ -801,10 +812,9 @@ class Model(metaclass=ModelMeta):
                 f"Model '{self.__class__.__name__}' does not have soft_delete enabled in Meta"
             )
         object.__setattr__(self, "deleted_at", None)
-        object.__setattr__(self, "is_deleted", False)
+        object.__setattr__(self, "_is_deleted_value", False)
         object.__setattr__(self, "_db_state", Lifecycle.DIRTY)
 
-    @property
     def identity_values(self) -> Any:
         """Return the identity key value(s) for this model."""
         meta = self.__db_metadata__
@@ -813,7 +823,6 @@ class Model(metaclass=ModelMeta):
             return getattr(self, pk_fields[0], None)
         return tuple(getattr(self, f, None) for f in pk_fields)
 
-    @property
     def identity_dict(self) -> dict[str, Any]:
         """Return the identity fields as a name-to-value dictionary."""
         meta = self.__db_metadata__

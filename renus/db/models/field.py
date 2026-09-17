@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
-import re
+
 import sys
-from re import Pattern
 import types
-from collections.abc import Callable, Collection
+from collections.abc import Callable
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
@@ -40,20 +38,6 @@ def find_model_subclass(name: str, model_base: type | None = None) -> type | Non
 
     return _search(model_base)
 
-def _decimal_parts(value: Any) -> tuple[int, int] | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
-        return None
-    try:
-        s = str(value)
-        if "e" in s or "E" in s:
-            s = format(Decimal(s), "f")
-        s = s.lstrip("+-").replace("_", "")
-        if "." in s:
-            int_part, dec_part = s.split(".", 1)
-            return len(int_part) + len(dec_part), len(dec_part)
-        return len(s), 0
-    except (InvalidOperation, ValueError):
-        return None
 
 def format_rule_error(field: str, err: Any) -> str:
     if isinstance(err, str):
@@ -111,20 +95,7 @@ class Field:
         *rules: Any,
         default: Any = _UNSET,
         default_factory: Callable[[], Any] | None = None,
-        min_length: int | None = None,
-        max_length: int | None = None,
-        length: int | None = None,
-        gt: float | None = None,
-        ge: float | None = None,
-        lt: float | None = None,
-        le: float | None = None,
-        max_digits: int | None = None,
-        decimal_places: int | None = None,
         error: str | None = None,
-        eq: Any = _UNSET,
-        regex: str | Pattern | None = None,
-        in_: Collection[Any] | None = None,
-        not_in: Collection[Any] | None = None,
         validator: Callable[[Any], Any] | list[Callable[[Any], Any]] | None = None,
         validators: list[Callable[[Any], Any]] | None = None,
         description: str | None = None,
@@ -142,38 +113,12 @@ class Field:
             Static default value used when no value is provided.
         default_factory:
             Zero-argument callable producing a default value.
-        min_length:
-            Minimum length for string or collection values.
-        max_length:
-            Maximum length for string or collection values.
-        length:
-            Exact required length for the value.
-        gt:
-            Value must be greater than this bound.
-        ge:
-            Value must be greater than or equal to this bound.
-        lt:
-            Value must be less than this bound.
-        le:
-            Value must be less than or equal to this bound.
-        max_digits:
-            Maximum number of digits for decimal values.
-        decimal_places:
-            Number of decimal places for decimal values.
         error:
-            Custom error message template for validation failures.
-        eq:
-            Value must equal this constant when set.
-        regex:
-            Regular expression pattern the value must match.
-        in_:
-            Collection of allowed values.
-        not_in:
-            Collection of disallowed values.
+            Custom error message template used by compatible validation rules.
         validator:
             Callable or list of callables used as validation rules.
         validators:
-            Additional list of callables used as validation rules.
+            Additional callables used as validation rules.
         description:
             Human-readable description of the field.
         database:
@@ -186,20 +131,7 @@ class Field:
         self.sensitive = sensitive
         self.default = default
         self.default_factory = default_factory
-        self.min_length = min_length
-        self.max_length = max_length
-        self.length = length
-        self.gt = gt
-        self.ge = ge
-        self.lt = lt
-        self.le = le
-        self.max_digits = max_digits
-        self.decimal_places = decimal_places
         self.error = error
-        self.eq = eq
-        self.regex = re.compile(regex) if isinstance(regex, str) else regex
-        self.in_ = in_
-        self.not_in = not_in
         self.description = description
 
         if database is None:
@@ -207,16 +139,12 @@ class Field:
         self.database = database
         self.extra = extra
 
+        self.rules: list[Any] = []
         parsed_rules = list(rules)
         if validator is not None:
-            if isinstance(validator, (list, tuple)):
-                parsed_rules.extend(validator)
-            else:
-                parsed_rules.append(validator)
+            parsed_rules.extend(validator if isinstance(validator, (list, tuple)) else [validator])
         if validators is not None:
             parsed_rules.extend(validators)
-
-        self.rules: list[Any] = []
         for r in parsed_rules:
             if hasattr(r, "__class__") and r.__class__.__name__ == "Default":
                 if self.default is _UNSET and self.default_factory is None:
@@ -449,81 +377,6 @@ class FieldInfo:
                     errors.append(f"Validator error on '{self.name}': {e}")
 
         f = self.field
-        if f.min_length is not None and hasattr(value, "__len__") and len(value) < f.min_length:
-            errors.append(f"'{self.name}' length must be at least {f.min_length}")
-
-        if f.max_length is not None and hasattr(value, "__len__") and len(value) > f.max_length:
-            errors.append(f"'{self.name}' length must be at most {f.max_length}")
-
-        if f.length is not None and hasattr(value, "__len__") and len(value) != f.length:
-            errors.append(f"'{self.name}' length must be {f.length}")
-
-        if f.gt is not None:
-            try:
-                if not (value > f.gt):
-                    errors.append(
-                        self._custom_message([f.gt, value])
-                        or f"'{self.name}' must be greater than {f.gt}"
-                    )
-            except TypeError:
-                pass
-
-        if f.ge is not None:
-            try:
-                if not (value >= f.ge):
-                    errors.append(
-                        self._custom_message([f.ge, value])
-                        or f"'{self.name}' must be greater than or equal to {f.ge}"
-                    )
-            except TypeError:
-                pass
-
-        if f.lt is not None:
-            try:
-                if not (value < f.lt):
-                    errors.append(
-                        self._custom_message([f.lt, value])
-                        or f"'{self.name}' must be less than {f.lt}"
-                    )
-            except TypeError:
-                pass
-
-        if f.le is not None:
-            try:
-                if not (value <= f.le):
-                    errors.append(
-                        self._custom_message([f.le, value])
-                        or f"'{self.name}' must be less than or equal to {f.le}"
-                    )
-            except TypeError:
-                pass
-
-        if f.max_digits is not None or f.decimal_places is not None:
-            parts = _decimal_parts(value)
-            if parts is not None:
-                total_digits, dec_places = parts
-                if f.max_digits is not None and total_digits > f.max_digits:
-                    errors.append(
-                        self._custom_message([f.max_digits, value])
-                        or f"'{self.name}' must have at most {f.max_digits} digits"
-                    )
-                if f.decimal_places is not None and dec_places > f.decimal_places:
-                    errors.append(
-                        self._custom_message([f.decimal_places, value])
-                        or f"'{self.name}' must have at most {f.decimal_places} decimal place(s)"
-                    )
-
-        if f.eq is not _UNSET and value != f.eq:
-            errors.append(f"'{self.name}' must be equal to {f.eq}")
-
-        if f.regex is not None and not f.regex.search(str(value)):
-            errors.append(f"'{self.name}' does not match pattern")
-
-        if f.in_ is not None and value not in f.in_:
-            errors.append(f"'{self.name}' must be one of {f.in_}")
-
-        if f.not_in is not None and value in f.not_in:
-            errors.append(f"'{self.name}' must not be in {f.not_in}")
 
         if (
             value is not None

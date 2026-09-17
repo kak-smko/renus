@@ -111,7 +111,7 @@ class Insert(MutationAST):
                     val = (
                         instance.get_sensitive(fname)
                         if fmeta.sensitive
-                        else getattr(instance, fname)
+                        else instance.get_sensitive(fname)
                     )
                     if val is not None:
                         values[fname] = val
@@ -209,13 +209,13 @@ class Update(FilterableMutation):
 
         meta = getattr(source, "__db_metadata__", None)
         if hasattr(instance, "dirty_fields"):
-            for fname in instance.dirty_fields:
+            for fname in instance.dirty_fields():
 
                 fmeta = meta.fields.get(fname) if meta else None
                 changes[fname] = (
                     instance.get_sensitive(fname)
                     if fmeta is not None and fmeta.sensitive
-                    else getattr(instance, fname)
+                    else instance.get_sensitive(fname)
                 )
         else:
             changes = {
@@ -224,7 +224,7 @@ class Update(FilterableMutation):
 
         filters: list[Condition] = []
         if hasattr(instance, "identity_dict"):
-            for pk_name, pk_val in instance.identity_dict.items():
+            for pk_name, pk_val in instance.identity_dict().items():
                 filters.append(Path(source, (pk_name,)) == pk_val)
 
         return cls(
@@ -296,7 +296,7 @@ class Delete(FilterableMutation):
         source = instance.__class__
         filters: list[Condition] = []
         if hasattr(instance, "identity_dict"):
-            for pk_name, pk_val in instance.identity_dict.items():
+            for pk_name, pk_val in instance.identity_dict().items():
                 filters.append(Path(source, (pk_name,)) == pk_val)
 
         return cls(source=source, filters=tuple(filters))
@@ -383,7 +383,7 @@ class Upsert(FilterableMutation):
             if meta:
                 targets = meta.primary_key_fields
             elif hasattr(instance, "identity_dict"):
-                targets = tuple(instance.identity_dict.keys())
+                targets = tuple(instance.identity_dict().keys())
             else:
                 raise ValueError("Upsert requires conflict_target when model metadata is missing")
         else:
