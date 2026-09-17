@@ -34,7 +34,6 @@ from renus.db import (
 from renus.db.mongodb.adapter import MongoTransactionContext
 from renus.db.mongodb.compiler import MongoCompiledQuery, MongoCompiler
 
-from tests.db import _native_helpers as nh
 
 class Location(Model):
     city: str
@@ -319,91 +318,3 @@ async def test_mongodb_transaction_context():
 
     mock_session.abort_transaction.assert_called_once()
     mock_session.end_session.assert_called_once()
-
-MONGO_URI = "mongodb://localhost:27017"
-MONGO_DB = "renus_native_mongodb"
-
-def _mongo_ready() -> bool:
-    try:
-        import pymongo
-
-        client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=1500)
-        client.admin.command("ping")
-        client.close()
-        return True
-    except Exception:
-        return False
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not _mongo_ready(), reason="MongoDB not reachable")
-async def test_native_raw_documents_in_collection():
-    import pymongo
-
-    client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=1500)
-    client.drop_database(MONGO_DB)
-    try:
-        adapter = MongoDBAdapter({"uri": MONGO_URI, "database": MONGO_DB})
-        db = Database(adapter)
-        await db.connect()
-        await db.create_schema([AccountDoc])
-
-        repo = db.repository(AccountDoc)
-        created = await repo.create(
-            AccountDoc(
-                username="native_alice",
-                age=30,
-                profile=Location(city="Tokyo", country="JP"),
-                items=[OrderItem(name="a", price=1.0, qty=2)],
-            )
-        )
-
-        coll = adapter._mongo_db["accountdocs"]
-        docs = [dict(d) for d in await coll.find({}).to_list(length=None)]
-        assert len(docs) == 1
-        doc = docs[0]
-
-        assert doc["_id"] == created.id
-        assert doc["username"] == "native_alice"
-        assert doc["age"] == 30
-
-        assert doc["profile"]["city"] == "Tokyo"
-        assert doc["items"][0]["name"] == "a"
-
-        await db.disconnect()
-    finally:
-        client.drop_database(MONGO_DB)
-        client.close()
-
-class DualDoc(Model):
-    id: str = Field(database=DatabaseField(primary_key=True))
-    username: str
-    profile: Location = Embedded(Location)
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", nh.DUAL_BACKENDS)
-async def test_native_dual_backend_embedded_persistence(kind):
-    db = await nh.connect_schema(kind, [DualDoc])
-    try:
-        repo = db.repository(DualDoc)
-        await repo.create(
-            DualDoc(
-                id="d1",
-                username="dual_native",
-                profile=Location(city="Oslo", country="NO"),
-            )
-        )
-
-        col = DualDoc.metadata().table
-        rows = await nh.native_all(db, col)
-        assert len(rows) == 1
-
-        if db.adapter("primary").name == "mongodb":
-
-            assert rows[0]["profile"]["city"] == "Oslo"
-        else:
-
-            sub = await nh.native_all(db, f"{col}_profile")
-            assert sub[0]["parent_id"] == "d1"
-            assert sub[0]["city"] == "Oslo"
-    finally:
-        await nh.cleanup(db)

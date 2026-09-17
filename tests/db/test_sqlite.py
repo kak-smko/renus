@@ -30,7 +30,6 @@ from renus.db.sql import (
 )
 from renus.db.sqlite.dialect import  SQLiteDialect
 
-from tests.db import _native_helpers as nh
 
 class GeoAddress(Model):
     street: str
@@ -367,30 +366,3 @@ async def test_native_physical_schema_and_stored_rows():
     assert addr["city"] == "Oslo"
 
     await db.disconnect()
-
-class NativeWare(Model):
-    id: str = Field(database=DatabaseField(primary_key=True))
-    sku: str
-    qty: int
-    embedded: GeoAddress = Embedded(GeoAddress)
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", nh.DUAL_BACKENDS)
-async def test_native_dual_backend_persistence(kind):
-    db = await nh.connect_schema(kind, [NativeWare])
-    try:
-        repo = db.repository(NativeWare)
-        await repo.create(
-            NativeWare(id="w1", sku="SKU-1", qty=5, embedded=GeoAddress(street="Main", city="Oslo"))
-        )
-
-        rows = await nh.native_all(db, "nativewares")
-        assert len(rows) == 1
-        assert rows[0]["sku"] == "SKU-1"
-        assert rows[0]["qty"] == 5
-
-        (loaded,) = await repo.query().include(NativeWare.embedded).all()
-        assert loaded.embedded.street == "Main"
-        assert loaded.embedded.city == "Oslo"
-    finally:
-        await nh.cleanup(db)

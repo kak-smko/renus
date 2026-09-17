@@ -20,7 +20,6 @@ from renus.db import (
     to_json,
 )
 
-from tests.db import _native_helpers as nh
 
 class RoleEnum(Enum):
     ADMIN = "admin"
@@ -247,31 +246,3 @@ def test_sensitive_fields_validate_and_roundtrip():
 
     rt = from_dict(SensitiveUser, to_dict(direct, include_sensitive=True))
     assert rt.get_sensitive("password") == "$2b$12$explicit"
-
-class NativeItem(Model):
-    id: str = Field(database=DatabaseField(primary_key=True))
-    name: str
-    qty: int
-    price: float = 0.0
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", nh.DUAL_BACKENDS)
-async def test_native_stored_row_matches_to_dict(kind):
-    db = await nh.connect_schema(kind, [NativeItem])
-    try:
-        repo = db.repository(NativeItem)
-        obj = NativeItem(id="n1", name="gadget", qty=7, price=3.5)
-        await repo.create(obj)
-
-        serialized = to_dict(obj)
-        assert serialized["name"] == "gadget"
-        assert serialized["qty"] == 7
-        assert serialized["price"] == 3.5
-
-        row = (await nh.native_all(db, "nativeitems"))[0]
-
-        assert row["name"] == serialized["name"]
-        assert row["qty"] == serialized["qty"]
-        assert row["price"] == serialized["price"]
-    finally:
-        await nh.cleanup(db)

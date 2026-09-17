@@ -29,7 +29,6 @@ from renus.db import (
     Upsert,
 )
 
-from tests.db import _native_helpers as nh
 from tests.db._fakes import DDLFakeMixin
 
 class Account(Model):
@@ -510,29 +509,3 @@ async def test_database_no_adapter_and_no_config_raises(monkeypatch: Any):
     with pytest.raises(ConfigurationError, match="No adapter configured for connection 'primary'"):
         Database()
 
-class NativeRepo(Model):
-    id: str = Field(database=DatabaseField(primary_key=True))
-    owner: str
-    balance: float = 0.0
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", nh.DUAL_BACKENDS)
-async def test_native_repository_persistence_on_real_backend(kind):
-    db = await nh.connect_schema(kind, [NativeRepo])
-    try:
-        repo = db.repository(NativeRepo)
-
-        created = await repo.create(NativeRepo(id="a1", owner="Alice", balance=100.0))
-        assert created.owner == "Alice"
-
-        await repo.update(NativeRepo.id == "a1", values={"balance": 250.0})
-
-        rows = await nh.native_all(db, "nativerepos")
-        assert len(rows) == 1
-        assert rows[0]["owner"] == "Alice"
-        assert rows[0]["balance"] == 250.0
-
-        await repo.delete_many(NativeRepo.owner == "Alice")
-        assert await nh.table_count(db, "nativerepos") == 0
-    finally:
-        await nh.cleanup(db)

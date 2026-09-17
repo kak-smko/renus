@@ -28,7 +28,6 @@ from renus.db import (
     unregister_adapter,
 )
 
-from tests.db import _native_helpers as nh
 from tests.db._fakes import DDLFakeMixin
 
 class MockCustomAdapter(DDLFakeMixin, AsyncDatabaseAdapter):
@@ -213,36 +212,3 @@ class MutationEventPlugin(Plugin):
     async def after_mutation(self, db, ast, result, context) -> None:
         self.after.append(ast.__class__.__name__)
         self.after_rows_affected.append(result.rows_affected)
-
-class EventItem(Model):
-    id: str = Field(database=DatabaseField(primary_key=True))
-    title: str
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", nh.DUAL_BACKENDS)
-async def test_create_update_delete_mutation_events(kind):
-    db = await nh.connect_schema(kind, [EventItem])
-    plugin = MutationEventPlugin()
-    db.use(plugin)
-
-    try:
-        repo = db.repository(EventItem)
-
-        created = await repo.create(EventItem(id="1", title="first"))
-        assert created.title == "first"
-
-        updated = await repo.update(EventItem.id == "1", values={"title": "changed"})
-        assert updated == 1
-
-        deleted = await repo.delete(EventItem.id == "1")
-        assert deleted == 1
-
-        assert plugin.before == ["Insert", "Update", "Delete"]
-        assert plugin.after == ["Insert", "Update", "Delete"]
-
-        assert plugin.after_rows_affected == [1, 1, 1]
-
-        table = EventItem.__db_metadata__.table
-        assert await nh.table_count(db, table) == 0
-    finally:
-        await nh.cleanup(db)

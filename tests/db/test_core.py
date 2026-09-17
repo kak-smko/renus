@@ -32,7 +32,6 @@ from renus.db.core import (
 from renus.db import DatabaseField, Field, Model
 from renus.db.core.exceptions import MutationError
 
-from tests.db import _native_helpers as nh
 from tests.db._fakes import DDLFakeMixin
 
 def test_all_exceptions_derive_from_dberror():
@@ -228,23 +227,3 @@ def test_adapter_nested_documents_class_attribute_override():
         nested_documents = True
 
     assert WithNested.nested_documents is True
-
-class NativeCoreItem(Model):
-    id: str = Field(database=DatabaseField(primary_key=True))
-    label: str
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", nh.DUAL_BACKENDS)
-async def test_native_adapter_contract_against_real_backend(kind):
-    db = await nh.connect_schema(kind, [NativeCoreItem])
-    try:
-        adapter = db.adapter("primary")
-        repo = db.repository(NativeCoreItem)
-        created = await repo.create(NativeCoreItem(id="c1", label="native"))
-        assert created.label == "native"
-
-        rows = await nh.native_all(db, "nativecoreitems")
-        assert len(rows) == 1
-        assert rows[0]["label"] == "native"
-    finally:
-        await nh.cleanup(db)

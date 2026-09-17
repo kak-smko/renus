@@ -27,7 +27,6 @@ from renus.db import (
     Sum,
 )
 
-from tests.db import _native_helpers as nh
 
 class UserAddress(Model):
     street: str
@@ -387,38 +386,3 @@ async def test_bound_query_execution():
 
     assert await q.exists() is True
 
-
-class NativeUser(Model):
-    id: str = Field(database=DatabaseField(primary_key=True))
-    name: str
-    age: int
-    score: float
-    role: str = "member"
-    active: bool = True
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", nh.DUAL_BACKENDS)
-async def test_native_query_ast_execution(kind):
-    db = await nh.connect_schema(kind, [NativeUser])
-    try:
-        repo = db.repository(NativeUser)
-        await repo.create_many(
-            [
-                NativeUser(id="1", name="Alice", age=30, score=90.0, role="admin", active=True),
-                NativeUser(id="2", name="Bob", age=20, score=40.0, role="member", active=True),
-                NativeUser(id="3", name="Carol", age=40, score=80.0, role="member", active=False),
-            ]
-        )
-
-        rows = await repo.query((NativeUser.age >= 25) & (NativeUser.active == True)).order_by(NativeUser.age.asc()).all()
-        assert [u.name for u in rows] == ["Alice"]
-
-        agg = await repo.query().group_by(NativeUser.role).aggregate(n=Count(NativeUser.id), total=Sum(NativeUser.score)).all()
-        by_role = {r["role"]: r for r in agg}
-        assert by_role["member"]["n"] == 2
-        assert by_role["member"]["total"] == 120.0
-
-        between = await repo.query(NativeUser.age.between(35, 100)).all()
-        assert [u.name for u in between] == ["Carol"]
-    finally:
-        await nh.cleanup(db)

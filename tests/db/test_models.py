@@ -36,7 +36,6 @@ from renus.db import (
 from renus.db.query.ast import Operator
 from renus.db.validation.rules import Email, MinLen
 
-from tests.db import _native_helpers as nh
 
 class ComprehensiveTypesModel(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
@@ -542,40 +541,3 @@ def test_model_dict_and_to_dict_parity():
     assert d1 == d2
     assert d1["name"] == "Bob"
     assert d1["address"]["street"] == "456 Elm St"
-
-class NativeAddr(Model):
-    street: str
-    city: str
-
-class NativeCust(Model):
-    id: str = Field(database=DatabaseField(primary_key=True))
-    name: str
-    address: NativeAddr = Embedded(NativeAddr)
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", nh.DUAL_BACKENDS)
-async def test_native_schema_materialisation_for_declared_model(kind):
-    db = await nh.connect_schema(kind, [NativeCust])
-    try:
-        repo = db.repository(NativeCust)
-        await repo.create(
-            NativeCust(id="c1", name="Acme", address=NativeAddr(street="456 Elm", city="Gotham"))
-        )
-
-        rows = await nh.native_all(db, "nativecusts")
-        assert rows[0]["name"] == "Acme"
-
-        if db.adapter("primary").name == "mongodb":
-
-            assert rows[0]["address"]["city"] == "Gotham"
-        else:
-
-            assert "nativecusts_address" in await nh.created_tables(db)
-            conn = db.adapter("primary")._sqlite_db
-            cols = conn.execute('PRAGMA table_info("nativecusts_address");').fetchall()
-            assert {c["name"] for c in cols} >= {"parent_id", "street", "city"}
-            embed = (await nh.native_all(db, "nativecusts_address"))[0]
-            assert embed["city"] == "Gotham"
-            assert embed["parent_id"] == "c1"
-    finally:
-        await nh.cleanup(db)

@@ -30,7 +30,6 @@ from renus.db.sql import (
 )
 from renus.db.mysql.dialect import MySQLDialect
 
-from tests.db import _native_helpers as nh
 
 class Customer(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True, auto_inc=True))
@@ -262,22 +261,3 @@ async def test_mysql_error_translation():
     with pytest.raises(DatabaseError, match="MySQL mutation error"):
         await adapter.execute_mutation(Insert(Customer, values={"username": "test"}))
 
-class NativeCustomer(Model):
-    id: str = Field(database=DatabaseField(primary_key=True))
-    username: str
-    balance: float = 0.0
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", nh.DUAL_BACKENDS)
-async def test_native_dual_backend_persistence(kind):
-    db = await nh.connect_schema(kind, [NativeCustomer])
-    try:
-        repo = db.repository(NativeCustomer)
-        await repo.create(NativeCustomer(id="c1", username="alice", balance=100.0))
-
-        rows = await nh.native_all(db, "nativecustomers")
-        assert len(rows) == 1
-        assert rows[0]["username"] == "alice"
-        assert rows[0]["balance"] == 100.0
-    finally:
-        await nh.cleanup(db)

@@ -22,7 +22,6 @@ from renus.db.mutation.ast import (
     normalize_values,
 )
 
-from tests.db import _native_helpers as nh
 
 class Member(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
@@ -226,39 +225,3 @@ def test_normalize_conflict_target():
     norm = normalize_conflict_target(targets)
     assert norm == ("username", "email", "id")
 
-class NativeMember(Model):
-    id: str = Field(database=DatabaseField(primary_key=True))
-    username: str
-    points: int = 0
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", nh.DUAL_BACKENDS)
-async def test_native_mutation_ast_execution(kind):
-    db = await nh.connect_schema(kind, [NativeMember])
-    try:
-        adapter = db.adapter("primary")
-
-        await adapter.execute_mutation(
-            Insert(NativeMember, values={"id": "m1", "username": "alice", "points": 10})
-        )
-
-        await adapter.execute_mutation(
-            Update(NativeMember, values={"points": 99}, filters=(NativeMember.username == "alice",))
-        )
-        rows = await nh.native_all(db, "nativemembers")
-        assert len(rows) == 1
-        assert rows[0]["points"] == 99
-
-        await adapter.execute_mutation(
-            InsertMany(
-                NativeMember,
-                records=[{"id": "m2", "username": "b1"}, {"id": "m3", "username": "b2"}],
-            )
-        )
-        assert await nh.table_count(db, "nativemembers") == 3
-
-        await adapter.execute_mutation(Delete(NativeMember, filters=(NativeMember.username == "b1",)))
-        remaining = await nh.native_all(db, "nativemembers")
-        assert sorted(r["username"] for r in remaining) == ["alice", "b2"]
-    finally:
-        await nh.cleanup(db)

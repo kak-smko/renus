@@ -2103,6 +2103,15 @@ async def test_transaction_commit_and_rollback(kind):
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_unit_of_work_commit_across_repositories(kind):
     db = await database_for(kind)
+    adapter = db.adapter("primary")
+    transaction_calls: list[None] = []
+    original_factory = adapter.transaction_factory
+
+    def transaction_factory():
+        transaction_calls.append(None)
+        return original_factory()
+
+    adapter.transaction_factory = transaction_factory
     try:
         repo = db.repository(User)
         async with db.unit_of_work() as uow:
@@ -2123,6 +2132,7 @@ async def test_unit_of_work_commit_across_repositories(kind):
 
         assert await repo.exists(User.username == "uw1") is True
         assert await repo.exists(User.username == "uw2") is True
+        assert transaction_calls == [None]
         posts = await db.repository(Post).where(Post.user_id == "uw1").all()
         assert len(posts) == 1
         assert posts[0].title == "uow post"
@@ -2189,6 +2199,15 @@ async def test_unit_of_work_explicit_rollback(kind):
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_uow_cross_repository_atomic_commit(kind):
     db = await database_for(kind)
+    adapter = db.adapter("primary")
+    transaction_calls: list[None] = []
+    original_factory = adapter.transaction_factory
+
+    def transaction_factory():
+        transaction_calls.append(None)
+        return original_factory()
+
+    adapter.transaction_factory = transaction_factory
     try:
         async with db.unit_of_work() as uow:
             users = uow.repository(User)
@@ -2207,6 +2226,7 @@ async def test_uow_cross_repository_atomic_commit(kind):
             )
             await uow.commit()
 
+        assert transaction_calls == [None]
         assert await db.repository(User).count() == 1
         assert await db.repository(Post).count() == 2
         assert await db.repository(User).exists(User.username == "alice") is True
@@ -2309,6 +2329,15 @@ async def test_committed_row_visibility(kind):
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_uow_rollback_and_transaction_commit(kind):
     db = await database_for(kind)
+    adapter = db.adapter("primary")
+    transaction_calls: list[None] = []
+    original_factory = adapter.transaction_factory
+
+    def transaction_factory():
+        transaction_calls.append(None)
+        return original_factory()
+
+    adapter.transaction_factory = transaction_factory
     try:
         async with db.unit_of_work() as uow:
             await uow.repository(User).create(
@@ -2320,6 +2349,7 @@ async def test_uow_rollback_and_transaction_commit(kind):
                     profile=Profile(city="Mashhad", street="six"),
                 )
             )
+        assert transaction_calls == [None]
         assert await db.repository(User).count() == 0
 
         async with db.transaction():
@@ -2333,6 +2363,7 @@ async def test_uow_rollback_and_transaction_commit(kind):
                 )
             )
 
+        assert transaction_calls == [None, None]
         rows = (
             await db.repository(User)
             .query(User.username == "outer")
@@ -2488,16 +2519,28 @@ async def test_in_transaction_read(kind):
     db = await database_for(kind)
     try:
         adapter = db.adapter("primary")
+        transaction_calls: list[None] = []
+        original_factory = adapter.transaction_factory
+
+        def transaction_factory():
+            transaction_calls.append(None)
+            return original_factory()
+
+        adapter.transaction_factory = transaction_factory
         repo = db.repository(User)
         await repo.create(
             _u("persist", "persist", age=1, profile=Profile(city="Rasht", street="ten"))
         )
+        expected_calls_before_transaction = 0 if adapter.nested_documents else 1
+        assert transaction_calls == [None] * expected_calls_before_transaction
         async with db.transaction():
+            assert transaction_calls == [None] * (expected_calls_before_transaction + 1)
             u1 = await repo.query(User.profile.city == "Rasht").update({"name": "Ali"})
             u1 = await repo.query(User.profile.city == "Rasht").first()
             assert u1.name == "Ali"
 
         assert adapter._in_active_transaction() is False
+        assert transaction_calls == [None] * (expected_calls_before_transaction + 1)
     finally:
         await cleanup(db)
 
