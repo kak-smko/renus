@@ -6,10 +6,7 @@ from abc import ABC, abstractmethod
 from types import MappingProxyType
 from typing import Any
 
-try:
-    from bson import ObjectId
-except ImportError:
-    ObjectId = str
+from renus.db.models.id import ID
 
 PARAM_REGEX = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)(?::([^{}]+))?\}")
 
@@ -41,6 +38,19 @@ class PathConvertor(BaseConvertor):
         """Return the value unchanged."""
         return value
 
+class IDConvertor(BaseConvertor):
+    """Convert an ``id:<value>`` path parameter to a configured identity."""
+
+    prefix = "id:"
+    regex = rf"{prefix}[^/]+"
+
+    def convert(self, value: str) -> ID:
+        """Strip the ``id:`` marker and build an identity value."""
+        if not value.startswith(self.prefix):
+            raise ValueError("ID route parameter must start with 'id:'")
+        return ID(value[len(self.prefix):])
+
+
 class IntegerConvertor(BaseConvertor):
     """Convert a path parameter to an integer."""
 
@@ -59,14 +69,6 @@ class FloatConvertor(BaseConvertor):
         """Convert the value to ``float``."""
         return float(value)
 
-class OIdConvertor(BaseConvertor):
-    """Convert a path parameter to an ObjectId."""
-
-    regex = r"[a-f0-9]{24}"
-
-    def convert(self, value: str) -> ObjectId:
-        """Convert the value to ``ObjectId``."""
-        return ObjectId(value)
 
 class BoolConvertor(BaseConvertor):
     """Convert a path parameter to a boolean."""
@@ -90,9 +92,9 @@ CONVERTOR_TYPES: Mapping[str, BaseConvertor] = MappingProxyType(
     {
         "str": StringConvertor(),
         "int": IntegerConvertor(),
+        "id": IDConvertor(),
         "float": FloatConvertor(),
         "path": PathConvertor(),
-        "oid": OIdConvertor(),
         "bool": BoolConvertor(),
         "uuid": UuidConvertor(),
     }
@@ -136,8 +138,8 @@ __all__ = [
     "StringConvertor",
     "PathConvertor",
     "IntegerConvertor",
+    "IDConvertor",
     "FloatConvertor",
-    "OIdConvertor",
     "BoolConvertor",
     "UuidConvertor",
     "build_path",

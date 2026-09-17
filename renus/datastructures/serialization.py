@@ -9,8 +9,6 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
-from renus.db.models.id import ID
-
 try:
     import orjson as _orjson
 except ImportError:
@@ -25,6 +23,7 @@ _UUID_RE = re.compile(
     r"[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$"
 )
 _DECIMAL_RE = re.compile(r"^-?\d+\.\d+$")
+_ID_PREFIX = "id:"
 
 class jsonEncoder(json.JSONEncoder):
     """JSON encoder with renus-specific default value handling."""
@@ -44,6 +43,8 @@ def _encode_datetime(value: datetime.datetime) -> str:
     return base + "Z"
 
 def _encode_default_value(o: Any) -> Any:
+    from renus.db.models.id import ID
+
     if isinstance(o, datetime.datetime):
         return _encode_datetime(o)
     if isinstance(o, datetime.date):
@@ -51,7 +52,9 @@ def _encode_default_value(o: Any) -> Any:
     if isinstance(o, datetime.time):
         encoded = o.isoformat()
         return encoded[:8] if o.microsecond == 0 else encoded
-    if isinstance(o, (uuid.UUID, ID)):
+    if isinstance(o, ID):
+        return f"{_ID_PREFIX}{o}"
+    if isinstance(o, uuid.UUID):
         return str(o)
     if isinstance(o, decimal.Decimal):
         return str(o)
@@ -69,6 +72,10 @@ def json_decoder(value: Any) -> Any:
     """Decode serialized values back into renus-native objects."""
     if isinstance(value, dict):
         return {k: json_decoder(v) for k, v in value.items()}
+    if isinstance(value, str) and value.startswith(_ID_PREFIX):
+        from renus.db.models.id import ID
+
+        return ID(value[len(_ID_PREFIX):])
     if isinstance(value, list):
         return [json_decoder(item) for item in value]
     if isinstance(value, str) and value:

@@ -184,10 +184,10 @@ class Router:
         self._add(path, controller, f"{func_prefix}index", "GET", middlewares)
         self._add(path, controller, f"{func_prefix}store", "POST", middlewares)
         self._add(
-            path + "/{id:oid}", controller, f"{func_prefix}update", "PUT", middlewares
+            path + "/{id:id}", controller, f"{func_prefix}update", "PUT", middlewares
         )
         self._add(
-            path + "/{id:oid}",
+            path + "/{id:id}",
             controller,
             f"{func_prefix}delete",
             "DELETE",

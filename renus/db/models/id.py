@@ -82,20 +82,9 @@ class ID:
     def _coerce(self, value: Any) -> Any:
         """Coerce ``value`` into the configured identity type."""
         obj = self.obj
-        try:
-            if obj is int:
-                return int(value)
-            if obj is UUID:
-                return value if isinstance(value, UUID) else UUID(str(value))
-            if obj is str:
-                return str(value)
-            if obj is None:
-                return value
-            if isinstance(value, obj):
-                return value
-            return obj(value)
-        except (TypeError, ValueError, AttributeError):
+        if isinstance(value, obj):
             return value
+        return obj(value)
 
     def __str__(self) -> str:
         return str(self.value)

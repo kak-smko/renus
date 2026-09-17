@@ -1,13 +1,12 @@
 from unittest.mock import MagicMock, patch
 from uuid import UUID
+from types import SimpleNamespace
 
 import pytest
 
-try:
-    from bson.objectid import ObjectId
-except ImportError:
-    ObjectId = None
 
+from renus.config import Config
+from renus.db.models.id import ID
 from renus.router import (
     CONVERTOR_TYPES,
     Middleware,
@@ -190,6 +189,16 @@ class TestRouteParameters:
         assert match is not None
         assert params["name"].convert(match.group("name")) == "john"
 
+    def test_id_parameter(self):
+        Config._cache["database"] = SimpleNamespace(ID=int)
+        regex, params = build_path("/users/{id:id}")
+        match = regex.fullmatch("/users/id:42")
+        assert match is not None
+        converted = params["id"].convert(match.group("id"))
+        assert isinstance(converted, ID)
+        assert converted.value == 42
+        assert regex.fullmatch("/users/42") is None
+
     def test_integer_parameter(self):
         regex, params = build_path("/users/{id:int}")
         match = regex.fullmatch("/users/123")
@@ -210,19 +219,6 @@ class TestRouteParameters:
         assert match is not None
         assert params["value"].convert(match.group("value")) == 42.0
 
-    @pytest.mark.skipif(
-        ObjectId is None, reason="bson not installed; oid convertor unavailable"
-    )
-    def test_oid_parameter(self):
-        regex, params = build_path("/users/{id:oid}")
-        match = regex.fullmatch("/users/507f1f77bcf86cd799439011")
-        assert match is not None
-        assert params["id"].convert(match.group("id")) == ObjectId(
-            "507f1f77bcf86cd799439011"
-        )
-
-        match = regex.fullmatch("/users/invalid")
-        assert match is None
 
     def test_bool_parameter(self):
         regex, params = build_path("/active/{flag:bool}")
@@ -360,14 +356,14 @@ class TestRouter:
 
         assert "PUT" in registry.all["_"]
         put_routes = [
-            r for r in registry.all["_"]["PUT"] if r["path"] == "/users/{id:oid}"
+            r for r in registry.all["_"]["PUT"] if r["path"] == "/users/{id:id}"
         ]
         assert len(put_routes) == 1
         assert put_routes[0]["func"] == "update"
 
         assert "DELETE" in registry.all["_"]
         delete_routes = [
-            r for r in registry.all["_"]["DELETE"] if r["path"] == "/users/{id:oid}"
+            r for r in registry.all["_"]["DELETE"] if r["path"] == "/users/{id:id}"
         ]
         assert len(delete_routes) == 1
         assert delete_routes[0]["func"] == "delete"

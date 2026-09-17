@@ -2,9 +2,12 @@ import io
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
+from renus.config import Config
+from renus.db.models.id import ID
 from renus.datastructures import (
     MAX_UPLOAD_SIZE,
     JSONEncoder,
@@ -230,6 +233,12 @@ def test_json_encoder_uuid_decimal_set():
     assert jsonEncoder().encode(Decimal("1.5")) == '"1.5"'
     assert jsonEncoder().encode({3, 1, 2}) == '[1, 2, 3]'
 
+
+def test_json_encoder_id_uses_explicit_marker():
+    Config._cache["database"] = SimpleNamespace(ID=int)
+    encoded = jsonEncoder().encode(ID(42))
+    assert encoded == '"id:42"'
+
 def test_json_encoder_object():
     class Obj:
         def __init__(self):
@@ -254,6 +263,16 @@ def test_dumps_loads_roundtrip_uuid_decimal():
     back = loads(raw)
     assert back["id"] == u
     assert back["price"] == Decimal("19.99")
+
+
+def test_dumps_loads_roundtrip_id():
+    Config._cache["database"] = SimpleNamespace(ID=int)
+    original = ID(42)
+    raw = dumps({"id": original})
+    assert '"id:42"' in raw
+    restored = loads(raw)["id"]
+    assert isinstance(restored, ID)
+    assert restored.value == 42
 
 def test_json_decoder_passthrough_scalars():
     assert json_decoder(None) is None
