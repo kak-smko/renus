@@ -6,7 +6,6 @@ import pytest
 
 from renus.util import (
     DEFAULT_ALPHABET,
-    DEFAULT_SALT,
     CodecError,
     add_pad64,
     decode64,
@@ -19,16 +18,12 @@ from renus.util import (
 )
 
 class TestSecurity:
-    def test_default_salt_is_renus(self):
-        assert DEFAULT_SALT == "renus"
-
-    def test_hash_is_deterministic_hex(self):
-        first = hash_new_password("s3cret", "pepper")
-        second = hash_new_password("s3cret", "pepper")
-        assert isinstance(first, str)
-        assert len(first) == 128
-        assert all(c in string.hexdigits for c in first)
-        assert first == second
+    def test_hash_is_self_contained_and_randomized(self):
+        first = hash_new_password("s3cret")
+        second = hash_new_password("s3cret")
+        assert not first.startswith("pbkdf2_sha256$600000$")
+        assert len(first.split("$")) == 2
+        assert first != second
 
     def test_matches_correct_password(self):
         stored = hash_new_password("s3cret")
@@ -38,10 +33,6 @@ class TestSecurity:
         stored = hash_new_password("s3cret")
         assert is_correct_password(stored, "wrong") is False
 
-    def test_different_salts_produce_different_hashes(self):
-        a = hash_new_password("pw", "salt-a")
-        b = hash_new_password("pw", "salt-b")
-        assert a != b
 
     def test_unrelated_hash_does_not_match(self):
         other = hash_new_password("other-password")

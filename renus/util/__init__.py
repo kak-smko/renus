@@ -17,12 +17,11 @@ from renus.util.concurrency import (
 )
 from renus.util.naming import to_camel_case, to_plural, to_plural_lower
 from renus.util.random import DEFAULT_ALPHABET, get_random_string, get_random_token
-from renus.util.security import DEFAULT_SALT, hash_new_password, is_correct_password
+from renus.util.security import hash_new_password, is_correct_password
 from renus.util.version import get_version
 
 __all__ = [
     "DEFAULT_ALPHABET",
-    "DEFAULT_SALT",
     "CodecError",
     "add_pad64",
     "decode64",
