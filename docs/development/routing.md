@@ -33,8 +33,8 @@ from renus.router import Router
 r = Router()
 r.get('/items', ItemController, 'index')
 r.post('/items', ItemController, 'store')
-r.put('/items/{id:oid}', ItemController, 'update')
-r.delete('/items/{id:oid}', ItemController, 'delete')
+r.put('/items/{id:id}', ItemController, 'update')
+r.delete('/items/{id:id}', ItemController, 'delete')
 ```
 
 Each method takes the path, an optional controller, a handler name or callable, and optional `middlewares` and `cache`:
@@ -56,7 +56,7 @@ Any route registered on a `Router` is stored in the shared singleton registry th
 Use `{name}` in a path to capture a segment, optionally typed with a colon:
 
 ```python
-@app.get('/user/{id:oid}')
+@app.get('/user/{id:id}')
 async def show_user(id):
     return JsonResponse({'id': str(id)})
 ```
@@ -69,7 +69,7 @@ The available types and their regex are:
 | `int`    | `[0-9]+`                                                     | `int`          |
 | `float`  | digits with optional decimal fraction                        | `float`        |
 | `path`   | one or more `segment/…` segments (a full sub-path)           | `str`          |
-| `oid`    | a 24-hex-digit MongoDB ObjectId                              | `ObjectId`     |
+| `id`    | a Renus Id                              | `ID`     |
 | `bool`   | `true` or `false`                                            | `bool`         |
 | `uuid`   | a canonical UUID string                                      | `uuid.UUID`    |
 
@@ -96,7 +96,7 @@ Wire it up with the fluent API:
 ```python
 r = Router()
 r.get('/items', ItemController, 'index')
-r.get('/items/{id:oid}', ItemController, 'show')
+r.get('/items/{id:id}', ItemController, 'show')
 ```
 
 When a controller's `__init__` declares a `request` parameter, the current `Request` is passed to it; otherwise it is instantiated with no arguments. The named method is then looked up on the instance.
@@ -111,7 +111,7 @@ from renus.router import Router
 v1 = Router(prefix='/api/v1', middlewares=[AuthMiddleware])
 
 with v1.group('/items') as items:
-    items.get('/{id:oid}', ItemController, 'show')
+    items.get('/{id:id}', ItemController, 'show')
     items.post('', ItemController, 'store')
 ```
 
@@ -137,8 +137,8 @@ This registers:
 | ------ | ---------------- | ------------- |
 | `GET`    | `/items`         | `index`       |
 | `POST`   | `/items`         | `store`       |
-| `PUT`    | `/items/{id:oid}`| `update`      |
-| `DELETE` | `/items/{id:oid}`| `delete`      |
+| `PUT`    | `/items/{id:id}`| `update`      |
+| `DELETE` | `/items/{id:id}`| `delete`      |
 
 Use the optional `func_prefix` to call methods with a prefix, and `mcud()` to register only store/update/delete (methods named `m_store`, `m_update`, `m_delete`).
 

@@ -43,7 +43,7 @@ The `App` exposes decorators that register a route when you decorate a handler:
 - `@app.get(path)` registers a `GET` route.
 - `@app.post(path)`, `@app.put(path)`, and `@app.delete(path)` register the matching methods.
 - `@app.route(path, method='...')` handles any method, including `WS` for WebSockets, `HEAD`, and `OPTIONS`.
-- Dynamic segments use `{name}` (optionally typed, e.g. `{id:oid}`).
+- Dynamic segments use `{name}` (optionally typed, e.g. `{id:id}`).
 
 The `App` also exposes `middlewares` and `cache` options on these decorators, and the `Router` class provides an equivalent fluent API if you prefer it.
 

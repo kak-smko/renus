@@ -63,7 +63,7 @@ async def websocket(ws):
     await ws.close()
 ```
 
-Dynamic path segments use `{name}` (optionally typed, e.g. `{id:oid}`). Under the hood, `App` maps each method to the `Router`'s fluent API, so you can also compose routes directly on `app.router` if you prefer.
+Dynamic path segments use `{name}` (optionally typed, e.g. `{id:id}`). Under the hood, `App` maps each method to the `Router`'s fluent API, so you can also compose routes directly on `app.router` if you prefer.
 
 ## Request injection
 
