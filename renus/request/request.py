@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 import types
 import typing
-
 from urllib.parse import parse_qsl
 
 from renus.config import Config
@@ -20,8 +19,8 @@ _UNSET = types.SimpleNamespace()
 
 _IP_LITERAL_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){3}(?::[0-9]+)?$")
 
-class Request:
 
+class Request:
     """Represent an incoming HTTP request."""
 
     cryptor = None
@@ -40,7 +39,7 @@ class Request:
         """
         self._scope: dict = scope
         self._receive: typing.Callable = receive
-        self._headers: dict[str, str] = headers_parser(scope.get("headers", []))
+        self._headers: dict[str, str] | object = _UNSET
 
         self._stream_consumed: bool = False
         self._is_disconnected: bool = False
@@ -54,12 +53,12 @@ class Request:
         self._form: FormData | object = _UNSET
         self._form_safe: FormData | object = _UNSET
         self.route: dict = {}
-        self.state: dict = {'app': scope.get('app')}
+        self.state: dict = {"app": scope.get("app")}
 
     def __getattr__(self, name: str) -> typing.Any:
 
-        if self.state['app'] and name in self.state['app'].state:
-            return self.state['app'].state[name]
+        if self.state["app"] and name in self.state["app"].state:
+            return self.state["app"].state[name]
         if name in self.state:
             return self.state[name]
         raise AttributeError(
@@ -69,13 +68,15 @@ class Request:
     @property
     def headers(self) -> dict[str, str]:
         """Request headers as a lowercase name-to-value mapping."""
-        return self._headers
+        if self._headers is _UNSET:
+            self._headers = headers_parser(self._scope.get("headers", []))
+        return typing.cast(dict[str, str], self._headers)
 
     @property
     def cookies(self) -> dict[str, str]:
         """Parsed request cookies."""
         if self._cookies is _UNSET:
-            header = self._headers.get("cookie")
+            header = self.headers.get("cookie")
             self._cookies = cookie_parser(header) if header else {}
         return typing.cast(dict[str, str], self._cookies)
 
@@ -90,14 +91,14 @@ class Request:
         header = Config("app").get("ipHeader", False)
         header = Config("app").get("ipHeader", False)
         if header:
-            return self._headers.get(header)
+            return self.headers.get(header)
         return self.client[0] if self.client else None
 
     @property
     def subdomain(self) -> typing.Optional[str]:
         """First label of the host header, or ``None`` for bare hosts."""
         if self._subdomain is _UNSET:
-            host = self._headers.get("host")
+            host = self.headers.get("host")
             if host is None or _IP_LITERAL_RE.match(host) or host.count(".") == 0:
                 self._subdomain = None
             else:
@@ -107,7 +108,7 @@ class Request:
     @property
     def user_agent(self) -> typing.Optional[str]:
         """Value of the ``user-agent`` header."""
-        return self._headers.get("user-agent")
+        return self.headers.get("user-agent")
 
     @property
     def url(self) -> str:
@@ -120,7 +121,7 @@ class Request:
         if self._base_path is _UNSET:
             scheme = self._scope.get("scheme", "http")
             server = self._scope.get("server")
-            host_header = self._headers.get("host")
+            host_header = self.headers.get("host")
 
             if host_header is not None:
                 url = f"{scheme}://{host_header}"
@@ -129,7 +130,11 @@ class Request:
             else:
                 host, port = server
                 default_port = {"http": 80, "https": 443, "ws": 80, "wss": 443}[scheme]
-                url = f"{scheme}://{host}" if port == default_port else f"{scheme}://{host}:{port}"
+                url = (
+                    f"{scheme}://{host}"
+                    if port == default_port
+                    else f"{scheme}://{host}:{port}"
+                )
 
             self._base_path = url
 
@@ -203,17 +208,20 @@ class Request:
     async def form_unsafe(self) -> FormData:
         """Parse and return the request body as form data."""
         if self._form is _UNSET:
-            content_type_value = self._headers.get("content-type", "")
+            content_type_value = self.headers.get("content-type", "")
             content_type, _ = parse_options_header(content_type_value)
 
             if self._is_encrypted():
                 raw_body = await self.body()
                 self._form = self._to_form_data(self._decrypt_body(raw_body))
             elif content_type == "multipart/form-data":
-                parser = MultiPartParser(self._headers, self.stream())
+                parser = MultiPartParser(self.headers, self.stream())
                 self._form = await parser.parse()
-            elif content_type in ("app/x-www-form-urlencoded", "application/x-www-form-urlencoded"):
-                parser = FormParser(self._headers, self.stream())
+            elif content_type in (
+                "app/x-www-form-urlencoded",
+                "application/x-www-form-urlencoded",
+            ):
+                parser = FormParser(self.headers, self.stream())
                 self._form = await parser.parse()
             else:
                 body = await self.body()
@@ -247,17 +255,21 @@ class Request:
         return FormData([])
 
     def _is_encrypted(self) -> bool:
-        return self._headers.get("encrypted", "") == "1"
+        return self.headers.get("encrypted", "") == "1"
 
     def _get_real_content_type(self) -> str:
-        return self._headers.get("real-type", "application/json")
+        return self.headers.get("real-type", "application/json")
 
     def _decrypt_body(self, body: bytes) -> typing.Any:
         if self.cryptor is None:
-            raise ValueError("Cannot decrypt encrypted request body: no cryptor configured")
+            raise ValueError(
+                "Cannot decrypt encrypted request body: no cryptor configured"
+            )
 
         try:
-            decrypted = self.cryptor(request=self).decrypt_text(body.decode("utf-8").strip())
+            decrypted = self.cryptor(request=self).decrypt_text(
+                body.decode("utf-8").strip()
+            )
         except Exception as exc:
             raise ValueError(f"Failed to decrypt request body: {exc}") from exc
 
@@ -267,5 +279,6 @@ class Request:
         if "application/x-www-form-urlencoded" in real_type:
             return dict(parse_qsl(decrypted, keep_blank_values=True))
         return decrypted
+
 
 __all__ = ["Request"]
