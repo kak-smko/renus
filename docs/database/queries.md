@@ -151,7 +151,7 @@ Use a field path directly for ascending order, or call `asc()` and `desc()` for 
 
 ```python
 rows = await users.query().order_by(
-    User.name.asc(nulls_last=True),
+    User.name.asc(),
     User.age.desc(),
 ).all()
 ```

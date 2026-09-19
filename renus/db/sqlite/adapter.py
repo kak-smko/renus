@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
 from collections.abc import AsyncIterator
 from datetime import date, datetime
@@ -142,6 +143,15 @@ class SQLiteAdapter(SQLAdapter):
                     timeout=timeout,
                 )
                 self._sqlite_db.row_factory = sqlite3.Row
+                await asyncio.to_thread(
+                    self._sqlite_db.create_function,
+                    "REGEXP",
+                    2,
+                    lambda pattern, value: (
+                        value is not None
+                        and re.search(str(pattern), str(value)) is not None
+                    ),
+                )
                 await asyncio.to_thread(
                     self._sqlite_db.execute, f"PRAGMA busy_timeout = {busy_timeout};"
                 )

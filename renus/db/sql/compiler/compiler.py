@@ -120,12 +120,7 @@ class SQLCompiler:
             for ord_spec in ast.ordering:
                 col = self._path(ord_spec.path)
                 direction = " DESC" if ord_spec.descending else " ASC"
-                nulls = ""
-                if ord_spec.nulls_first:
-                    nulls = " NULLS FIRST"
-                elif ord_spec.nulls_last:
-                    nulls = " NULLS LAST"
-                order_items.append(f"{col}{direction}{nulls}")
+                order_items.append(f"{col}{direction}")
             sql += f" ORDER BY {', '.join(order_items)}"
 
         sql = self.dialect.limit_offset(sql, ast.limit, ast.offset)

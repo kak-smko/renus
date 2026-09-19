@@ -186,9 +186,6 @@ def test_query_ordering():
     assert ord_desc.descending
     assert ord_desc.path == User.age
 
-    ord_nulls = User.score.asc(nulls_first=True)
-    assert ord_nulls.nulls_first is True
-    assert not ord_nulls.nulls_last
 
     q = Query(User).order_by(User.name.asc(), User.age.desc())
     assert len(q.ast.ordering) == 2

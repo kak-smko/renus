@@ -113,7 +113,8 @@ class Insert(MutationAST):
                         if fmeta.sensitive
                         else instance.get_sensitive(fname)
                     )
-                    if val is not None:
+
+                    if val is not None or fmeta.nullable:
                         values[fname] = val
         else:
             values = {

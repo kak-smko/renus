@@ -122,33 +122,13 @@ class Path:
         """Return a condition matching any related record for this field."""
         return RelationAny(self, condition)
 
-    def asc(
-        self,
-        *,
-        nulls_first: bool = False,
-        nulls_last: bool = False,
-    ) -> Ordering:
+    def asc(self) -> Ordering:
         """Return an ascending ordering for this field."""
-        return Ordering(
-            self,
-            descending=False,
-            nulls_first=nulls_first,
-            nulls_last=nulls_last,
-        )
+        return Ordering(self, descending=False)
 
-    def desc(
-        self,
-        *,
-        nulls_first: bool = False,
-        nulls_last: bool = False,
-    ) -> Ordering:
+    def desc(self) -> Ordering:
         """Return a descending ordering for this field."""
-        return Ordering(
-            self,
-            descending=True,
-            nulls_first=nulls_first,
-            nulls_last=nulls_last,
-        )
+        return Ordering(self, descending=True)
 
 @dataclass(frozen=True, slots=True)
 class Condition:
@@ -223,12 +203,10 @@ class RelationAny(Condition):
 
 @dataclass(frozen=True, slots=True)
 class Ordering:
-    """Sort direction and null policy for a field."""
+    """Sort direction for a field."""
 
     path: Path
     descending: bool = False
-    nulls_first: bool = False
-    nulls_last: bool = False
 
 @dataclass(frozen=True, slots=True)
 class Projection:

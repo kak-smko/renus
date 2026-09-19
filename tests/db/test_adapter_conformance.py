@@ -42,6 +42,7 @@ from renus.db import (
     MigrationManager,
     Min,
     OneToMany,
+    Q,
     OneToOne,
     ReferentialAction,
     RelationshipKind,
@@ -654,6 +655,118 @@ async def test_query_filters_and_ordering(kind):
         assert [u.username for u in like] == ["ann"]
         assert await repo.query(User.name.is_null()).count() == 0
         assert await repo.query(User.name.is_not_null()).count() == 3
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_query_conditions_and_builder_aliases(kind):
+    """Exercise the remaining condition and builder features across adapters."""
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        await repo.create_many(
+            [
+                _u(
+                    f"cf-{i:03d}",
+                    f"cf-{i:03d}",
+                    name=None if i % 10 == 0 else f"team-{i % 4}",
+                    age=i,
+                    active=i % 2 == 0,
+                )
+                for i in range(120)
+            ]
+        )
+        assert await repo.count() == 120
+        assert await repo.query(User.name.is_null()).count() == 12
+        assert await repo.query(User.name.is_not_null()).count() == 108
+
+        # ``filter`` is an alias for ``where`` and Query.__call__ adds filters.
+        assert await repo.query().filter(User.age >= 110).count() == 10
+        first_three = await repo.query()(User.age < 3).order_by(User.age).all()
+        assert [user.age for user in first_three] == [0, 1, 2]
+
+        # Q(), &, |, and ~ must preserve logical grouping when compiled.
+        active_adults = await repo.query(
+            Q(User.active == True, User.age >= 100)
+        ).all()
+        assert [user.age for user in active_adults] == list(range(100, 120, 2))
+
+        edge_rows = await repo.query(
+            (User.age < 3) | (User.age >= 118)
+        ).order_by(User.age).all()
+        assert [user.age for user in edge_rows] == [0, 1, 2, 118, 119]
+
+        not_young = await repo.query(~(User.age < 118)).order_by(User.age).all()
+        assert [user.age for user in not_young] == [118, 119]
+
+        # Exercise every scalar comparison and explicit collection/pattern
+        # operator against known boundary values.
+        assert await repo.query(User.age != 0).count() == 119
+        assert await repo.query(User.age > 110).count() == 9
+        assert await repo.query(User.age >= 110).count() == 10
+        assert await repo.query(User.age < 10).count() == 10
+        assert await repo.query(User.age <= 10).count() == 11
+        assert await repo.query(User.age.not_in([0, 1, 2])).count() == 117
+        assert await repo.query(User.username.regex(r"^cf-00[1-3]$")).count() == 3
+        assert await repo.query(User.name.is_null()).count() == 12
+        assert await repo.query(User.name.is_not_null()).count() == 108
+
+
+        # Grouping by more than one field must retain both group keys. HAVING
+        # then removes the null group while retaining the larger non-null
+        # groups.
+        grouped = await (
+            repo.query()
+            .group_by(User.active, User.name)
+            .aggregate(rows=Count(User.id))
+            .all()
+        )
+        grouped_counts = {
+            (row["active"], row["name"]): row["rows"] for row in grouped
+        }
+        assert grouped_counts == {
+            (True, None): 12,
+            (True, "team-0"): 24,
+            (True, "team-2"): 24,
+            (False, "team-1"): 30,
+            (False, "team-3"): 30,
+        }
+
+        filtered_groups = await (
+            repo.query()
+            .group_by(User.active, User.name)
+            .aggregate(rows=Count(User.id), average_age=Avg(User.age))
+            .having(Count(User.id) >= 24)
+            .all()
+        )
+        filtered_counts = {
+            (row["active"], row["name"]): row["rows"]
+            for row in filtered_groups
+        }
+        assert filtered_counts == {
+            (True, "team-0"): 24,
+            (True, "team-2"): 24,
+            (False, "team-1"): 30,
+            (False, "team-3"): 30,
+        }
+        assert all(isinstance(row["average_age"], (int, float)) for row in filtered_groups)
+        
+        ascing = await (
+            repo.query()
+            .order_by(User.name.asc(), User.age.asc())
+            .all()
+        )
+        assert [user.age for user in ascing] == [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 4, 8, 12, 16, 24, 28, 32, 36, 44, 48, 52, 56, 64, 68, 72, 76, 84, 88, 92, 96, 104, 108, 112, 116, 1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49, 53, 57, 61, 65, 69, 73, 77, 81, 85, 89, 93, 97, 101, 105, 109, 113, 117, 2, 6, 14, 18, 22, 26, 34, 38, 42, 46, 54, 58, 62, 66, 74, 78, 82, 86, 94, 98, 102, 106, 114, 118, 3, 7, 11, 15, 19, 23, 27, 31, 35, 39, 43, 47, 51, 55, 59, 63, 67, 71, 75, 79, 83, 87, 91, 95, 99, 103, 107, 111, 115, 119]
+
+        descing = await (
+            repo.query()
+            .order_by(User.name.desc(), User.age.asc())
+            .all()
+        )
+        assert [user.age for user in descing] == [3, 7, 11, 15, 19, 23, 27, 31, 35, 39, 43, 47, 51, 55, 59, 63, 67, 71, 75, 79, 83, 87, 91, 95, 99, 103, 107, 111, 115, 119, 2, 6, 14, 18, 22, 26, 34, 38, 42, 46, 54, 58, 62, 66, 74, 78, 82, 86, 94, 98, 102, 106, 114, 118, 1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49, 53, 57, 61, 65, 69, 73, 77, 81, 85, 89, 93, 97, 101, 105, 109, 113, 117, 4, 8, 12, 16, 24, 28, 32, 36, 44, 48, 52, 56, 64, 68, 72, 76, 84, 88, 92, 96, 104, 108, 112, 116, 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110]
+
     finally:
         await cleanup(db)
 
