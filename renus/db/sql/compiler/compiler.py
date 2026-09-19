@@ -72,7 +72,10 @@ class SQLCompiler:
                 select_items.append(f"{fn_name}({distinct_agg}{target}) AS {alias}")
             select_clause = ", ".join(select_items)
         elif ast.projection:
-            select_clause = ", ".join(self._path(p) for p in ast.projection.paths)
+            select_clause = ", ".join(
+                f"{self._path(p)} AS {self.dialect.quote(p.parts[-1])}"
+                for p in ast.projection.paths
+            )
         else:
             select_clause = "*"
 
@@ -335,6 +338,28 @@ class SQLCompiler:
         return f"EXISTS (SELECT 1 FROM {e_table} e WHERE {inner} AND {expr})", params
 
     def _having_condition(self, h: Any) -> tuple[str, list[Any]]:
+        if isinstance(h, HavingCondition) and h.operator in (Operator.AND, Operator.OR):
+            children = h.aggregate if isinstance(h.aggregate, tuple) else ()
+            parts = [self._having_condition(child) for child in children]
+            joiner = " AND " if h.operator == Operator.AND else " OR "
+            sql = f"({joiner.join(part[0] for part in parts)})"
+            params: list[Any] = []
+            for _, child_params in parts:
+                params.extend(child_params)
+            return sql, params
+
+        if isinstance(h, Logical):
+            parts = [self._having_condition(child) for child in h.children]
+            joiner = " AND " if h.operator == Operator.AND else " OR "
+            sql = f"({joiner.join(part[0] for part in parts)})"
+            params: list[Any] = []
+            for _, child_params in parts:
+                params.extend(child_params)
+            if h.operator == Operator.NOT:
+                child_sql, child_params = parts[0]
+                return f"NOT ({child_sql})", child_params
+            return sql, params
+
         if isinstance(h, HavingCondition):
             agg = h.aggregate
             fn_name = agg.function.upper()

@@ -253,8 +253,10 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
             results: list[dict[str, Any]] = []
             for d in docs:
                 doc = dict(d)
-                if "_id" in doc and "id" not in doc:
-                    doc["id"] = doc["_id"]
+                if "_id" in doc:
+                    if "id" not in doc:
+                        doc["id"] = doc["_id"]
+                    doc.pop("_id", None)
                 results.append(doc)
 
             return results

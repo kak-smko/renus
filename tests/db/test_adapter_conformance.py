@@ -752,7 +752,55 @@ async def test_query_conditions_and_builder_aliases(kind):
             (False, "team-3"): 30,
         }
         assert all(isinstance(row["average_age"], (int, float)) for row in filtered_groups)
-        
+
+
+        # Distinct aggregate forms must be computed, not merely accepted by
+        # the AST. All ages are unique, while each name has four values.
+        distinct_summary = await (
+            repo.query()
+            .aggregate(
+                distinct_total=Sum(User.age, distinct=True),
+                distinct_average=Avg(User.age, distinct=True),
+            )
+            .all()
+        )
+        assert distinct_summary == [{
+            "distinct_total": sum(range(120)),
+            "distinct_average": sum(range(120)) / 120,
+        }]
+
+        # Multiple HAVING predicates and logical HAVING composition are both
+        # evaluated after grouping.
+        compound_having = await (
+            repo.query()
+            .group_by(User.active, User.name)
+            .aggregate(rows=Count(User.id), total=Sum(User.age))
+            .having((Count(User.id) >= 24) & (Sum(User.age) > 1000))
+            .all()
+        )
+        assert {
+            (row["active"], row["name"]): row["rows"]
+            for row in compound_having
+        } == {
+            (True, "team-0"): 24,
+            (True, "team-2"): 24,
+            (False, "team-1"): 30,
+            (False, "team-3"): 30,
+        }
+
+        separate_having = await (
+            repo.query()
+            .group_by(User.active, User.name)
+            .aggregate(rows=Count(User.id), total=Sum(User.age))
+            .having(Count(User.id) >= 24, Sum(User.age) > 1000)
+            .order_by(User.active.asc())
+            .offset(1)
+            .limit(2)
+            .all()
+        )
+        assert len(separate_having) == 2
+        assert [row["rows"] for row in separate_having] == [30, 24]
+
         ascing = await (
             repo.query()
             .order_by(User.name.asc(), User.age.asc())
@@ -766,6 +814,21 @@ async def test_query_conditions_and_builder_aliases(kind):
             .all()
         )
         assert [user.age for user in descing] == [3, 7, 11, 15, 19, 23, 27, 31, 35, 39, 43, 47, 51, 55, 59, 63, 67, 71, 75, 79, 83, 87, 91, 95, 99, 103, 107, 111, 115, 119, 2, 6, 14, 18, 22, 26, 34, 38, 42, 46, 54, 58, 62, 66, 74, 78, 82, 86, 94, 98, 102, 106, 114, 118, 1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49, 53, 57, 61, 65, 69, 73, 77, 81, 85, 89, 93, 97, 101, 105, 109, 113, 117, 4, 8, 12, 16, 24, 28, 32, 36, 44, 48, 52, 56, 64, 68, 72, 76, 84, 88, 92, 96, 104, 108, 112, 116, 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110]
+
+        await repo.create(
+            _u(
+                "cf-nested",
+                "cf-nested",
+                age=120,
+                profile=Profile(city="Nested", street="projection"),
+            )
+        )
+        embedded_projection = await (
+            repo.query(User.username == "cf-nested")
+            .select(User.profile.city)
+            .all()
+        )
+        assert embedded_projection == [{"city": "Nested"}]
 
     finally:
         await cleanup(db)
@@ -1236,6 +1299,143 @@ async def test_embedded_relationship(kind):
         after = await _row_counts(db, *tables)
         assert after == {t: 0 for t in tables}, after
         assert await repo.count() == 0
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_relationship_target_projections(kind):
+    """Project scalar fields from every supported relationship target type."""
+    db = await database_for(
+        kind,
+        [User, Post, Citizen, Passport, Dept, Employee, Role],
+    )
+    try:
+        user_repo = db.repository(User)
+        post_repo = db.repository(Post)
+        citizen_repo = db.repository(Citizen)
+        passport_repo = db.repository(Passport)
+        dept_repo = db.repository(Dept)
+        employee_repo = db.repository(Employee)
+        role_repo = db.repository(Role)
+
+        # OneToMany: 100 posts reference 100 users; project the child endpoint.
+        await user_repo.create_many(
+            [_u(f"rp-u{i:03d}", f"rp-u{i:03d}", age=i) for i in range(100)]
+        )
+        await post_repo.create_many(
+            [_p(f"rp-p{i:03d}", f"post-{i:03d}", f"rp-u{i:03d}") for i in range(100)]
+        )
+        post_projection = await (
+            post_repo.query()
+            .select(Post.user_id, Post.title)
+            .order_by(Post.title.asc())
+            .all()
+        )
+        assert len(post_projection) == 100
+        assert post_projection[0] == {"user_id": "rp-u000", "title": "post-000"}
+        loaded_user = await (
+            user_repo.query(User.id == "rp-u000").include(User.posts).first()
+        )
+        assert loaded_user is not None
+        assert [post.title for post in loaded_user.posts] == ["post-000"]
+
+        # OneToOne: 100 passports reference 100 citizens; project the target.
+        await citizen_repo.create_many(
+            [Citizen(id=f"rp-c{i:03d}", name=f"citizen-{i:03d}") for i in range(100)]
+        )
+        await passport_repo.create_many(
+            [
+                Passport(
+                    id=f"rp-pass{i:03d}",
+                    citizen_id=f"rp-c{i:03d}",
+                    number=f"passport-{i:03d}",
+                )
+                for i in range(100)
+            ]
+        )
+        passport_projection = await (
+            passport_repo.query()
+            .select(Passport.citizen_id, Passport.number)
+            .order_by(Passport.number.asc())
+            .all()
+        )
+        assert len(passport_projection) == 100
+        assert passport_projection[0] == {
+            "citizen_id": "rp-c000",
+            "number": "passport-000",
+        }
+        loaded_citizen = await (
+            citizen_repo.query(Citizen.id == "rp-c000")
+            .include(Citizen.passport)
+            .first()
+        )
+        assert loaded_citizen is not None
+        assert loaded_citizen.passport.number == "passport-000"
+
+        # ManyToOne: 100 employees point to 100 departments; project the holder.
+        await dept_repo.create_many(
+            [Dept(id=f"rp-d{i:03d}", name=f"dept-{i:03d}") for i in range(100)]
+        )
+        await employee_repo.create_many(
+            [
+                Employee(
+                    id=f"rp-e{i:03d}",
+                    name=f"employee-{i:03d}",
+                    dept_id=f"rp-d{i:03d}",
+                )
+                for i in range(100)
+            ]
+        )
+        employee_projection = await (
+            employee_repo.query()
+            .select(Employee.dept_id, Employee.name)
+            .order_by(Employee.name.asc())
+            .all()
+        )
+        assert len(employee_projection) == 100
+        assert employee_projection[0] == {
+            "dept_id": "rp-d000",
+            "name": "employee-000",
+        }
+        loaded_employee = await (
+            employee_repo.query(Employee.id == "rp-e000")
+            .include(Employee.dept)
+            .first()
+        )
+        assert loaded_employee is not None
+        assert loaded_employee.dept.name == "dept-000"
+
+        # ManyToMany: 100 employees each link to one role; project the target
+        # endpoint and verify the link is still populated through include().
+        roles = [Role(id=f"rp-r{i:03d}", name=f"role-{i:03d}") for i in range(100)]
+        await role_repo.create_many(roles)
+        await employee_repo.create_many(
+            [
+                Employee(
+                    id=f"rp-m{i:03d}",
+                    name=f"member-{i:03d}",
+                    roles=[roles[i]],
+                )
+                for i in range(100)
+            ]
+        )
+        role_projection = await (
+            role_repo.query()
+            .select(Role.id, Role.name)
+            .order_by(Role.name.asc())
+            .all()
+        )
+        assert len(role_projection) == 100
+        assert role_projection[0] == {"id": "rp-r000", "name": "role-000"}
+        loaded_member = await (
+            employee_repo.query(Employee.id == "rp-m000")
+            .include(Employee.roles)
+            .first()
+        )
+        assert loaded_member is not None
+        assert [role.name for role in loaded_member.roles] == ["role-000"]
     finally:
         await cleanup(db)
 

@@ -142,12 +142,12 @@ class MongoCompiler:
                 group_id = None
 
             group_stage: dict[str, Any] = {"_id": group_id}
-            distinct_aliases: dict[str, str] = {}
+            distinct_aliases: dict[str, tuple[str, str]] = {}
             for agg in ast.aggregates:
                 field_target = f"${self._path_str(agg.path)}" if agg.path else 1
-                if agg.function == "count" and agg.distinct and agg.path:
+                if agg.distinct and agg.path:
                     temp = f"__renus_distinct_{agg.alias}"
-                    distinct_aliases[agg.alias] = temp
+                    distinct_aliases[agg.alias] = (temp, agg.function)
                     group_stage[temp] = {"$addToSet": field_target}
                 elif agg.function == "count":
                     group_stage[agg.alias] = {"$sum": 1}
@@ -171,7 +171,15 @@ class MongoCompiler:
                     project[gp] = "$_id" if len(group_paths) == 1 else f"$_id.{gp}"
             for agg in ast.aggregates:
                 if agg.alias in distinct_aliases:
-                    project[agg.alias] = {"$size": f"${distinct_aliases[agg.alias]}"}
+                    temp, function = distinct_aliases[agg.alias]
+                    if function == "count":
+                        project[agg.alias] = {"$size": f"${temp}"}
+                    elif function == "sum":
+                        project[agg.alias] = {"$sum": f"${temp}"}
+                    elif function == "avg":
+                        project[agg.alias] = {"$avg": f"${temp}"}
+                    else:
+                        project[agg.alias] = 1
                 else:
                     project[agg.alias] = 1
             pipeline.append({"$project": project})
@@ -206,6 +214,29 @@ class MongoCompiler:
         for o in ast.ordering:
             direction = -1 if o.descending else 1
             sort_spec.append((self._path_str(o.path), direction))
+
+        if ast.projection and any(len(path.parts) > 1 for path in ast.projection.paths):
+            pipeline: list[dict[str, Any]] = []
+            if filter_doc:
+                pipeline.append({"$match": filter_doc})
+            if sort_spec:
+                pipeline.append({"$sort": dict(sort_spec)})
+            if ast.offset is not None:
+                pipeline.append({"$skip": ast.offset})
+            if ast.limit is not None:
+                pipeline.append({"$limit": ast.limit})
+            pipeline.append({"$project": {
+                "_id": 0,
+                **{
+                    path.parts[-1]: f"${self._path_str(path)}"
+                    for path in ast.projection.paths
+                },
+            }})
+            return MongoCompiledQuery(
+                collection=collection_name,
+                filter_doc={},
+                pipeline=pipeline,
+            )
 
         if ast.distinct and ast.projection:
             group_id = {
@@ -256,36 +287,49 @@ class MongoCompiler:
         return ".".join(parts)
 
     def _compile_having(self, conditions: tuple[Any, ...], aggregates: tuple[Any, ...]) -> dict[str, Any]:
-        clauses: list[dict[str, Any]] = []
-        for condition in conditions:
-            if not isinstance(condition, HavingCondition):
-                continue
-            aggregate = condition.aggregate
-            alias = next(
-                (
-                    item.alias
-                    for item in aggregates
-                    if item.function == aggregate.function
-                    and item.path == aggregate.path
-                    and item.distinct == aggregate.distinct
-                ),
-                None,
-            )
-            if alias is None:
-                continue
-            operator = {
-                Operator.EQ: "$eq",
-                Operator.NE: "$ne",
-                Operator.GT: "$gt",
-                Operator.GE: "$gte",
-                Operator.LT: "$lt",
-                Operator.LE: "$lte",
-            }.get(condition.operator)
-            if operator:
-                clauses.append({alias: {operator: condition.value}})
+        clauses = [self._compile_having_condition(condition, aggregates) for condition in conditions]
+        clauses = [clause for clause in clauses if clause]
         if not clauses:
             return {}
         return clauses[0] if len(clauses) == 1 else {"$and": clauses}
+
+    def _compile_having_condition(self, condition: Any, aggregates: tuple[Any, ...]) -> dict[str, Any]:
+        if not isinstance(condition, HavingCondition):
+            return {}
+        if condition.operator in (Operator.AND, Operator.OR):
+            children = condition.aggregate
+            if not isinstance(children, tuple):
+                return {}
+            clauses = [self._compile_having_condition(child, aggregates) for child in children]
+            clauses = [clause for clause in clauses if clause]
+            if not clauses:
+                return {}
+            if condition.operator == Operator.OR:
+                return {"$or": clauses}
+            return {"$and": clauses}
+
+        aggregate = condition.aggregate
+        alias = next(
+            (
+                item.alias
+                for item in aggregates
+                if item.function == aggregate.function
+                and item.path == aggregate.path
+                and item.distinct == aggregate.distinct
+            ),
+            None,
+        )
+        operator = {
+            Operator.EQ: "$eq",
+            Operator.NE: "$ne",
+            Operator.GT: "$gt",
+            Operator.GE: "$gte",
+            Operator.LT: "$lt",
+            Operator.LE: "$lte",
+        }.get(condition.operator)
+        if alias is None or operator is None:
+            return {}
+        return {alias: {operator: condition.value}}
 
     def _is_raw_list_path(self, c: Condition) -> bool:
         p = c.path
