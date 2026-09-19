@@ -22,6 +22,19 @@ class BaseCache(ABC):
     def _id(self, key) -> str:
         return f"{self._prefix}{hash_key(key)}"
 
+    async def connect(self):
+        """Open or validate the backend connection.
+
+        Backends may remain lazy when used without an application lifespan;
+        applications can call this method during startup to make connection
+        failures visible before serving requests.
+        """
+        return self
+
+    async def disconnect(self):
+        """Release backend resources held by this cache instance."""
+        return None
+
     @abstractmethod
     def put(self, key, value, expire: int = 60):
         """Store a value under ``key`` for ``expire`` seconds.

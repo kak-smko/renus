@@ -10,9 +10,17 @@ def build_default_lifespan(app):
         The application instance.
     """
     async def default_lifespan(_app):
-        await run_startup(app)
-        yield
-        await run_shutdown(app)
+        from renus.cache import Cache
+
+        await Cache.connect_all()
+        try:
+            await run_startup(app)
+            yield
+        finally:
+            try:
+                await run_shutdown(app)
+            finally:
+                await Cache.disconnect_all()
 
     return default_lifespan
 

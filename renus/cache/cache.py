@@ -65,6 +65,33 @@ class Cache:
                 cls._instances[key] = backend
             return backend
 
+    async def connect(self):
+        """Connect this cache backend for application startup."""
+        await self._backend.connect()
+        return self
+
+    async def disconnect(self):
+        """Disconnect this cache backend during application shutdown."""
+        await self._backend.disconnect()
+
+    @classmethod
+    async def connect_all(cls) -> None:
+        """Connect the configured default backend and all cached backends."""
+        default = cls()
+        await default.connect()
+        with cls._instance_lock:
+            backends = list(dict.fromkeys(cls._instances.values()))
+        for backend in backends:
+            await backend.connect()
+
+    @classmethod
+    async def disconnect_all(cls) -> None:
+        """Disconnect every backend currently held by the cache registry."""
+        with cls._instance_lock:
+            backends = list(dict.fromkeys(cls._instances.values()))
+        for backend in reversed(backends):
+            await backend.disconnect()
+
     @classmethod
     def clear_instances(cls) -> None:
         with cls._instance_lock:

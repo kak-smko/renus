@@ -195,6 +195,27 @@ class TestLifespan:
         assert stopped == [1]
 
     @pytest.mark.asyncio
+    async def test_default_lifespan_connects_and_disconnects_cache(self):
+        from renus.cache import file as file_module
+
+        observed = []
+
+        def on_startup():
+            observed.append(file_module._conn is not None)
+
+        def on_shutdown():
+            observed.append(file_module._conn is not None)
+
+        app = App(on_startup=[on_startup], on_shutdown=[on_shutdown])
+        acc = _MessageAccumulator(
+            [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+        )
+        await app(lifespan_scope(), acc.receive, acc.send)
+
+        assert observed == [True, True]
+        assert file_module._conn is None
+
+    @pytest.mark.asyncio
     async def test_failing_lifespan_sends_failure(self):
         def bad_lifespan(app):
             raise RuntimeError("startup exploded")

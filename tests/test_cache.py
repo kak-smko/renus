@@ -12,6 +12,12 @@ class _FakeRedis:
     def __init__(self):
         self.data = {}
 
+    def ping(self):
+        return True
+
+    def close(self):
+        return None
+
     def set(self, key, value, ex=None, nx=False, px=None):
 
         if not nx:
@@ -168,6 +174,13 @@ class TestRedisCache:
     def test_delete_missing_returns_zero(self, redis_cache):
         assert redis_cache.delete("nope") == 0
 
+    @pytest.mark.asyncio
+    async def test_connect_and_disconnect(self, redis_cache):
+        await redis_cache.connect()
+        assert redis_cache._rd is not None
+        await redis_cache.disconnect()
+        assert redis_cache._rd is None
+
     def test_requires_redis_package(self):
         with patch("renus.cache.redis._redis_lib", None):
             with pytest.raises(RuntimeError):
@@ -200,6 +213,27 @@ class TestCacheFacade:
         c = Cache(prefix="q")
         assert a.backend is b.backend
         assert a.backend is not c.backend
+
+    @pytest.mark.asyncio
+    async def test_connect_and_disconnect(self, isolated_db):
+        cache = Cache()
+        await cache.connect()
+        from renus.cache import file as file_module
+
+        assert file_module._conn is not None
+        await cache.disconnect()
+        assert file_module._conn is None
+
+    @pytest.mark.asyncio
+    async def test_connect_all_and_disconnect_all(self, isolated_db):
+        cache = Cache(prefix="lifecycle")
+        await Cache.connect_all()
+        from renus.cache import file as file_module
+
+        assert file_module._conn is not None
+        await Cache.disconnect_all()
+        assert file_module._conn is None
+        assert cache.backend._conn is None
 
     @pytest.mark.asyncio
     async def test_async_put_get(self):
