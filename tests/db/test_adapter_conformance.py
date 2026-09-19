@@ -88,6 +88,7 @@ from tests.db._conformance import (
     cleanup,
     conformance_tests,
     database_for,
+    adapter_for,
 )
 
 ADAPTERS = conformance_tests()
@@ -101,6 +102,13 @@ def _u(uid: str, username: str, **kw):
 
 def _p(pid: str, title: str, user_id: str = ""):
     return Post(id=pid, title=title, user_id=user_id)
+
+
+class CompositeConflictRecord(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    left: str
+    right: str
+    value: int = 0
 
 
 _row_count_models: dict[str, type] = {}
@@ -1076,6 +1084,184 @@ async def test_large_query_ast_features(kind):
             {"active": False, "rows": 40, "unique_names": 4, "total_age": 2340},
             {"active": True,  "rows": 80, "unique_names": 4, "total_age": 4800},
         ]
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_model_lifecycle_and_clean_save(kind):
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        user = _u("state-1", "state-1", name="before", age=10)
+
+        assert user.is_new() is True
+        assert user.is_persisted() is False
+        assert user.is_dirty() is False
+        assert user.is_deleted() is False
+
+        await repo.create(user)
+        assert user.is_new() is False
+        assert user.is_persisted() is True
+        assert user.is_dirty() is False
+        assert user.dirty_fields() == set()
+        assert user.get_dirty_changes() == {}
+
+        mutation_calls = 0
+        execute_mutation = db.adapter("primary").execute_mutation
+
+        async def counted_mutation(compiled):
+            nonlocal mutation_calls
+            mutation_calls += 1
+            return await execute_mutation(compiled)
+
+        db.adapter("primary").execute_mutation = counted_mutation
+        clean_result = await repo.save(user)
+        assert clean_result is user
+        assert mutation_calls == 0
+
+        user.name = "after"
+        user.age = 11
+        assert user.is_dirty() is True
+        assert user.is_persisted() is False
+        assert user.dirty_fields() == {"name", "age"}
+        assert user.get_dirty_changes() == {
+            "name": ("before", "after"),
+            "age": (10, 11),
+        }
+
+        await repo.save(user)
+        assert mutation_calls == 1
+        assert user.is_persisted() is True
+        assert user.is_dirty() is False
+        assert user.dirty_fields() == set()
+        assert user.get_dirty_changes() == {}
+
+        await repo.delete(user)
+        assert user.is_deleted() is True
+        assert user.is_persisted() is False
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_upsert_model_target_and_primary_key_forms(kind):
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        await repo.create(_u("model-upsert-1", "model-upsert-1", name="before"))
+
+        target = _u("model-upsert-1", "model-upsert-1", name="target", age=42)
+        assert await repo.upsert(
+            target=target,
+            conflict_target=(User.id,),
+        ) in (0, 1, 2)
+        row = await repo.where(User.id == "model-upsert-1").first()
+        assert row is not None
+        assert (row.username, row.name, row.age) == (
+            "model-upsert-1",
+            "target",
+            42,
+        )
+
+        # Positional model form defaults to the model primary key.
+        positional = _u("model-upsert-2", "model-upsert-2", name="positional")
+        assert await repo.upsert(positional) in (0, 1, 2)
+        inserted = await repo.where(User.id == "model-upsert-2").first()
+        assert inserted is not None
+        assert inserted.name == "positional"
+
+        positional.name = "positional-updated"
+        assert await repo.upsert(positional) in (0, 1, 2)
+        updated = await repo.where(User.id == "model-upsert-2").first()
+        assert updated is not None
+        assert updated.name == "positional-updated"
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_upsert_composite_conflict_target(kind):
+    db = await database_for(kind, [CompositeConflictRecord])
+    try:
+        adapter = db.adapter("primary")
+        await adapter.create_index(
+            CompositeConflictRecord.metadata().table,
+            ["left", "right"],
+            unique=True,
+            name="uq_composite_conflict",
+        )
+        repo = db.repository(CompositeConflictRecord)
+        await repo.create(
+            CompositeConflictRecord(id="cc-1", left="a", right="b", value=1)
+        )
+
+        # The composite target updates the existing row, even though the id is
+        # different, and leaves the conflict columns unchanged.
+        assert await repo.upsert(
+            conflict_target=(CompositeConflictRecord.left, CompositeConflictRecord.right),
+            create_values={"id": "cc-existing", "left": "a", "right": "b"},
+            update_values={"value": 9},
+        ) in (0, 1, 2)
+        existing = await repo.where(
+            (CompositeConflictRecord.left == "a")
+            & (CompositeConflictRecord.right == "b")
+        ).first()
+        assert existing is not None
+        assert (existing.id, existing.value) == ("cc-1", 9)
+
+        # A new composite key takes the create branch.
+        assert await repo.upsert(
+            conflict_target=(CompositeConflictRecord.left, CompositeConflictRecord.right),
+            create_values={"id": "cc-2", "left": "a", "right": "c", "value": 3},
+            update_values={},
+        ) in (0, 1, 2)
+        created = await repo.where(CompositeConflictRecord.id == "cc-2").first()
+        assert created is not None
+        assert (created.left, created.right, created.value) == ("a", "c", 3)
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_generated_fields_on_create_and_create_many(kind):
+    Config._cache["database"] = SimpleNamespace(ID=int)
+
+    class GeneratedRecord(Model):
+        id: ID = Field(
+            database=DatabaseField(primary_key=True, generated=True, auto_inc=True)
+        )
+        name: str
+        token: UUID = Field(default_factory=uuid4, database=DatabaseField(generated=True))
+
+    db = Database(adapter_for(kind))
+    await db.connect()
+    await db.create_schema([GeneratedRecord])
+    try:
+        repo = db.repository(GeneratedRecord)
+        single = await repo.create(GeneratedRecord(name="single"))
+        many = await repo.create_many(
+            [GeneratedRecord(name=f"bulk-{i}") for i in range(3)]
+        )
+        rows = [single, *many]
+
+        assert all(row.is_persisted() for row in rows)
+        assert all(row.id is not None for row in rows)
+        assert all(isinstance(row.token, UUID) for row in rows)
+        id_values = {
+            row.id.value if isinstance(row.id, ID) else row.id for row in rows
+        }
+        assert len(id_values) == 4
+        assert len({row.token for row in rows}) == 4
+
+        fetched = await repo.query().order_by(GeneratedRecord.name.asc()).all()
+        assert len(fetched) == 4
+        assert all(row.id is not None for row in fetched)
+        assert all(isinstance(row.token, UUID) for row in fetched)
     finally:
         await cleanup(db)
 

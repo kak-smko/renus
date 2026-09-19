@@ -473,7 +473,10 @@ class MongoCompiler:
 
         if isinstance(m, Upsert):
             conflict_keys = list(m.conflict_target)
-            filt = {k: m.create_values.get(k) for k in conflict_keys}
+            filt = self._map_doc_for_mongo(
+                {k: m.create_values.get(k) for k in conflict_keys},
+                meta,
+            )
             set_values = self._map_doc_for_mongo(m.update_values, meta)
             # MongoDB's immutable _id may be supplied for the insert branch,
             # but must never appear in the update document.
