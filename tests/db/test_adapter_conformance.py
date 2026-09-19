@@ -811,6 +811,213 @@ async def test_aggregations(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
+async def test_large_query_ast_features(kind):
+    """Exercise every result-shaping query feature on a substantial dataset."""
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        await repo.create_many(
+            [
+                _u(
+                    f"q-{i:03d}",
+                    f"q-{i:03d}",
+                    name=f"team-{i % 4}",
+                    age=i,
+                    active=i % 3 != 0,
+                )
+                for i in range(120)
+            ]
+        )
+        assert await repo.count() == 120
+
+        # Projection returns dictionaries and does not hydrate full models.
+        projected = await (
+            repo.query(User.age >= 100)
+            .select(User.username, User.age)
+            .order_by(User.age.asc())
+            .all()
+        )
+        assert projected == [
+            {"username": f"q-{i:03d}", "age": i} for i in range(100, 120)
+        ]
+
+        # DISTINCT is meaningful here because names deliberately repeat.
+        distinct_names = await (
+            repo.query().select(User.name).distinct().order_by(User.name.asc()).all()
+        )
+        assert distinct_names == [{"name": f"team-{i}"} for i in range(4)]
+
+        distinct_active = await (
+            repo.query().select(User.active).distinct().order_by(User.active.desc()).all()
+        )
+        assert distinct_active == [{"active": True} ,{"active": False}]
+
+        # OFFSET and LIMIT must be applied after deterministic ordering.
+        window = await (
+            repo.query()
+            .order_by(User.age.asc())
+            .offset(17)
+            .limit(13)
+            .all()
+        )
+        assert [user.age for user in window] == list(range(17, 30))
+
+        # A cursor starts strictly after its token and honors the ordering.
+        cursor_page = await (
+            repo.query()
+            .order_by(User.age.asc())
+            .cursor(59, field=User.age)
+            .limit(10)
+            .all()
+        )
+        assert [user.age for user in cursor_page] == list(range(60, 70))
+
+        grouped = await (
+            repo.query()
+            .group_by(User.active)
+            .aggregate(
+                rows=Count(User.id),
+                unique_names=Count(User.name, distinct=True),
+                total_age=Sum(User.age),
+            )
+            .having(Count(User.id) > 40)
+            .all()
+        )
+        assert grouped == [
+            {"active": True, "rows": 80, "unique_names": 4, "total_age": 4800}
+        ]
+        grouped = await (
+            repo.query()
+            .group_by(User.active)
+            .aggregate(
+                rows=Count(User.id),
+                unique_names=Count(User.name, distinct=True),
+                total_age=Sum(User.age),
+            )
+            .all()
+        )
+        assert grouped == [
+            {"active": False, "rows": 40, "unique_names": 4, "total_age": 2340},
+            {"active": True,  "rows": 80, "unique_names": 4, "total_age": 4800},
+        ]
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_large_mutation_and_upsert_conformance(kind):
+    """Check mutation result contracts and upserts using 120 persisted rows."""
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        created = await repo.create(
+                    _u("m-single", "m-single", name="before", age=1, active=False)
+                )
+        assert created.id == "m-single"
+        assert created.username == "m-single"
+        assert created.name == "before"
+
+        bulk = [
+            _u(
+                f"m-{i:03d}",
+                f"m-{i:03d}",
+                name=f"bulk-{i % 5}",
+                age=i,
+                active=i < 80,
+            )
+            for i in range(120)
+        ]
+        returned = await repo.create_many(bulk)
+        assert returned == bulk
+        assert await repo.count() == 121
+
+        # Single-row and bulk updates return affected-row counts, and the
+        # persisted values are the same for every adapter.
+        assert await repo.update(
+            User.username == "m-single", values={"name": "updated", "age": 2}
+        ) == 1
+        single = await repo.where(User.username == "m-single").first()
+        assert single is not None
+        assert (single.name, single.age) == ("updated", 2)
+
+        assert await repo.update_many(
+            User.active == True, values={"name": "active"}
+        ) == 80
+        assert await repo.count(User.name == "active") == 80
+
+        # Upsert by a unique non-primary field updates the existing row without
+        # replacing its primary key, then inserts a new row on the same target.
+        assert await repo.upsert(
+            conflict_target=(User.username,),
+            create_values={
+                "id": "m-000",
+                "username": "m-000",
+            },
+            update_values={"name": "upserted", "age": 1000},
+        ) in (1, 2)
+        existing = await repo.where(User.username == "m-000").first()
+        assert existing is not None
+        assert (existing.id, existing.name, existing.age) == (
+            "m-000",
+            "upserted",
+            1000,
+        )
+
+        assert await repo.upsert(
+            conflict_target=(User.username,),
+            create_values={
+                "id": "m-new",
+                "username": "m-new",
+                "name": "inserted-by-upsert",
+                "age": 7,
+                "active": True,
+            },
+            update_values={},
+        ) in (1, 2)
+        inserted = await repo.where(User.username == "m-new").first()
+        assert inserted is not None
+        assert (inserted.id, inserted.name, inserted.age) == (
+            "m-new",
+            "inserted-by-upsert",
+            7,
+        )
+
+        # Query upsert derives its conflict target from an equality condition.
+        assert await repo.where(User.username == "m-query").upsert(
+            {"id": "m-query", "name": "query-insert", "age": 9, "active": True}
+        ) in (1, 2)
+        assert await repo.where(User.username == "m-query").upsert(
+            {"id": "m-query", "name": "query-update", "age": 10, "active": True}
+        ) in (1, 2)
+        query_row = await repo.where(User.username == "m-query").first()
+        assert query_row is not None
+        assert (query_row.id, query_row.name, query_row.age) == (
+            "m-query",
+            "query-update",
+            10,
+        )
+
+        # Single and bulk delete use the same count contract. User is a
+        # soft-delete model, so the rows remain observable with_deleted().
+        assert await repo.delete(User.username == "m-single") == 1
+        assert await repo.where(User.username == "m-single").first() is None
+        assert (
+                    await repo.query(User.username == "m-single").with_deleted().count()
+                    == 1
+                )
+
+        assert await repo.delete_many(User.name == "active") == 79
+        assert await repo.count(User.name == "active") == 0
+        assert (
+                    await repo.query(User.name == "active").with_deleted().count() == 79
+                )
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
 async def test_include_relationship(kind):
     db = await database_for(kind)
     try:

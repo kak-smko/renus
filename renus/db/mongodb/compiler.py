@@ -16,6 +16,7 @@ from renus.db.mutation.ast import (
 )
 from renus.db.query.ast import (
     Condition,
+    HavingCondition,
     Logical,
     Operator,
     Path,
@@ -114,6 +115,17 @@ class MongoCompiler:
         for cond in ast.filters:
             filter_parts.append(self._compile_condition(cond))
 
+        if ast.cursor is not None:
+            cursor_path = ast.cursor_field
+            if cursor_path is None and meta and meta.primary_key_field:
+                cursor_path = Path(source, (meta.primary_key_field,))
+            if cursor_path is not None:
+                filter_parts.append({
+                    self._path_str(cursor_path): {
+                        "$gt": self.dialect.encode_value(ast.cursor)
+                    }
+                })
+
         filter_doc = self._combine_filter_parts(filter_parts)
 
         if ast.aggregates:
@@ -130,9 +142,14 @@ class MongoCompiler:
                 group_id = None
 
             group_stage: dict[str, Any] = {"_id": group_id}
+            distinct_aliases: dict[str, str] = {}
             for agg in ast.aggregates:
                 field_target = f"${self._path_str(agg.path)}" if agg.path else 1
-                if agg.function == "count":
+                if agg.function == "count" and agg.distinct and agg.path:
+                    temp = f"__renus_distinct_{agg.alias}"
+                    distinct_aliases[agg.alias] = temp
+                    group_stage[temp] = {"$addToSet": field_target}
+                elif agg.function == "count":
                     group_stage[agg.alias] = {"$sum": 1}
                 elif agg.function == "sum":
                     group_stage[agg.alias] = {"$sum": field_target}
@@ -147,17 +164,31 @@ class MongoCompiler:
 
             pipeline.append({"$group": group_stage})
 
+            project: dict[str, Any] = {"_id": 0}
             if ast.group_by:
                 group_paths = [self._path_str(p) for p in ast.group_by]
-                project: dict[str, Any] = {}
                 for gp in group_paths:
-                    if len(ast.group_by) == 1:
-                        project[gp] = "$_id"
-                    else:
-                        project[gp] = f"$_id.{gp}"
-                for agg in ast.aggregates:
+                    project[gp] = "$_id" if len(group_paths) == 1 else f"$_id.{gp}"
+            for agg in ast.aggregates:
+                if agg.alias in distinct_aliases:
+                    project[agg.alias] = {"$size": f"${distinct_aliases[agg.alias]}"}
+                else:
                     project[agg.alias] = 1
-                pipeline.append({"$project": project})
+            pipeline.append({"$project": project})
+
+            if ast.having:
+                having_doc = self._compile_having(ast.having, ast.aggregates)
+                if having_doc:
+                    pipeline.append({"$match": having_doc})
+            if ast.ordering:
+                pipeline.append({"$sort": {
+                    self._path_str(o.path): -1 if o.descending else 1
+                    for o in ast.ordering
+                }})
+            if ast.offset is not None:
+                pipeline.append({"$skip": ast.offset})
+            if ast.limit is not None:
+                pipeline.append({"$limit": ast.limit})
 
             return MongoCompiledQuery(
                 collection=collection_name,
@@ -168,11 +199,44 @@ class MongoCompiler:
         projection_doc: dict[str, Any] | None = None
         if ast.projection:
             projection_doc = {self._path_str(p): 1 for p in ast.projection.paths}
+            if "_id" not in projection_doc:
+                projection_doc["_id"] = 0
 
         sort_spec: list[tuple[str, int]] = []
         for o in ast.ordering:
             direction = -1 if o.descending else 1
             sort_spec.append((self._path_str(o.path), direction))
+
+        if ast.distinct and ast.projection:
+            group_id = {
+                self._path_str(path): f"${self._path_str(path)}"
+                for path in ast.projection.paths
+            }
+            pipeline: list[dict[str, Any]] = []
+            if filter_doc:
+                pipeline.append({"$match": filter_doc})
+            pipeline.append({"$group": {"_id": group_id}})
+            pipeline.append({"$project": {
+                "_id": 0,
+                **{
+                    self._path_str(path): f"$_id.{self._path_str(path)}"
+                    for path in ast.projection.paths
+                },
+            }})
+            if sort_spec:
+                pipeline.append({"$sort": {
+                    self._path_str(o.path): -1 if o.descending else 1
+                    for o in ast.ordering
+                }})
+            if ast.offset is not None:
+                pipeline.append({"$skip": ast.offset})
+            if ast.limit is not None:
+                pipeline.append({"$limit": ast.limit})
+            return MongoCompiledQuery(
+                collection=collection_name,
+                filter_doc={},
+                pipeline=pipeline,
+            )
 
         return MongoCompiledQuery(
             collection=collection_name,
@@ -190,6 +254,38 @@ class MongoCompiler:
         if meta and meta.primary_key_field == "id" and parts == ["id"]:
             return "_id"
         return ".".join(parts)
+
+    def _compile_having(self, conditions: tuple[Any, ...], aggregates: tuple[Any, ...]) -> dict[str, Any]:
+        clauses: list[dict[str, Any]] = []
+        for condition in conditions:
+            if not isinstance(condition, HavingCondition):
+                continue
+            aggregate = condition.aggregate
+            alias = next(
+                (
+                    item.alias
+                    for item in aggregates
+                    if item.function == aggregate.function
+                    and item.path == aggregate.path
+                    and item.distinct == aggregate.distinct
+                ),
+                None,
+            )
+            if alias is None:
+                continue
+            operator = {
+                Operator.EQ: "$eq",
+                Operator.NE: "$ne",
+                Operator.GT: "$gt",
+                Operator.GE: "$gte",
+                Operator.LT: "$lt",
+                Operator.LE: "$lte",
+            }.get(condition.operator)
+            if operator:
+                clauses.append({alias: {operator: condition.value}})
+        if not clauses:
+            return {}
+        return clauses[0] if len(clauses) == 1 else {"$and": clauses}
 
     def _is_raw_list_path(self, c: Condition) -> bool:
         p = c.path
@@ -335,14 +431,17 @@ class MongoCompiler:
             conflict_keys = list(m.conflict_target)
             filt = {k: m.create_values.get(k) for k in conflict_keys}
             set_values = self._map_doc_for_mongo(m.update_values, meta)
+            # MongoDB's immutable _id may be supplied for the insert branch,
+            # but must never appear in the update document.
+            set_values.pop("_id", None)
             create_values = self._map_doc_for_mongo(m.create_values, meta)
             update_doc: dict[str, Any] = {}
             if set_values:
                 update_doc["$set"] = set_values
             if create_values:
-                # MongoDB forbids a path in both ``$set`` and ``$setOnInsert``
-                # in the same update (error 40). Fields already present in
-                # ``$set`` are insert-time updates, so drop them here.
+                # MongoDB forbids a path in both ``$set`` and ``$setOnInsert``.
+                # On conflict, update_values win; the remaining create fields
+                # are applied atomically only on the insert branch.
                 insert_only = {
                     k: v for k, v in create_values.items() if k not in set_values
                 }

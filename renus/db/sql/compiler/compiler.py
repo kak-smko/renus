@@ -92,6 +92,14 @@ class SQLCompiler:
             clauses.append(s)
             params.extend(p)
 
+        if ast.cursor is not None:
+            cursor_path = ast.cursor_field
+            if cursor_path is None and meta and meta.primary_key_field:
+                cursor_path = Path(source, (meta.primary_key_field,))
+            if cursor_path is not None:
+                clauses.append(f"{self._path(cursor_path)} > {self.dialect.placeholder}")
+                params.append(ast.cursor)
+
         if clauses:
             sql += f" WHERE {' AND '.join(clauses)}"
 
