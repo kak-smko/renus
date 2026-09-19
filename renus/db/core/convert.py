@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -19,6 +19,8 @@ def encode_value(value: Any, field_meta: Any = None) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, time):
         return value.isoformat()
     if isinstance(value, UUID):
         return str(value)
@@ -43,15 +45,27 @@ def decode_value(value: Any, field_meta: Any = None) -> Any:
     if (target_type is bool or type_str in ("bool", "boolean")) and isinstance(value, int):
         return bool(value)
 
-    if (target_type is datetime or "datetime" in type_str) and isinstance(value, str):
+    if (
+        target_type is datetime or type_str.rsplit(".", 1)[-1] == "datetime"
+    ) and isinstance(value, str):
         try:
             return datetime.fromisoformat(value.rstrip("Z"))
         except Exception:
             return value
 
-    if (target_type is date or type_str == "date") and isinstance(value, str):
+    if (
+        target_type is date or type_str.rsplit(".", 1)[-1] == "date"
+    ) and isinstance(value, str):
         try:
             return date.fromisoformat(value)
+        except Exception:
+            return value
+
+    if (
+        target_type is time or type_str.rsplit(".", 1)[-1] == "time"
+    ) and isinstance(value, str):
+        try:
+            return time.fromisoformat(value)
         except Exception:
             return value
 

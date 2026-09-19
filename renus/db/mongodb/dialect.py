@@ -71,7 +71,7 @@ class MongoDialect:
         """Return whether BSON can store ``value`` in its native form."""
         return isinstance(value, self.native_types)
 
-    def encode_value(self, value: Any) -> Any:
+    def encode_value(self, value: Any, field_meta: Any = None) -> Any:
         """Recursively convert a value into something BSON can store.
 
         ``dict``/``list``/``tuple``/``set`` are traversed so nested values are
