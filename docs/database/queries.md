@@ -74,7 +74,17 @@ For a condition on a related collection, use `any()`:
 query = users.where(User.posts.any(Post.published == True))
 ```
 
-Relationship declarations and relationship-specific behavior are documented in [`/docs/database/models.md`](models.md).
+Relationship predicates are compiled and evaluated by the selected adapter; 
+
+SQL adapters also support scalar paths through non-embedded relationships:
+
+```python
+employees = await employee_repo.where(
+    Employee.department.name == "Engineering"
+).all()
+```
+
+For portable relationship filtering across the built-in adapters, prefer `any()` on the relationship collection or use a condition on the stored foreign-key field. Relationship declarations and relationship-specific behavior are documented in [`/docs/database/models.md`](models.md).
 
 ## 3. Execute a query
 
@@ -143,11 +153,18 @@ Projection results are dictionaries rather than hydrated `User` instances:
 print(rows[0])
 ```
 
-The selected paths are represented by the model fields, so database column names and backend-specific identity mappings remain adapter concerns.
+Nested paths are supported and use the leaf field name as the dictionary key:
+
+```python
+rows = await users.query().select(User.profile.city).all()
+# {"city": "Paris"}
+```
+
+The selected paths are represented by the model fields, so database column names and backend-specific identity mappings remain adapter concerns. MongoDB removes its internal `_id` storage field from results and exposes the model identity as `id` when it is selected or when a model is hydrated.
 
 ## 6. Ordering
 
-Use a field path directly for ascending order, or call `asc()` and `desc()` for direction and null handling:
+Use a field path directly for ascending order, or call `asc()` and `desc()` for direction:
 
 ```python
 rows = await users.query().order_by(
@@ -177,13 +194,19 @@ page_three = await (
 )
 ```
 
-`paginate(page, size)` treats pages as one-based: page 1 starts at offset 0. `cursor(token, field=None)` creates a cursor-positioned query for adapters that support cursor compilation:
+`paginate(page, size)` treats pages as one-based: page 1 starts at offset 0. `cursor(token, field=None)` creates a query that starts strictly after the token (`field > token`). If `field` is omitted, the model primary key is used when available:
 
 ```python
-next_page = await users.query().cursor(last_id, field=User.id).all()
+next_page = await (
+    users.query()
+    .order_by(User.id.asc())
+    .cursor(last_id, field=User.id)
+    .limit(20)
+    .all()
+)
 ```
 
-For stable pages, provide an explicit order, especially when using offset pagination.
+Cursor values are compared by the database and are not opaque encoded tokens. Use a field and ordering with compatible ascending semantics; cursor pagination is not a substitute for a compound cursor when the ordering uses multiple fields. For stable pages, provide an explicit order, especially when using offset pagination.
 
 ## 8. Eager-load relationships
 
@@ -247,7 +270,29 @@ summary = await users.query().aggregate(
 ).all()
 ```
 
-`having()` filters grouped or aggregate results. Group fields are included in the returned dictionaries.
+`distinct=True` is supported by `Count`, `Sum`, and `Avg`; it applies to the aggregate path before the function is calculated. For example:
+
+```python
+summary = await users.query().aggregate(
+    unique_roles=Count(User.role, distinct=True),
+    unique_age_total=Sum(User.age, distinct=True),
+    unique_age_average=Avg(User.age, distinct=True),
+).all()
+```
+
+`having()` filters grouped or aggregate results after grouping. Pass multiple conditions to combine them with `AND`, or compose aggregate conditions with `&` and `|`:
+
+```python
+rows = await (
+    users.query()
+    .group_by(User.role)
+    .aggregate(rows=Count(User.id), total_age=Sum(User.age))
+    .having((Count(User.id) >= 2) & (Sum(User.age) > 100))
+    .all()
+)
+```
+
+Group fields are included in the returned dictionaries, including all fields passed to `group_by()`.
 
 ## 11. Distinct results
 
@@ -259,7 +304,7 @@ rows = await users.query().select(User.role).distinct().all()
 
 Distinct projections return dictionaries, as all projected queries do.
 
-## 12. Query-side mutations
+## 13. Query-side mutations
 
 A query can update or delete the rows selected by its filters:
 
@@ -281,9 +326,13 @@ await users.where(User.username == "ada").upsert(
 
 The equality filters become the conflict target and are included in the inserted values.
 
-## 13. Backend behavior
+## 14. Backend behavior
 
-The query builder produces a backend-neutral query structure. SQL adapters compile it to parameterized SQL; MongoDB compiles it to filters, projections, sort specifications, and aggregation pipelines. The same public query API is intended to work across the built-in adapters, but backend support can vary for advanced operations. See [`/docs/database/adapters.md`](adapters.md) when choosing a backend.
+The query builder produces a backend-neutral query structure. SQL adapters compile it to parameterized SQL; MongoDB compiles it to filters, projections, sort specifications, and aggregation pipelines. Relationship predicates are part of this compilation: SQL uses `EXISTS` joins, including many-to-many through tables, while MongoDB uses `$lookup` stages for non-embedded relationships.
+
+Embedded data is also backend-specific. SQL adapters query normalized auxiliary tables, including nested embedded paths; MongoDB queries nested documents and arrays with `$elemMatch` where needed. Nested projections return the selected leaf field under its field name on both backends.
+
+The same public query API is intended to work across the built-in adapters, but backend support can vary for advanced operations. In particular, cursor comparisons use `>` against the selected field. See [`/docs/database/adapters.md`](adapters.md) when choosing a backend.
 
 ## Next steps
 

@@ -84,7 +84,7 @@ Renus checks assigned values against the annotation. Common supported annotation
 For example:
 
 ```python
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import UUID
 
@@ -95,12 +95,13 @@ class Event(Model):
     title: str
     starts_at: datetime
     event_date: date
+    starts_time: time
     price: Decimal
     external_id: UUID
     metadata: dict
 ```
 
-A `float` field accepts integers as well as floats. An `int` field does not accept booleans, even though `bool` is a subclass of `int` in Python.
+A `float` field accepts integers as well as floats. An `int` field does not accept booleans, even though `bool` is a subclass of `int` in Python. Database adapters encode `datetime`, `date`, and `time` values to ISO strings when needed and decode them back according to the declared field type. A `time` field therefore round-trips values such as `time(8, 15, 30)` without requiring application-level serialization.
 
 ## 3. Nullable fields
 
@@ -274,7 +275,7 @@ class Appointment(Model):
     day: date = Field(Convert(date))
 ```
 
-`Convert(date)` accepts an ISO date string and converts it with `date.fromisoformat`. `Convert(datetime)` does the equivalent for an ISO datetime string. A conversion failure becomes a validation error.
+`Convert(date)` accepts an ISO date string and converts it with `date.fromisoformat`. `Convert(datetime)` does the equivalent for an ISO datetime string. The same pattern can be used with `Convert(time)` and an ISO time string. A conversion failure becomes a validation error.
 
 ## 6. When validation runs
 
