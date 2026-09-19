@@ -1,135 +1,216 @@
-
 # Renus
 
-**Renus** is a lightweight ASGI framework/toolkit, which is ideal for building async web services in Python. It is production-ready and designed for large-scale projects while maintaining a lightweight footprint and high performance.
+Renus is a lightweight, async-first ASGI framework and toolkit for building
+Python web applications and services. It provides routing, HTTP and WebSocket
+handling, middleware, lifecycle hooks, caching, scheduling, validation, and an
+async database layer while keeping the core dependency footprint small.
 
-## ✨ Features
+- **Current version:** 3.0.0
+- **Python:** 3.11+
+- **License:** BSD-3-Clause
+- **Documentation:** [codenus.com/renus](https://codenus.com/renus)
+- **Source:** [github.com/kak-smko/renus](https://github.com/kak-smko/renus)
 
-- 🚀 **High Performance**: Great overall performance against independent benchmarks.
-- 🪶 **Lightweight**: Low-complexity HTTP web framework with few hard dependencies.
-- 🔄 **Async Support**: Fully compatible with `asyncio` and `trio` backends.
-- 🔌 **WebSocket Support**: Built-in support for WebSockets.
-- 🛠️ **Background Tasks**: Handle in-process background tasks easily.
-- 🔄 **Lifespan Events**: Manage startup and shutdown events for resource management.
-- 📦 **Built-in Utilities**: CORS, GZip, Static Files, Streaming responses, Caching, Cryptography, Scheduling, and more.
-- ✅ **Reliable**: 100% test coverage.
-- 📝 **Type Safe**: 100% type annotated codebase.
+## Features
 
-## 📦 Installation
+- ASGI application support for HTTP, WebSockets, and lifespan events
+- Decorator-based and fluent routing with typed path parameters
+- Text, HTML, JSON, redirect, file, streaming, and private responses
+- Application, router, and route-level middleware
+- Request parsing for headers, cookies, query parameters, JSON, forms, and uploads
+- Built-in XSS protection for form and WebSocket input helpers
+- Background tasks and startup/shutdown hooks
+- File- and Redis-backed caching, including route and function caching
+- Async ORM with models, validation, repositories, queries, mutations, and transactions
+- SQLite, MySQL, and MongoDB integrations through optional dependencies
+- Database migrations, backup/restore, and plugin hooks
+- Fluent task scheduling and a built-in `renus` CLI
 
-Install Renus using pip:
+## Installation
+
+Renus requires Python 3.11 or newer. Install the core package with pip:
 
 ```bash
-pip install renus
+python -m pip install renus
 ```
 
-## 🚀 Quick Start
+Renus is an ASGI framework. Install the server extra when you want to run an
+application with Uvicorn or with `App.run()`:
 
-Here is a simple example to get you started with Renus:
+```bash
+python -m pip install "renus[server]"
+```
+
+Optional extras are available for additional integrations:
+
+| Extra | Provides |
+| --- | --- |
+| `server` | Uvicorn |
+| `mongo` | MongoDB support via `pymongo` |
+| `mysql` | MySQL support via `aiomysql` |
+| `redis` | Redis caching support |
+| `all` | All runtime integrations |
+| `dev` | Development and benchmarking dependencies |
+
+Install from source in editable mode:
+
+```bash
+git clone https://github.com/kak-smko/renus.git
+cd renus
+python -m pip install -e ".[dev]"
+```
+
+## Quick start
+
+Create `main.py`:
 
 ```python
 from renus.app import App
-from renus.core.response import TextResponse, JsonResponse
-from renus.router import Router
-
-# 1. Define route handlers
-def home():
-    return TextResponse('Hello, world!')
-
-def user(username):
-    return JsonResponse({'name': username})
-
-async def websocket(ws):
-    await ws.accept()
-    await ws.send_text('Hello, world!')
-    await ws.close()
-
-# 2. Define lifespan events (startup and shutdown)
-async def lifespan(app):
-    print('Startup', app)
-    yield
-    print('Shutdown')
-
-# 3. Setup routing
-r = Router()
-r.get('/', func=home)
-r.get('/user/{username}', func=user)
-r.ws('/ws', func=websocket)
-
-# 4. Initialize the app
-app = App(lifespan=lifespan)
-```
-
-### Running the Application
-
-You can run your application using an ASGI server like `uvicorn`:
-
-```python
-# main.py
-import uvicorn
-from renus.app import App
-import routes.index # Import your routes module
+from renus.response import JsonResponse, TextResponse
 
 app = App()
 
-if __name__ == "__main__":
-    uvicorn.run(
-        "main:app", 
-        host="127.0.0.1", 
-        port=4000, 
-        reload=True, 
-        log_level="info",
-        headers=[
-            ("X-Frame-Options", 'DENY'),
-            ("Access-Control-Allow-Headers", '*'),
-            ("Access-Control-Allow-Origin", '*')
-        ]
-    )
+
+@app.get("/")
+def home():
+    return TextResponse("Hello, world!")
+
+
+@app.get("/users/{username}")
+def user(username):
+    return JsonResponse({"name": username})
 ```
 
-Run it with:
+Run the application with Uvicorn:
+
+```bash
+uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Then visit <http://127.0.0.1:8000/> or call the parameterized route:
+
+```bash
+curl http://127.0.0.1:8000/users/renus
+# {"name":"renus"}
+```
+
+You can also use Renus's convenience runner:
+
+```python
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=8000, reload=True)
+```
+
 ```bash
 python main.py
 ```
 
-## 📚 Documentation
+## WebSockets
 
-For full documentation, advanced features, and API references, please visit the official documentation:
-👉 **[Renus Documentation](https://codenus.com/en/renus)**
+WebSocket routes use `@app.route(..., method="WS")`:
 
-### Advanced Features
-Renus comes packed with advanced features out of the box to help you build complex applications:
-- **Caching**: Efficient data caching mechanisms.
-- **Lifespan**: Manage application lifecycle events.
-- **Cryptography**: Built-in cryptographic utilities.
-- **Background Tasks**: Handle long-running tasks in the background.
-- **Dependency Injection**: Powerful injection system.
-- **Logging**: Integrated logging system.
-- **Scheduling**: Schedule tasks to run at specific intervals.
-- **Thread Pool**: Manage concurrent operations efficiently.
+```python
+from renus.websockets import WebSocketDisconnect
 
-## 🤝 Contributing
 
-Thank you for your interest in contributing to the Renus framework! We welcome all contributions from the community, whether they're bug reports, feature requests, documentation improvements, or code contributions.
+@app.route("/echo", method="WS")
+async def echo(ws):
+    await ws.accept()
+    try:
+        async for message in ws.iter_text():
+            await ws.send_text(message)
+    except WebSocketDisconnect:
+        pass
+```
 
-### Coding Standards
-- Follow **PEP 8** style guidelines.
-- Use **type hints** for all new code (PEP 484).
-- Keep lines under **88 characters** (Black's default line length).
+## Database example
 
-### Testing
-- Write unit tests for all new features using `pytest`.
-- Include docstrings for all public methods and classes.
+Renus includes an async ORM. The following example uses the built-in SQLite
+adapter:
 
-### Issue Reporting
-When reporting bugs or requesting features:
-- Check existing issues to avoid duplicates.
-- Provide detailed reproduction steps for bugs.
-- Include Python version, OS, and framework version.
-- For feature requests, explain the use case and benefits.
+```python
+from renus.db import Database, DatabaseField, Field, Model, SQLiteAdapter
 
-Please read our [Contributing Guidelines](https://codenus.com/en/renus/3) for more details.
 
-## 📄 License
+class User(Model):
+    id: int = Field(database=DatabaseField(primary_key=True, generated=True))
+    username: str = Field(database=DatabaseField(unique=True))
+    email: str
 
-*BSD 3-Clause License*
+
+async def create_user():
+    async with Database(SQLiteAdapter({"database": "storage/app.sqlite"})) as db:
+        await db.create_schema([User])
+        users = db.repository(User)
+        return await users.create(
+            User(username="ada", email="ada@example.com")
+        )
+```
+
+For production applications, initialize shared database resources in an
+application lifespan hook and use migrations for schema changes.
+
+## CLI
+
+The package exposes both a `renus` command and a module entry point:
+
+```bash
+renus --help
+renus --version
+python -m renus --help
+```
+
+Project commands can be added under a project's `commands/` directory. See the
+[CLI documentation](https://codenus.com/renus) for command discovery,
+scaffolding, database commands, and extensions.
+
+## Documentation
+
+The full documentation covers:
+
+- [Installation](docs/starting/installation.md)
+- [Quick start](docs/starting/quick_start.md)
+- [Project structure](docs/starting/project_structure.md)
+- [Application and routing](docs/development/app.md)
+- [Requests and responses](docs/development/request.md)
+- [Middleware](docs/development/middlewares.md)
+- [WebSockets](docs/development/websockets.md)
+- [Lifespan and background tasks](docs/development/lifespan_tasks.md)
+- [Caching and scheduling](docs/development/caching.md)
+- [Database, models, queries, and migrations](docs/database/overview.md)
+- [Validation and security](docs/security/validation.md)
+- [CLI reference](docs/cli/reference.md)
+
+## Development
+
+Install the development dependencies and run the test suite:
+
+```bash
+python -m pip install -e ".[dev]"
+pytest
+```
+
+Run a focused test module while developing:
+
+```bash
+pytest tests/test_routing.py
+```
+
+## Contributing
+
+Bug reports, documentation improvements, tests, and code contributions are
+welcome. Please keep changes focused, add regression tests for behavior changes,
+and follow the existing project style.
+
+## Support Renus
+
+If Renus is useful to you, please consider giving the project a star on
+[GitHub](https://github.com/kak-smko/renus). It helps others discover the
+framework and supports continued development.
+
+A GitHub star is appreciated but voluntary; it is not a condition of using,
+copying, modifying, or distributing Renus under the BSD 3-Clause License.
+
+## License
+
+Renus is distributed under the [BSD 3-Clause License](LICENSE).

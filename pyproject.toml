@@ -76,7 +76,7 @@ renus = "renus.commands.cli:main"
 version = { attr = "renus.__version__" }
 
 [tool.setuptools]
-packages = { find = { where = ["."], exclude = ["tests*","example*", "venv*", "benchmarks*", "storage*"] } }
+packages = { find = { where = ["."], exclude = ["tests*","venv*", "benchmarks*", "storage*"] } }
 
 [[tool.setuptools.ext-modules]]
 name = "renus._speedup"

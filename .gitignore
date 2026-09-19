@@ -9,7 +9,6 @@ build
 .idea
 .zed
 .gitignore
-memory.md
 publish.md
 storage
 *.log
@@ -19,3 +18,4 @@ example
 # Cython build artifact (generated from renus/_speedup.pyx)
 renus/_speedup.c
 _stripdocs.py
+run.py
