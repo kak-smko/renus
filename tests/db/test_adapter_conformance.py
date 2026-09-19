@@ -68,9 +68,10 @@ from tests.db.deep_embedded_models import (
     DeepMany4,
     DeepMany5,
     DeepMany6,
-    DeepManyLeaf,
+    DeepMany7,
     DeepRoot,
 )
+from renus.db.repository.relationships import _junction_columns
 from tests.db._conformance import (
     Citizen,
     Contact,
@@ -104,6 +105,61 @@ def _p(pid: str, title: str, user_id: str = ""):
     return Post(id=pid, title=title, user_id=user_id)
 
 
+class NestedDepartment(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    name: str
+
+
+class NestedEmployee(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    name: str
+    company_id: str = ""
+    department_id: str = ""
+    department: NestedDepartment = ManyToOne(
+        NestedDepartment,
+        foreign_key="department_id",
+        loading=LoadingStrategy.SELECTIN,
+    )
+
+
+class NestedCompany(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    name: str
+    employees: list[NestedEmployee] = OneToMany(
+        NestedEmployee,
+        foreign_key="company_id",
+        loading=LoadingStrategy.SELECTIN,
+    )
+
+
+class StrategyChild(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    joined_parent_id: str = ""
+    selectin_parent_id: str = ""
+    label: str
+
+
+class JoinedParent(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    name: str
+    children: list[StrategyChild] = OneToMany(
+        StrategyChild,
+        foreign_key="joined_parent_id",
+        loading=LoadingStrategy.JOINED,
+    )
+
+
+class SelectinParent(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    name: str
+    children: list[StrategyChild] = OneToMany(
+        StrategyChild,
+        foreign_key="selectin_parent_id",
+        loading=LoadingStrategy.SELECTIN,
+    )
+
+
+_row_count_models: dict[str, type] = {}
 class CompositeConflictRecord(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     left: str
@@ -1445,8 +1501,247 @@ async def test_include_filter_posts_returns_all_users(kind):
 
 
 # ---------------------------------------------------------------------------
-# Relationships: Embedded, EmbeddedMany, OneToOne, OneToMany, ManyToOne,
-# ManyToMany.
+# Relationship query and loading conformance.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_relation_any_and_nested_logical_filters(kind):
+    db = await database_for(kind, [User, Post])
+    try:
+        repo = db.repository(User)
+        await repo.create_many(
+            [
+                _u("any-1", "any-1", age=10),
+                _u("any-2", "any-2", age=20),
+                _u("any-3", "any-3", age=30),
+                *[_u(f"any-{i:03d}", f"any-{i:03d}", age=40 + i) for i in range(4, 101)],
+            ]
+        )
+        await db.repository(Post).create_many(
+            [
+                _p("any-p1", "keep", "any-1"),
+                _p("any-p2", "drop", "any-2"),
+            ]
+        )
+
+        matching = await repo.query(
+            User.posts.any((Post.title == "keep") & (Post.id == "any-p1"))
+        ).all()
+        assert [user.id for user in matching] == ["any-1"]
+
+        # RelationAny can participate in a normal logical expression without
+        # requiring callers to explicitly include the related collection.
+        matching = await repo.query(
+            User.posts.any(Post.title == "keep") | (User.age == 30)
+        ).order_by(User.id.asc()).all()
+        assert [user.id for user in matching] == ["any-1", "any-3"]
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_nested_and_filtered_includes(kind):
+    db = await database_for(kind, [NestedCompany, NestedEmployee, NestedDepartment])
+    try:
+        company_repo = db.repository(NestedCompany)
+        employee_repo = db.repository(NestedEmployee)
+        department_repo = db.repository(NestedDepartment)
+
+        await department_repo.create_many(
+            [
+                NestedDepartment(id="rel-d1", name="engineering"),
+                NestedDepartment(id="rel-d2", name="support"),
+            ]
+        )
+        await company_repo.create(NestedCompany(id="rel-c1", name="Renus"))
+        await employee_repo.create_many(
+            [
+                NestedEmployee(
+                    id="rel-e1",
+                    name="Ada",
+                    company_id="rel-c1",
+                    department_id="rel-d1",
+                ),
+                NestedEmployee(
+                    id="rel-e2",
+                    name="Grace",
+                    company_id="rel-c1",
+                    department_id="rel-d2",
+                ),
+                *[
+                    NestedEmployee(
+                        id=f"rel-e{i:03d}",
+                        name=f"Employee-{i:03d}",
+                        company_id="rel-c1",
+                        department_id=f"rel-d{i}",
+                    )
+                    for i in range(3, 101)
+                ],
+            ]
+        )
+
+        nested = Include(
+            NestedCompany.employees,
+            nested=(Include(NestedEmployee.department),),
+        )
+        loaded = await company_repo.query().include(nested).first()
+        assert loaded is not None
+        assert len(loaded.employees) == 100
+        assert [
+            (employee.name, employee.department.name)
+            for employee in loaded.employees[:2]
+        ] == [("Ada", "engineering"), ("Grace", "support")]
+
+        filtered = Include(
+            NestedCompany.employees,
+            filter=NestedEmployee.name == "Ada",
+            nested=(Include(NestedEmployee.department),),
+        )
+        loaded = await company_repo.query().include(filtered).first()
+        assert loaded is not None
+        assert [(employee.name, employee.department.name) for employee in loaded.employees] == [
+            ("Ada", "engineering")
+        ]
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_joined_and_selectin_loading_strategies(kind):
+    db = await database_for(kind, [JoinedParent, SelectinParent, StrategyChild])
+    try:
+        joined_repo = db.repository(JoinedParent)
+        selectin_repo = db.repository(SelectinParent)
+        child_repo = db.repository(StrategyChild)
+
+        await joined_repo.create(JoinedParent(id="joined-1", name="joined"))
+        await selectin_repo.create(SelectinParent(id="selectin-1", name="selectin"))
+        await child_repo.create_many(
+            [
+                StrategyChild(
+                    id="strategy-j1",
+                    joined_parent_id="joined-1",
+                    label="joined-child",
+                ),
+                StrategyChild(
+                    id="strategy-s1",
+                    selectin_parent_id="selectin-1",
+                    label="selectin-child",
+                ),
+                *[
+                    StrategyChild(
+                        id=f"strategy-{i:03d}",
+                        joined_parent_id="joined-1" if i < 51 else "",
+                        selectin_parent_id="selectin-1" if i >= 51 else "",
+                        label=f"child-{i:03d}",
+                    )
+                    for i in range(2, 100)
+                ],
+            ]
+        )
+
+        # JOINED relationships are loaded by an ordinary query.
+        joined = await joined_repo.query().first()
+        assert joined is not None
+        assert len(joined.children) == 50
+        assert joined.children[0].label == "joined-child"
+
+        # SELECTIN relationships require an explicit include and are loaded in
+        # the same result shape when requested.
+        selectin = await selectin_repo.query().first()
+        assert selectin is not None
+        assert selectin.children == []
+        selectin = await selectin_repo.query().include(SelectinParent.children).first()
+        assert selectin is not None
+        assert len(selectin.children) == 50
+        assert selectin.children[0].label == "selectin-child"
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_many_to_many_duplicate_link_reconciliation(kind):
+    db = await database_for(kind, [Employee, Role])
+    try:
+        employee_repo = db.repository(Employee)
+        role_repo = db.repository(Role)
+        roles = [
+            Role(id="dup-role", name="shared"),
+            *[Role(id=f"dup-role-{i:03d}", name=f"role-{i:03d}") for i in range(1, 100)],
+        ]
+        await role_repo.create_many(roles)
+
+        employee = Employee(
+            id="dup-employee",
+            name="duplicate-safe",
+            roles=[
+                Role(id="dup-role", name="shared"),
+                Role(id="dup-role", name="shared"),
+            ],
+        )
+        await employee_repo.create(employee)
+        await employee_repo.create_many(
+            [
+                Employee(
+                    id=f"dup-employee-{i:03d}",
+                    name=f"employee-{i:03d}",
+                    roles=[Role(id=f"dup-role-{i:03d}", name=f"role-{i:03d}")],
+                )
+                for i in range(1, 100)
+            ]
+        )
+        assert await _row_counts(db, "employees", "roles", "employee_roles") == {
+            "employees": 100,
+            "roles": 100,
+            "employee_roles": 100,
+        }
+
+        loaded = await employee_repo.query(Employee.id == "dup-employee").include(Employee.roles).first()
+        assert loaded is not None
+        assert [role.id for role in loaded.roles] == ["dup-role"]
+
+        # Re-saving the same duplicate collection must reconcile to one link,
+        # not accumulate duplicate junction rows.
+        loaded.roles = [
+            Role(id="dup-role", name="shared"),
+            Role(id="dup-role", name="shared"),
+        ]
+        await employee_repo.save(loaded)
+        assert await _row_counts(db, "employees", "roles", "employee_roles") == {
+            "employees": 100,
+            "roles": 100,
+            "employee_roles": 100,
+        }
+        local_column, _ = _junction_columns(
+            Employee.metadata(),
+            Employee.metadata().relationships["roles"],
+            Role.metadata(),
+        )
+        duplicate_links = await db.adapter("primary").execute_query(
+            QueryAST(
+                source=_row_count_model("employee_roles"),
+                filters=(
+                    Path(_row_count_model("employee_roles"), (local_column,))
+                    == "dup-employee",
+                ),
+            )
+        )
+        assert len(duplicate_links) == 1
+        loaded_again = await employee_repo.query(Employee.id == "dup-employee").include(Employee.roles).first()
+        assert loaded_again is not None
+        assert [role.id for role in loaded_again.roles] == ["dup-role"]
+    finally:
+        await cleanup(db)
+
+
+# ---------------------------------------------------------------------------
+# Relationships: Embedded, EmbeddedMany, OneToOne, OneToMany,
+# ManyToOne, ManyToMany.
 # ---------------------------------------------------------------------------
 
 
@@ -1639,30 +1934,35 @@ def _deep_embedded_tables(model: type, prefix: str | None = None) -> list[str]:
     return tables
 
 
-def _deep_embedded_value() -> DeepEmbedded1:
-    value: Any = DeepEmbedded7(value="embedded-7")
-    for model in (
-        DeepEmbedded6,
-        DeepEmbedded5,
-        DeepEmbedded4,
-        DeepEmbedded3,
-        DeepEmbedded2,
+def _deep_embedded_value(prefix: str = "") -> DeepEmbedded1:
+    """Build all seven embedded levels, applying ``prefix`` to every name."""
+    value: Any = DeepEmbedded7(
+        name=f"{prefix}deep-embedded-7",
+        value=f"{prefix}embedded-7",
+    )
+    for level, model in zip(
+        range(6, 1, -1),
+        (
+            DeepEmbedded6,
+            DeepEmbedded5,
+            DeepEmbedded4,
+            DeepEmbedded3,
+            DeepEmbedded2,
+        ),
     ):
-        value = model(child=value)
-    return DeepEmbedded1(child=value)
+        value = model(name=f"{prefix}deep-embedded-{level}", child=value)
+    return DeepEmbedded1(name=f"{prefix}deep-embedded-1", child=value)
 
 
-def _deep_many_value() -> list[DeepMany1]:
-    value: Any = DeepManyLeaf(value="many-leaf")
-    for model in (
-        DeepMany6,
-        DeepMany5,
-        DeepMany4,
-        DeepMany3,
-        DeepMany2,
+def _deep_many_value(prefix: str = "") -> list[DeepMany1]:
+    """Build all seven embedded-many levels, applying ``prefix`` to every name."""
+    value: Any = DeepMany7(name=f"{prefix}deep-many-7")
+    for level, model in zip(
+        range(6, 1, -1),
+        (DeepMany6, DeepMany5, DeepMany4, DeepMany3, DeepMany2),
     ):
-        value = model(children=[value])
-    return [DeepMany1(children=[value])]
+        value = model(name=f"{prefix}deep-many-{level}", children=[value])
+    return [DeepMany1(name=f"{prefix}deep-many-1", children=[value])]
 
 
 @pytest.mark.asyncio
@@ -1671,20 +1971,35 @@ async def test_seven_level_embedded_and_embedded_many_relationships(kind):
     db = await database_for(kind, [DeepRoot])
     try:
         root_repo = db.repository(DeepRoot)
-        root = DeepRoot(
-            id="deep-1",
-            embedded=_deep_embedded_value(),
-            many=_deep_many_value(),
-        )
-        await root_repo.create(root)
+        roots = [
+            DeepRoot(
+                id="deep-1",
+                name="deep-root-1",
+                embedded=_deep_embedded_value("root1-"),
+                many=_deep_many_value("root1-"),
+            ),
+            DeepRoot(
+                id="deep-2",
+                name="deep-root-2",
+                embedded=_deep_embedded_value("root2-"),
+                many=_deep_many_value("root2-"),
+            ),
+            DeepRoot(
+                id="deep-3",
+                name="deep-root-3",
+                embedded=_deep_embedded_value("root3-"),
+                many=_deep_many_value("root3-"),
+            ),
+        ]
+        await root_repo.create_many(roots)
 
         nested = db.adapter("primary").nested_documents
         embedded_tables = _deep_embedded_tables(DeepRoot)
         if nested:
-            assert await _row_counts(db, "deeproots") == {"deeproots": 1}
+            assert await _row_counts(db, "deeproots") == {"deeproots": 3}
         else:
             tables = ["deeproots", *embedded_tables]
-            assert await _row_counts(db, *tables) == {table: 1 for table in tables}
+            assert await _row_counts(db, *tables) == {table: 3 for table in tables}
             assert embedded_tables == [
                 "deeproots_embedded",
                 "deeproots_embedded_child",
@@ -1705,37 +2020,95 @@ async def test_seven_level_embedded_and_embedded_many_relationships(kind):
         embedded_path = DeepRoot.embedded
         for _ in range(6):
             embedded_path = embedded_path.child
-        assert [row.id for row in await root_repo.query(embedded_path.value == "embedded-7").all()] == ["deep-1"]
+        
+        assert [row.id for row in await root_repo.query(
+            (embedded_path.value == "root2-embedded-7")
+        ).all()] == ["deep-2"]
 
         many_path = DeepRoot.many
         for _ in range(6):
             many_path = many_path.children
-        assert [row.id for row in await root_repo.query(many_path.value.in_("many-leaf")).all()] == ["deep-1"]
+        assert [row.id for row in await root_repo.query(
+           (many_path.name == "root2-deep-many-7")
+        ).all()] == ["deep-2"]
+
+        # Nested RelationAny across the embedded-many hierarchy must match the
+        # root without requiring callers to flatten the path manually.
+        deep_many_any = DeepRoot.many.any(
+            DeepMany1.children.any(
+                DeepMany2.children.any(
+                    DeepMany3.children.any(
+                        DeepMany4.children.any(
+                            DeepMany5.name == "root2-deep-many-5"
+                        )
+                    )
+                )
+            )
+        )
+        assert [row.id for row in await root_repo.query(
+             deep_many_any
+        ).all()] == ["deep-2"]
+
+        deep_embedded_any = DeepRoot.embedded.any(
+            DeepEmbedded1.child.any(
+                DeepEmbedded2.child.any(
+                    DeepEmbedded3.child.any(
+                        DeepEmbedded4.child.any(
+                            DeepEmbedded5.child.any(
+                                DeepEmbedded6.child.any(
+                                    DeepEmbedded7.value == "root2-embedded-7"
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        assert [row.id for row in await root_repo.query(
+            deep_embedded_any
+        ).all()] == ["deep-2"]
 
         if nested:
-            loaded = (await root_repo.query().all())[0]
-            assert loaded.id == "deep-1"
+            loaded = await root_repo.query(DeepRoot.id == "deep-2").first()
+            assert loaded is not None
+            assert loaded.id == "deep-2"
             embedded = loaded.embedded
-            for _ in range(6):
-                embedded = embedded["child"]
-            assert embedded["value"] == "embedded-7"
+            embedded_names = []
+            for level in range(7):
+                embedded_names.append(embedded["name"])
+                if level < 6:
+                    embedded = embedded["child"]
+            assert embedded_names == [
+                "root2-deep-embedded-1",
+                "root2-deep-embedded-2",
+                "root2-deep-embedded-3",
+                "root2-deep-embedded-4",
+                "root2-deep-embedded-5",
+                "root2-deep-embedded-6",
+                "root2-deep-embedded-7",
+            ]
+            assert embedded["value"] == "root2-embedded-7"
             many = loaded.many[0]
             for _ in range(6):
                 many = many["children"][0]
-            assert many["value"] == "many-leaf"
+            assert many["name"] == "root2-deep-many-7"
         else:
             assert await _row_counts(db, *embedded_tables) == {
-                table: 1 for table in embedded_tables
+                table: 3 for table in embedded_tables
             }
             for table in embedded_tables:
                 rows = await db.adapter("primary").execute_query(
                     QueryAST(
                         source=_row_count_model(table),
-                        filters=(Path(_row_count_model(table), ("parent_id",)) == "deep-1",),
+                        filters=(Path(_row_count_model(table), ("parent_id",)).in_(["deep-1", "deep-2", "deep-3"]),),
                     )
                 )
-                assert len(rows) == 1
-                assert dict(rows[0])["parent_id"] == "deep-1"
+                assert len(rows) == 3
+                assert {dict(row)["parent_id"] for row in rows} == {
+                    "deep-1",
+                    "deep-2",
+                    "deep-3",
+                }
     finally:
         await cleanup(db)
 
@@ -1903,20 +2276,18 @@ async def test_seven_level_relations_and_nested_queries(kind, family_name):
             "many_to_one": "parent",
             "many_to_many": "children",
         }[family_name]
-        path = getattr(root_cls, relation_name)
-        for _ in range(5):
-            path = getattr(path, relation_name)
-        scalar_path = path.value
-        scalar_matches = await db.repository(root_cls).query(scalar_path == f"{family_name.replace('_', '-')}-7").all()
-        assert [row.id for row in scalar_matches] == [root.id]
+        relation_path = getattr(root_cls, relation_name)
+        relation_meta = root_cls.metadata().relationships[relation_name]
+        target_cls = relation_meta.target
+        related = getattr(root, relation_name)
+        related = related[0] if isinstance(related, list) else related
+        relation_match = relation_path.any(
+            Path(target_cls, (target_cls.metadata().primary_key_field,))
+            == getattr(related, target_cls.metadata().primary_key_field)
+        )
+        relation_matches = await db.repository(root_cls).query(relation_match).all()
+        assert [row.id for row in relation_matches] == [root.id]
 
-        collection_path = getattr(root_cls, relation_name)
-        for _ in range(5):
-            collection_path = getattr(collection_path, relation_name)
-        collection_matches = await db.repository(root_cls).query(
-            collection_path.value.in_(f"{family_name.replace('_', '-')}-7")
-        ).all()
-        assert [row.id for row in collection_matches] == [root.id]
 
         loaded = (await db.repository(root_cls).query().include(include).all())[0]
         current = loaded

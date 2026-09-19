@@ -104,6 +104,8 @@ class MongoCompiler:
         )
 
         filter_parts: list[dict[str, Any]] = []
+        relation_any_lookups: dict[int, str] = {}
+        relation_any_stages: list[dict[str, Any]] = []
 
         if meta and meta.soft_delete:
             del_field = meta.deleted_at_field or "deleted_at"
@@ -113,7 +115,63 @@ class MongoCompiler:
                 filter_parts.append({del_field: None})
 
         for cond in ast.filters:
-            filter_parts.append(self._compile_condition(cond))
+            for relation_filter in self._relation_any_nodes(cond):
+                if id(relation_filter) in relation_any_lookups:
+                    continue
+                relation_name = relation_filter.relation.parts[0]
+                relation_meta = meta.relationships.get(relation_name) if meta else None
+                target_cls = relation_meta.target if relation_meta else None
+                target_meta = getattr(target_cls, "__db_metadata__", None)
+                if relation_meta is None or target_meta is None:
+                    raise NotImplementedError(
+                        "RelationAny requires a mapped relationship target"
+                    )
+
+                if relation_meta.is_embedded:
+                    continue
+                lookup_name = f"__renus_relation_any_{len(relation_any_lookups)}"
+                relation_any_lookups[id(relation_filter)] = lookup_name
+
+                def mongo_field(model_meta: Any, field_name: str) -> str:
+                    return "_id" if field_name == model_meta.primary_key_field else field_name
+
+                relation_kind = getattr(relation_meta.kind, "value", relation_meta.kind)
+                if relation_kind == "many_to_many":
+                    if not relation_meta.through:
+                        raise ValueError("ManyToMany relation requires a through table")
+                    link_name = f"__renus_relation_links_{len(relation_any_lookups)}"
+                    local_col = relation_meta.local_key or f"{to_plural_lower(meta.table)}_id"
+                    foreign_col = relation_meta.foreign_key or f"{to_plural_lower(target_meta.table)}_id"
+                    relation_any_stages.append({"$lookup": {
+                        "from": relation_meta.through,
+                        "localField": mongo_field(meta, meta.primary_key_field),
+                        "foreignField": local_col,
+                        "as": link_name,
+                    }})
+                    relation_any_stages.append({"$lookup": {
+                        "from": target_meta.table,
+                        "localField": f"{link_name}.{foreign_col}",
+                        "foreignField": mongo_field(target_meta, target_meta.primary_key_field),
+                        "as": lookup_name,
+                    }})
+                elif relation_kind == "many_to_one":
+                    local_field = relation_meta.foreign_key or f"{relation_name}_id"
+                    relation_any_stages.append({"$lookup": {
+                        "from": target_meta.table,
+                        "localField": mongo_field(meta, local_field),
+                        "foreignField": mongo_field(target_meta, target_meta.primary_key_field),
+                        "as": lookup_name,
+                    }})
+                else:
+                    local_field = relation_meta.local_key or meta.primary_key_field
+                    foreign_field = relation_meta.foreign_key or f"{meta.table}_id"
+                    relation_any_stages.append({"$lookup": {
+                        "from": target_meta.table,
+                        "localField": mongo_field(meta, local_field),
+                        "foreignField": foreign_field,
+                        "as": lookup_name,
+                    }})
+            filter_parts.append(self._compile_condition(cond, relation_any_lookups))
 
         if ast.cursor is not None:
             cursor_path = ast.cursor_field
@@ -129,7 +187,7 @@ class MongoCompiler:
         filter_doc = self._combine_filter_parts(filter_parts)
 
         if ast.aggregates:
-            pipeline: list[dict[str, Any]] = []
+            pipeline: list[dict[str, Any]] = [*relation_any_stages]
             if filter_doc:
                 pipeline.append({"$match": filter_doc})
 
@@ -205,6 +263,30 @@ class MongoCompiler:
             )
 
         projection_doc: dict[str, Any] | None = None
+        if relation_any_stages:
+            pipeline: list[dict[str, Any]] = [*relation_any_stages]
+            if filter_doc:
+                pipeline.append({"$match": filter_doc})
+            if ast.ordering:
+                pipeline.append({"$sort": {
+                    self._path_str(o.path): -1 if o.descending else 1
+                    for o in ast.ordering
+                }})
+            if ast.offset is not None:
+                pipeline.append({"$skip": ast.offset})
+            if ast.limit is not None:
+                pipeline.append({"$limit": ast.limit})
+            if ast.projection:
+                pipeline.append({"$project": {
+                    "_id": 0,
+                    **{self._path_str(path): 1 for path in ast.projection.paths},
+                }})
+            return MongoCompiledQuery(
+                collection=collection_name,
+                filter_doc={},
+                pipeline=pipeline,
+            )
+
         if ast.projection:
             projection_doc = {self._path_str(p): 1 for p in ast.projection.paths}
             if "_id" not in projection_doc:
@@ -345,18 +427,57 @@ class MongoCompiler:
             and rel.target is list
         )
 
-    def _compile_condition(self, c: Condition) -> dict[str, Any]:
+    def _relation_any_nodes(self, c: Condition) -> tuple[RelationAny, ...]:
         if isinstance(c, RelationAny):
+            return (c,)
+        if isinstance(c, Logical):
+            return tuple(
+                relation_filter
+                for child in c.children
+                for relation_filter in self._relation_any_nodes(child)
+            )
+        return ()
 
+    def _compile_condition(
+        self,
+        c: Condition,
+        relation_any_lookups: dict[int, str] | None = None,
+    ) -> dict[str, Any]:
+        if isinstance(c, RelationAny):
+            if relation_any_lookups and id(c) in relation_any_lookups:
+                return {
+                    relation_any_lookups[id(c)]: {
+                        "$elemMatch": self._compile_condition(
+                            c.condition, relation_any_lookups
+                        )
+                    }
+                }
+            relation_meta = getattr(c.relation.model, "__db_metadata__", None)
+            relation = (
+                relation_meta.relationships.get(c.relation.parts[0])
+                if relation_meta and c.relation.parts
+                else None
+            )
+            if relation is not None and relation.is_embedded:
+                return self._compile_embedded_any(c, relation_any_lookups)
             rel_path = self._path_str(c.relation)
-            sub_filter = self._compile_condition(c.condition)
+            sub_filter = self._compile_condition(c.condition, relation_any_lookups)
             return {rel_path: {"$elemMatch": sub_filter}}
 
         if isinstance(c, Logical):
             if c.operator == Operator.NOT:
-                return {"$nor": [self._compile_condition(c.children[0])]}
+                return {
+                    "$nor": [
+                        self._compile_condition(c.children[0], relation_any_lookups)
+                    ]
+                }
             op_str = "$and" if c.operator == Operator.AND else "$or"
-            return {op_str: [self._compile_condition(child) for child in c.children]}
+            return {
+                op_str: [
+                    self._compile_condition(child, relation_any_lookups)
+                    for child in c.children
+                ]
+            }
 
         path = self._path_str(c.path) if c.path else ""
         op = c.operator
@@ -364,42 +485,32 @@ class MongoCompiler:
 
         if self._is_raw_list_path(c):
             if op == Operator.EQ and isinstance(val, list):
-
                 return {path: {"$all": val}}
             if op == Operator.IN and not isinstance(val, (list, tuple, set)):
-
                 return {path: val}
 
         if op == Operator.EQ:
             return {path: self.dialect.encode_value(val)}
-
         if op == Operator.NE:
             return {path: {"$ne": self.dialect.encode_value(val)}}
-
         if op == Operator.GT:
             return {path: {"$gt": self.dialect.encode_value(val)}}
-
         if op == Operator.GE:
             return {path: {"$gte": self.dialect.encode_value(val)}}
-
         if op == Operator.LT:
             return {path: {"$lt": self.dialect.encode_value(val)}}
-
         if op == Operator.LE:
             return {path: {"$lte": self.dialect.encode_value(val)}}
-
         if op == Operator.IN:
+            if not isinstance(val, (list, tuple, set)):
+                return {path: self.dialect.encode_value(val)}
             return {path: {"$in": [self.dialect.encode_value(v) for v in val]}}
-
         if op == Operator.NOT_IN:
             return {path: {"$nin": [self.dialect.encode_value(v) for v in val]}}
-
         if op == Operator.IS_NULL:
             return {path: None}
-
         if op == Operator.IS_NOT_NULL:
             return {path: {"$ne": None}}
-
         if op == Operator.LIKE:
             raw_str = str(val)
             pattern = ""
@@ -411,10 +522,8 @@ class MongoCompiler:
                 else:
                     pattern += re.escape(ch)
             return {path: {"$regex": f"^{pattern}$"}}
-
         if op == Operator.REGEX:
             return {path: {"$regex": str(val)}}
-
         if op == Operator.BETWEEN:
             lower, upper = val
             return {
@@ -423,8 +532,39 @@ class MongoCompiler:
                     "$lte": self.dialect.encode_value(upper),
                 }
             }
-
         raise ValueError(f"Unsupported MongoDB query operator: {op}")
+
+    def _prefix_mongo_condition(self, doc: dict[str, Any], prefix: str) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in doc.items():
+            if key.startswith("$"):
+                if isinstance(value, list):
+                    result[key] = [
+                        self._prefix_mongo_condition(item, prefix)
+                        if isinstance(item, dict) else item
+                        for item in value
+                    ]
+                else:
+                    result[key] = value
+            else:
+                result[f"{prefix}.{key}"] = value
+        return result
+
+    def _compile_embedded_any(
+        self,
+        c: RelationAny,
+        relation_any_lookups: dict[int, str] | None,
+    ) -> dict[str, Any]:
+        relation_meta = getattr(c.relation.model, "__db_metadata__", None)
+        relation_name = c.relation.parts[0]
+        relation = relation_meta.relationships[relation_name]
+        if isinstance(c.condition, RelationAny):
+            nested = self._compile_embedded_any(c.condition, relation_any_lookups)
+        else:
+            nested = self._compile_condition(c.condition, relation_any_lookups)
+        if relation.is_collection:
+            return {relation_name: {"$elemMatch": nested}}
+        return self._prefix_mongo_condition(nested, relation_name)
 
     def compile_mutation(self, m: MutationAST) -> tuple[str, str, dict[str, Any], Any]:
         """Compile a mutation AST into a collection, operation, and arguments."""

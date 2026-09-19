@@ -239,6 +239,7 @@ class RelationshipCoordinator:
         target_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
 
         records: list[dict[str, Any]] = []
+        linked_target_ids: set[Any] = set()
         for child in children or []:
             fk_val = (
                 child.get(target_pk)
@@ -260,8 +261,9 @@ class RelationshipCoordinator:
                 else:
                     # No action: only link targets that are already stored.
                     continue
-            if fk_val is None:
+            if fk_val is None or fk_val in linked_target_ids:
                 continue
+            linked_target_ids.add(fk_val)
             records.append({local_col: parent_id, foreign_col: fk_val})
 
         if records:
