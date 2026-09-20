@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
+import inspect
 import os
 import shutil
+import threading
 import urllib.error
 import urllib.request
 import zipfile
@@ -33,6 +36,42 @@ DESCRIPTION = """Install/update/remove extensions.
 
 EXTENSION_CONFIG = "extension.json"
 EXTENSION_LOCK = "extension-lock.json"
+
+
+def _run_awaitable(value: Any) -> None:
+    """Resolve a lifecycle hook result from the synchronous CLI.
+    """
+    if not inspect.isawaitable(value):
+        return
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(value)
+        return
+
+    error: list[BaseException] = []
+
+    def run_in_thread() -> None:
+        try:
+            asyncio.run(value)
+        except BaseException as exc:
+            error.append(exc)
+
+    thread = threading.Thread(target=run_in_thread)
+    thread.start()
+    thread.join()
+    if error:
+        raise error[0]
+
+
+def _run_hook(install: Any, name: str, app: str) -> None:
+    hook = getattr(install, name, None)
+    if hook is None or not callable(hook):
+        return
+    Terminal.cyan.print(f"  Calling {name}() for {app}...")
+    _run_awaitable(hook())
+
 
 def http_get(url: str, timeout: int = 30) -> tuple[int, dict[str, str], bytes]:
     req = urllib.request.Request(
@@ -253,13 +292,10 @@ def install_app(
             download(dep, "*", installed, mode=mode, base_dir=base_dir)
 
     if mode == "update":
-        update_fn = getattr(install, "update", None) or getattr(install, "setup_update", None)
-        if update_fn and callable(update_fn):
-            Terminal.cyan.print(f"  Calling update() for {app}...")
-            try:
-                update_fn()
-            except Exception as exc:
-                Terminal.red.print(f"  Update error: {exc}")
+        try:
+            _run_hook(install, "update", app)
+        except Exception as exc:
+            Terminal.red.print(f"  Update error: {exc}")
         return
 
     if hasattr(install, "cls") and install.cls:
@@ -316,20 +352,15 @@ def install_app(
             Terminal.red.print(f"  Failed registering config: {exc}")
 
     if mode == "upgrade":
-        upgrade_fn = getattr(install, "upgrade", None) or getattr(install, "setup_upgrade", None)
-        if upgrade_fn and callable(upgrade_fn):
-            Terminal.cyan.print(f"  Calling upgrade() for {app}...")
-            try:
-                upgrade_fn()
-            except Exception as exc:
-                Terminal.red.print(f"  Upgrade error: {exc}")
+        try:
+            _run_hook(install, "upgrade", app)
+        except Exception as exc:
+            Terminal.red.print(f"  Upgrade error: {exc}")
     else:
-        if hasattr(install, "setup") and callable(install.setup):
-            Terminal.cyan.print(f"  Calling setup() for {app}...")
-            try:
-                install.setup()
-            except Exception as exc:
-                Terminal.red.print(f"  Setup error: {exc}")
+        try:
+            _run_hook(install, "setup", app)
+        except Exception as exc:
+            Terminal.red.print(f"  Setup error: {exc}")
 
 def install_all(
     apps: dict[str, str],

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
+import inspect
 import os
 import shutil
+import threading
 from typing import Any
 
 from renus.commands.extension.build import (
@@ -14,6 +17,32 @@ from renus.commands.extension.build import (
     _remove_route,
 )
 from renus.rich import Terminal
+
+
+def _run_awaitable(value: object) -> None:
+    if not inspect.isawaitable(value):
+        return
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(value)
+        return
+
+    error: list[BaseException] = []
+
+    def run_in_thread() -> None:
+        try:
+            asyncio.run(value)
+        except BaseException as exc:
+            error.append(exc)
+
+    thread = threading.Thread(target=run_in_thread)
+    thread.start()
+    thread.join()
+    if error:
+        raise error[0]
+
 
 def remove_all(installed: dict[str, str], base_dir: str = "./") -> None:
     items = list(installed.copy().keys())
@@ -31,10 +60,10 @@ def remove(app: str, installed: dict[str, str], base_dir: str = "./") -> None:
     except Exception as exc:
         Terminal.yellow.print(f"   Notice: {exc}")
 
-    if install is not None and hasattr(install, "setup_remove"):
-        Terminal.dim.print(f"   Running setup_remove for {app}...")
+    if install is not None and hasattr(install, "remove"):
+        Terminal.dim.print(f"   Running remove for {app}...")
         try:
-            install.setup_remove()
+            _run_awaitable(install.remove())
         except Exception as exc:
             Terminal.red.print(f"   Setup remove error: {exc}")
 
