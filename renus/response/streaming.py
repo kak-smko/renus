@@ -103,5 +103,3 @@ class StreamingResponse(Response):
             await wrap(partial(self.listen_for_disconnect, receive))
         if self.background is not None:
             await self.background()
-
-__all__ = ["StreamingResponse"]

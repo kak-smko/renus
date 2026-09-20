@@ -43,11 +43,3 @@ class Middleware:
 
     __call__ = next
 
-__all__ = [
-    "EndpointFunc",
-    "LegacyMiddlewareFunc",
-    "Middleware",
-    "MiddlewareFunc",
-    "is_onion_middleware",
-    "run_middleware_chain",
-]

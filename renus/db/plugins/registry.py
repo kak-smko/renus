@@ -10,15 +10,6 @@ from renus.db.mongodb import MongoDBAdapter
 from renus.db.mysql import MySQLAdapter
 from renus.db.sqlite import SQLiteAdapter
 
-__all__ = [
-    "adapters",
-    "clear_adapters",
-    "get_adapter",
-    "has_adapter",
-    "register_adapter",
-    "reset_builtin_adapters",
-    "unregister_adapter",
-]
 
 _REGISTRY: dict[str, Any] = {}
 ENTRY_POINT_GROUPS = ("db.adapters", "renus.db.adapters")

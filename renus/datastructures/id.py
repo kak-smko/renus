@@ -25,8 +25,6 @@ from uuid import UUID, uuid4
 
 from renus.config import Config
 
-__all__ = ["ID", "is_identity"]
-
 
 class ID:
     """Identity value resolved from the configured identity object."""

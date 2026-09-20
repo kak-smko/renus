@@ -101,5 +101,3 @@ try:
     query_parser = _fast_query_parser
 except ImportError:
     headers_parser = _pure_headers_parser
-
-__all__ = ["headers_parser", "cookie_parser", "query_parser"]

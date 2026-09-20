@@ -40,5 +40,3 @@ class GzipStreamer:
         data = buffer.read(end - self._offset)
         self._offset = end
         return data
-
-__all__ = ["GzipStreamer", "GZIP_MIN_LENGTH"]

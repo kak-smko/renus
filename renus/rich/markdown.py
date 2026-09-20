@@ -6,8 +6,6 @@ from typing import Callable
 from ._style import _Style
 from .table import Table
 
-__all__ = ["Markdown", "markdown"]
-
 _BOLD = _Style(1)
 _ITALIC = _Style(3)
 _CODE = _Style(36)

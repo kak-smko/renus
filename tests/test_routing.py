@@ -6,7 +6,7 @@ import pytest
 
 
 from renus.config import Config
-from renus.db.models.id import ID
+from renus.datastructures import ID
 from renus.router import (
     CONVERTOR_TYPES,
     Middleware,

@@ -17,12 +17,10 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-
+from renus.datastructures.id import ID
 from renus.config import Config
 from renus.db import (
-    ID,
     Avg,
-
     Column,
     Count,
     Database,
@@ -51,7 +49,7 @@ from renus.db import (
     Sum,
 
 )
-from renus.db.models.id import ID
+from renus.datastructures import ID
 from renus.db.query.ast import Path, QueryAST
 from tests.db.deep_relation_models import DEEP_RELATION_FAMILIES
 from tests.db.deep_embedded_models import (

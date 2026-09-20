@@ -164,5 +164,3 @@ class FileResponse(Response):
             self.on_end()
         if self.background is not None:
             await self.background()
-
-__all__ = ["FileResponse"]

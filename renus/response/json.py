@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import Any, Mapping, Optional
 from urllib.parse import quote_plus
 
-from renus.datastructures import Background, dumps_bytes
+from renus.datastructures import Background
 from renus.response.base import Response
 from renus.response.status import Status
+from renus.util import dumps_bytes
 
 class JsonResponse(Response):
     """JSON-encoded response."""
@@ -55,4 +56,3 @@ class JsonResponseRedirect(Response):
         content = {"location": quote_plus(url, safe="://%#?&=@[]!$&'()*+,;")}
         return dumps_bytes(content)
 
-__all__ = ["JsonResponse", "JsonResponseRedirect"]

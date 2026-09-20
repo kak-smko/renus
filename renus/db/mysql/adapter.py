@@ -27,7 +27,6 @@ try:
 except ImportError:
     aiomysql = None
 
-__all__ = ["MySQLAdapter", "MySQLTransactionContext"]
 
 DEFAULT_MYSQL_MIN_POOL = 5
 DEFAULT_MYSQL_MAX_POOL = 100

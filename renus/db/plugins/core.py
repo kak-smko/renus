@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from renus.db.database import Database
 
-__all__ = ["Plugin", "PluginManager"]
 
 class Plugin:
     """Base class defining a database lifecycle and hook plugin."""

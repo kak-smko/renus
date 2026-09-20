@@ -149,5 +149,3 @@ class MultiPartParser:
         filename = options.get("filename")
         content_type = _decode_ascii(headers.get("content-type"))
         return name, filename, content_type
-
-__all__ = ["FormParser", "MultiPartParser"]

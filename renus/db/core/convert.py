@@ -6,9 +6,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from renus.db.models.id import ID
-
-__all__ = ["decode_value", "encode_value"]
+from renus.datastructures.id import ID
 
 
 def encode_value(value: Any, field_meta: Any = None) -> Any:

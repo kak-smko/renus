@@ -10,7 +10,6 @@ import pytest
 from renus.db import (
     DatabaseField,
     Field,
-    ID,
     Model,
     ValidationError,
     from_dict,
@@ -20,6 +19,7 @@ from renus.db import (
     to_json,
 )
 
+from renus.datastructures.id import ID
 
 class RoleEnum(Enum):
     ADMIN = "admin"

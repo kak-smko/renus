@@ -145,5 +145,3 @@ class WebSocket(Request, WebSocketProtocol):
         except WebSocketProtocolError:
 
             pass
-
-__all__ = ["WebSocket"]

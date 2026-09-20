@@ -2,7 +2,6 @@ from typing import List
 
 import pytest
 
-from renus.datastructures import jsonEncoder
 from renus.websockets import (
     WebSocket,
     WebSocketCloseCode,

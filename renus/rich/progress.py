@@ -5,8 +5,6 @@ import sys
 from ._style import _Style
 from .style_context import lookup_style
 
-__all__ = ["Progress"]
-
 _FILLED = "█"
 _EMPTY = "░"
 

@@ -90,5 +90,3 @@ class WebSocketProtocol:
         elif message_type == "websocket.close":
             self.application_state = WebSocketState.DISCONNECTED
         await self._send(message)
-
-__all__ = ["WebSocketProtocol", "WebSocketProtocolError"]

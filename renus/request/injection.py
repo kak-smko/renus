@@ -41,4 +41,3 @@ class Injection:
             return self.__list_handle(value)
         return self.escape(str(value))
 
-__all__ = ["Injection"]

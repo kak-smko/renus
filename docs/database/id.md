@@ -2,12 +2,19 @@
 
 `ID` is Renus's configurable identity value type. Use it when a model's primary key should follow the identity configured for the active database instead of being tied directly to `int`, `str`, `ObjectId`, or `UUID`.
 
+`ID` lives in the `renus.datastructures` package:
+
+```python
+from renus.datastructures import ID
+```
+
 ## 1. `ID` in one minute
 
 A model can use `ID` as its primary-key type:
 
 ```python
-from renus.db import DatabaseField, Field, ID, Model
+from renus.datastructures import ID
+from renus.db import DatabaseField, Field, Model
 
 
 class Document(Model):
@@ -44,7 +51,8 @@ Renus automatically gives a model a generated integer `id` field when it declare
 The `_id` spelling is useful when the database or document model convention uses `_id`. A field named `id` is also valid:
 
 ```python
-from renus.db import DatabaseField, Field, ID, Model
+from renus.datastructures import ID
+from renus.db import DatabaseField, Field, Model
 
 
 class User(Model):
@@ -113,7 +121,7 @@ If the configuration is missing, Renus uses `int` as the default identity config
 Calling `ID()` creates a new identity according to the configuration:
 
 ```python
-from renus.db import ID
+from renus.datastructures import ID
 
 new_identity = ID()
 ```
@@ -134,7 +142,7 @@ ID = int
 ```
 
 ```python
-from renus.db import ID
+from renus.datastructures import ID
 
 identity = ID("42")
 
@@ -168,7 +176,8 @@ hash(identity)      # hash of the wrapped value
 A complete model using a generated configured identity looks like this:
 
 ```python
-from renus.db import DatabaseField, Field, ID, Model
+from renus.datastructures import ID
+from renus.db import DatabaseField, Field, Model
 
 
 class Document(Model):
@@ -315,7 +324,8 @@ ID = UUID
 ```
 
 ```python
-from renus.db import DatabaseField, Field, ID, Model
+from renus.datastructures import ID
+from renus.db import DatabaseField, Field, Model
 
 
 class Event(Model):

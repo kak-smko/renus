@@ -9,7 +9,7 @@ from typing import Any, get_args, get_origin
 from uuid import UUID
 
 from renus.db.core.state import IdentityKind
-from renus.db.models.id import ID
+from renus.datastructures.id import ID
 
 _OPTIONAL_RE = re.compile(r"^optional\[\s*(.+)\s*\]$", re.IGNORECASE)
 

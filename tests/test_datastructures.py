@@ -7,14 +7,15 @@ from types import SimpleNamespace
 import pytest
 
 from renus.config import Config
-from renus.db.models.id import ID
+from renus.datastructures import ID
 from renus.datastructures import (
-    MAX_UPLOAD_SIZE,
-    JSONEncoder,
     Background,
     FormData,
     MultiDict,
     UploadFile,
+)
+from renus.util.serialization import (
+    JSONEncoder,
     dumps,
     jsonEncoder,
     json_decoder,
@@ -178,9 +179,6 @@ def test_uploadfile_repr():
     uf = _sync_upload()
     assert "UploadFile" in repr(uf)
     assert "a.txt" in repr(uf)
-
-def test_max_upload_size_config_default():
-    assert MAX_UPLOAD_SIZE == 50 * 1024 * 1024
 
 
 @pytest.mark.asyncio

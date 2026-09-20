@@ -5,7 +5,6 @@ import string
 import pytest
 
 from renus.util import (
-    DEFAULT_ALPHABET,
     CodecError,
     add_pad64,
     decode64,
@@ -43,8 +42,6 @@ class TestSecurity:
         assert is_correct_password(stored, "s3crét-🙂") is True
 
 class TestRandom:
-    def test_default_alphabet_is_ascii_letters(self):
-        assert DEFAULT_ALPHABET == string.ascii_letters
 
     def test_random_string_length(self):
         assert len(get_random_string(12)) == 12

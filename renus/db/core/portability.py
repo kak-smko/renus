@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from enum import Enum
 
-__all__ = ["Portability", "PortabilityKind"]
 
 class PortabilityKind(str, Enum):
     """Classification of a feature's portability across backends."""

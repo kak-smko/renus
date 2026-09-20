@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
-from renus.db.models.id import ID
+from renus.datastructures.id import ID
 
 if TYPE_CHECKING:
     from renus.db.models.db_field import DatabaseField

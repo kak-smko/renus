@@ -15,7 +15,6 @@ from renus.db.mutation.ast import (
 from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
 from renus.db.sql.dialect.base import SQLDialect
 
-__all__ = ["SQLMutationCompiler"]
 
 class SQLMutationCompiler:
 

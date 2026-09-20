@@ -72,5 +72,3 @@ class Status(IntEnum):
     WS_1013_TRY_AGAIN_LATER = 1013
     WS_1014_BAD_GATEWAY = 1014
     WS_1015_TLS_HANDSHAKE = 1015
-
-__all__ = ["Status"]

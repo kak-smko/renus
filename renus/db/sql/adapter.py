@@ -13,7 +13,6 @@ from renus.db.sql.dialect.base import SQLDialect
 from renus.db.sql.mutation import SQLMutationCompiler
 from renus.util import to_plural_lower
 
-__all__ = ["SQLAdapter"]
 
 
 class SQLAdapter(AsyncDatabaseAdapter):

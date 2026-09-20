@@ -38,5 +38,3 @@ class WebSocketCloseCode(enum.IntEnum):
     INTERNAL_ERROR = 1011
     SERVICE_RESTART = 1012
     TRY_AGAIN_LATER = 1013
-
-__all__ = ["WebSocketState", "WebSocketDisconnect", "WebSocketCloseCode"]

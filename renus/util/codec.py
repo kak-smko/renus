@@ -5,22 +5,13 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from binascii import Error as _BinasciiError
 from typing import Any, Callable
 
-from renus.datastructures.serialization import dumps
+from renus.util.serialization import dumps
 
 try:
     import orjson as _orjson
 except ImportError:
     _orjson = None
 
-__all__ = [
-    "CodecError",
-    "add_pad64",
-    "decode64",
-    "encode64",
-    "json_decode",
-    "json_encode",
-    "remove_pad64",
-]
 
 class CodecError(RuntimeError):
     """Raised when decoding an encode64 value fails."""

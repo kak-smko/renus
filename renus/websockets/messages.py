@@ -32,10 +32,3 @@ def close_message(code: int = 1000) -> dict:
     """Build a ``close`` message with the given status code."""
     return {"type": "websocket.close", "code": code}
 
-__all__ = [
-    "accept_message",
-    "close_message",
-    "send_text_message",
-    "send_bytes_message",
-    "send_json_message",
-]

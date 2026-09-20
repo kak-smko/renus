@@ -9,12 +9,11 @@ from uuid import UUID
 
 from renus.db.core import convert
 from renus.db.metadata.core import FieldMetadata
-from renus.db.models.id import ID, is_identity
+from renus.datastructures.id import ID, is_identity
 
 if TYPE_CHECKING:
     from renus.db.migrations.operations import Column
 
-__all__ = ["SQLDialect"]
 
 
 class SQLDialect(ABC):

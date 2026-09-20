@@ -14,7 +14,6 @@ from renus.db import (
     EmbeddedOne,
     Field,
     FieldMetadata,
-
     IdentityKind,
     IdentityMetadata,
     Index,
@@ -22,7 +21,6 @@ from renus.db import (
     ManyToMany,
     ManyToOne,
     ModelMetadata,
-    ID,
     OneToMany,
     OneToOne,
     Path,
@@ -35,7 +33,7 @@ from renus.db import (
 )
 from renus.db.query.ast import Operator
 from renus.db.validation.rules import Email, MinLen
-
+from renus.datastructures.id import ID
 
 class ComprehensiveTypesModel(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))

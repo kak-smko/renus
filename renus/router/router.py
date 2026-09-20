@@ -207,5 +207,3 @@ class Router:
         self._add(path, controller, f"{func_prefix}m_update", "PUT", middlewares)
         self._add(path, controller, f"{func_prefix}m_delete", "DELETE", middlewares)
         return self
-
-__all__ = ["Router"]

@@ -27,11 +27,6 @@ _MIN_ITERATIONS = 100_000
 _MAX_ITERATIONS = 10_000_000
 _B64_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
-__all__ = [
-    "hash_new_password",
-    "is_correct_password",
-]
-
 
 def _require_text(value: object, name: str) -> bytes:
     if not isinstance(value, str):

@@ -35,7 +35,6 @@ except ImportError:
     AsyncMongoClient = None
     ReturnDocument = None
 
-__all__ = ["MongoDBAdapter", "MongoTransactionContext"]
 
 DEFAULT_MAX_POOL = 100
 DEFAULT_MIN_POOL = 10

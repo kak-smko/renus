@@ -11,12 +11,6 @@ from anyio.to_thread import run_sync
 
 T = TypeVar("T")
 
-__all__ = [
-    "iterate_in_threadpool",
-    "run_in_processpool",
-    "run_in_threadpool",
-    "shutdown_pool",
-]
 
 class _StopIteration(Exception):
     pass

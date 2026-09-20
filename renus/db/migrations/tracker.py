@@ -5,8 +5,6 @@ from datetime import datetime, timezone
 
 from renus.db.core.adapter import AsyncDatabaseAdapter
 
-__all__ = ["MigrationRecord", "MigrationTracker"]
-
 MIGRATIONS_TABLE = "_db_migrations"
 
 @dataclass(frozen=True)

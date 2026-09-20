@@ -14,9 +14,9 @@ from renus.db import (
     DatabaseField,
     DuplicateKeyError,
     Field,
-    ID,
     Model,
 )
+from renus.datastructures.id import ID
 
 from renus.db.sqlite import SQLiteAdapter
 from tests.db._conformance import (

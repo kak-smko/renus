@@ -16,12 +16,11 @@ from renus.db.metadata.core import (
 from renus.db.metadata.inference import analyze_field_type, infer_identity_kind, is_optional_type
 from renus.db.models.db_field import UNSET, DatabaseField
 from renus.db.models.field import Field, FieldInfo, _UNSET
-from renus.db.models.id import ID
+from renus.datastructures.id import ID
 from renus.db.query.ast import Path
 from renus.db.relationships import EmbeddedMany, EmbeddedOne, Relationship
 from renus.util.codec import json_decode
 
-__all__ = ["ModelMeta", "Model"]
 
 _MODEL_REGISTRY: dict[str, type] = {}
 

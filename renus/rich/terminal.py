@@ -9,8 +9,6 @@ from .progress import Progress
 from .style_context import configure_styles
 from .table import Table
 
-__all__ = ["Terminal"]
-
 class Terminal:
     """Namespace of styles and helpers for rendering styled terminal output."""
 

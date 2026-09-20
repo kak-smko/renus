@@ -5,7 +5,6 @@ from typing import Any, Final, override
 
 from renus.util.codec import json_encode
 
-__all__ = ["JsonFormatter"]
 
 _TXT_FORMAT: Final[str] = (
     "[%(asctime)s] %(levelname)-7s %(name)s | %(message)s"

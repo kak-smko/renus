@@ -115,4 +115,3 @@ class Xss(HTMLParser):
             .replace("'", "&#039;")
         )
 
-__all__ = ["Xss"]

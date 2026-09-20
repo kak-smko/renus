@@ -39,4 +39,3 @@ class RedirectResponse(Response):
             background=background,
         )
 
-__all__ = ["RedirectResponse"]

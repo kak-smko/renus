@@ -156,4 +156,3 @@ class RouteRegistry:
         """Reset the singleton so a new registry is created on next access."""
         cls._instance = None
 
-__all__ = ["RouteRegistry", "RouteEntry", "RouteResult"]

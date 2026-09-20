@@ -61,4 +61,3 @@ def _split_unquoted_semicolons(value: str) -> list[str]:
     segments.append("".join(current))
     return segments
 
-__all__ = ["parse_options_header"]

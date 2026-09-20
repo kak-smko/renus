@@ -18,4 +18,3 @@ example
 # Cython build artifact (generated from renus/_speedup.pyx)
 renus/_speedup.c
 _stripdocs.py
-run.py

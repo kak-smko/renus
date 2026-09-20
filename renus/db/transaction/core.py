@@ -5,7 +5,6 @@ from typing import Any
 
 from renus.db.core.adapter import AsyncDatabaseAdapter, TransactionContext
 
-__all__ = ["Transaction"]
 
 class Transaction:
     """Wrap a database transaction in async context manager semantics."""

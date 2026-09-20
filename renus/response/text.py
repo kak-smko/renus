@@ -21,5 +21,3 @@ class TextResponse(Response):
         if isinstance(content, bytes):
             return content
         return str(content).encode(self.charset)
-
-__all__ = ["HtmlResponse", "TextResponse"]

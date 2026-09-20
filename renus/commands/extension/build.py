@@ -7,9 +7,9 @@ from typing import Any
 def _add_cls(install: Any, app: str, base_dir: str = "./") -> None:
     if getattr(install, "cls", None):
         target_dir = os.path.join(base_dir, "app", "extension", app)
-        os.makedirs(target_dir, exist_ok=True)
         for item in install.cls:
             file_path = os.path.join(target_dir, f"{item[0]}.py")
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
             with open(file_path, "a", encoding="utf-8") as file:
                 content = f"from {item[1]} import {item[2]}\n\nclass {item[3]}({item[2]}):\n    pass\n"
                 file.write(content)
@@ -17,9 +17,9 @@ def _add_cls(install: Any, app: str, base_dir: str = "./") -> None:
 def _add_imprt(install: Any, app: str, base_dir: str = "./") -> None:
     if getattr(install, "imprt", None):
         target_dir = os.path.join(base_dir, "app", "extension", app)
-        os.makedirs(target_dir, exist_ok=True)
         for item in install.imprt:
             file_path = os.path.join(target_dir, f"{item[0]}.py")
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
             with open(file_path, "a", encoding="utf-8") as file:
                 file.write(f"from {item[1]} import {item[2]}\n")
 

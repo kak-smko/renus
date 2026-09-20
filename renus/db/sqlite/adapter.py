@@ -32,8 +32,6 @@ from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
 from renus.db.sql.mutation import SQLMutationCompiler
 from renus.db.sqlite.dialect import SQLiteDialect
 
-__all__ = ["SQLiteAdapter", "SQLiteTransactionContext"]
-
 DEFAULT_SQLITE_TIMEOUT = 5.0
 DEFAULT_SQLITE_BUSY_TIMEOUT = 5000
 CONNECT_RETRIES = 3

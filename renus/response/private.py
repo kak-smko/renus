@@ -45,4 +45,3 @@ class PrivateResponse(Response):
         content = f"/storage/private/{rnd}/{content}"
         return content.encode(self.charset)
 
-__all__ = ["PrivateResponse"]
