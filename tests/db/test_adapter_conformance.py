@@ -4387,6 +4387,86 @@ async def downgrade(adapter):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
+@pytest.mark.parametrize(
+    "identity_name",
+    ["str", "int", "ObjectId", "Custom", "UUID"],
+)
+async def test_configured_identity_roundtrip_and_storage(kind, identity_name):
+    """Configured IDs round-trip and use each adapter's physical representation."""
+    if identity_name == "ObjectId":
+        from bson import ObjectId
+
+        identity_config = ObjectId
+        expected_type = ObjectId
+    elif identity_name == "UUID":
+        identity_config = UUID
+        expected_type = UUID
+    elif identity_name == "int":
+        identity_config = int
+        expected_type = int
+    elif identity_name == "str":
+        identity_config = str
+        expected_type = str
+    else:
+        class CustomIdentity:
+            _counter = 0
+
+            def __init__(self, value=None):
+                if value is None:
+                    type(self)._counter += 1
+                    value = f"custom-{type(self)._counter}"
+                self.value = str(value)
+
+            def __str__(self):
+                return self.value
+
+        identity_config = CustomIdentity
+        expected_type = CustomIdentity
+
+    previous_config = Config._cache.get("database")
+    Config._cache["database"] = SimpleNamespace(ID=identity_config)
+    db = None
+    try:
+        class ConfiguredIdentityRecord(Model):
+            id: ID = Field(
+                default_factory=ID,
+                database=DatabaseField(
+                    primary_key=True,
+                    generated=True
+                ),
+            )
+            value: str
+
+        db = Database(adapter_for(kind))
+        await db.connect()
+        await db.create_schema([ConfiguredIdentityRecord])
+        repository = db.repository(ConfiguredIdentityRecord)
+
+        record = await repository.create(ConfiguredIdentityRecord(value="portable"))
+        assert isinstance(record.id, ID)
+        assert isinstance(record.id.value, expected_type)
+
+        fetched = await repository.where(
+            ConfiguredIdentityRecord.id == record.id
+        ).first()
+        assert fetched is not None
+        assert isinstance(fetched.id, ID)
+        assert isinstance(fetched.id.value, expected_type)
+        assert str(fetched.id) == str(record.id)
+        assert fetched.value == "portable"
+
+       
+    finally:
+        if db is not None:
+            await cleanup(db)
+        if previous_config is None:
+            Config._cache.pop("database", None)
+        else:
+            Config._cache["database"] = previous_config
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
 async def test_create_auto_generates_identity_object_id(kind):
     from bson import ObjectId
 

@@ -4,10 +4,12 @@ from __future__ import annotations
 import sys
 import types
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
-from renus.datastructures.id import ID
+from renus.config import Config
+from renus.datastructures.id import ID, is_identity
 
 if TYPE_CHECKING:
     from renus.db.models.db_field import DatabaseField
@@ -133,12 +135,16 @@ class Field:
         self.default_factory = default_factory
         self.error = error
         self.description = description
-
-        if database is None:
-            database = extra.pop("database", None) or extra.pop("db", None)
         self.database = database
-        self.extra = extra
+        if is_identity(self.default_factory) and self.database is not None:
+            configured_id = Config("database").get("ID", int)
+            if configured_id is int:
+                self.database = replace(self.database, auto_inc=True)
+                self.default_factory = None
+            else:
+                self.database = replace(self.database, auto_inc=False)
 
+        self.extra = extra
         self.rules: list[Any] = []
         parsed_rules = list(rules)
         if validator is not None:
@@ -146,10 +152,6 @@ class Field:
         if validators is not None:
             parsed_rules.extend(validators)
         for r in parsed_rules:
-            if hasattr(r, "__class__") and r.__class__.__name__ == "Default":
-                if self.default is _UNSET and self.default_factory is None:
-                    self.default = r.d
-                continue
             self.rules.append(r)
 
 class FieldInfo:
