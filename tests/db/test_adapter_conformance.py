@@ -33,6 +33,7 @@ from renus.db import (
     Include,
     IntegrityError,
     LoadingStrategy,
+    ValidationError,
     ManyToMany,
     ManyToOne,
     Max,
@@ -155,6 +156,16 @@ class SelectinParent(Model):
         foreign_key="selectin_parent_id",
         loading=LoadingStrategy.SELECTIN,
     )
+
+
+class UnannotatedEmbeddedChild(Model):
+    id: int
+    name: str
+
+
+class UnannotatedEmbeddedOwner(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    data = EmbeddedMany(UnannotatedEmbeddedChild)
 
 
 _row_count_models: dict[str, type] = {}
@@ -1741,6 +1752,187 @@ async def test_many_to_many_duplicate_link_reconciliation(kind):
 # Relationships: Embedded, EmbeddedMany, OneToOne, OneToMany,
 # ManyToOne, ManyToMany.
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_unannotated_embedded_many_is_validated_before_save(kind):
+    db = await database_for(kind, [UnannotatedEmbeddedOwner])
+    try:
+        repo = db.repository(UnannotatedEmbeddedOwner)
+
+        with pytest.raises(ValidationError) as exc_info:
+            await repo.create(
+                UnannotatedEmbeddedOwner(
+                    id="unannotated-invalid",
+                    data=[{"id": "1", "name": "invalid"}],
+                )
+            )
+        assert "data[0].id" in str(exc_info.value)
+        assert await repo.count() == 0
+
+        created = await repo.create(
+            UnannotatedEmbeddedOwner(
+                id="unannotated-valid",
+                data=[{"id": 1, "name": "valid"}],
+            )
+        )
+        assert isinstance(created.data[0], UnannotatedEmbeddedChild)
+        assert created.data[0].id == 1
+
+        loaded = await repo.query().include(UnannotatedEmbeddedOwner.data).first()
+        assert loaded is not None
+        assert isinstance(loaded.data[0], UnannotatedEmbeddedChild)
+        assert loaded.data[0].name == "valid"
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_nested_relationship_validation(kind):
+    """Validate nested payloads for every relationship kind on every adapter."""
+    db = await database_for(
+        kind,
+        [Item, Citizen, Passport, User, Post, Employee, Dept, Role],
+    )
+    try:
+        cases = (
+            (
+                Item,
+                "address",
+                Profile,
+                {
+                    "id": "nv-embedded",
+                    "name": "widget",
+                    "address": {"street": "one", "city": "two"},
+                },
+                {
+                    "id": "nv-embedded",
+                    "name": "widget",
+                    "address": {"street": "one", "city": 2},
+                },
+                "address.city",
+            ),
+            (
+                Item,
+                "tags",
+                Tag,
+                {
+                    "id": "nv-embedded-many",
+                    "name": "kit",
+                    "tags": [{"name": "blue"}],
+                },
+                {
+                    "id": "nv-embedded-many",
+                    "name": "kit",
+                    "tags": [{"name": 2}],
+                },
+                "tags[0].name",
+            ),
+            (
+                Citizen,
+                "passport",
+                Passport,
+                {
+                    "id": "nv-one-to-one",
+                    "name": "Ada",
+                    "passport": {"id": "nv-passport", "number": "P-1"},
+                },
+                {
+                    "id": "nv-one-to-one",
+                    "name": "Ada",
+                    "passport": {"id": "nv-passport", "number": 1},
+                },
+                "passport.number",
+            ),
+            (
+                User,
+                "posts",
+                Post,
+                {
+                    "id": "nv-one-to-many",
+                    "username": "ada",
+                    "posts": [{"id": "nv-post", "title": "Hello"}],
+                },
+                {
+                    "id": "nv-one-to-many",
+                    "username": "ada",
+                    "posts": [{"id": "nv-post", "title": 1}],
+                },
+                "posts[0].title",
+            ),
+            (
+                Employee,
+                "dept",
+                Dept,
+                {
+                    "id": "nv-many-to-one",
+                    "name": "Ada",
+                    "dept_id": "nv-dept",
+                    "dept": {"id": "nv-dept", "name": "engineering"},
+                },
+                {
+                    "id": "nv-many-to-one",
+                    "name": "Ada",
+                    "dept_id": "nv-dept",
+                    "dept": {"id": "nv-dept", "name": 1},
+                },
+                "dept.name",
+            ),
+            (
+                Employee,
+                "dept",
+                Dept,
+                {
+                    "id": "nv-many-to-one",
+                    "name": "Ada",
+                    "dept_id": "nv-dept",
+                    "dept": {"id": "nv-dept", "name": "engineering"},
+                },
+                {
+                    "id": "nv-many-to-one",
+                    "name": "Ada",
+                    "dept_id": 123,
+                    "dept": {"id": "nv-dept", "name": "ok"},
+                },
+                "dept_id",
+            ),
+            (
+                Employee,
+                "roles",
+                Role,
+                {
+                    "id": "nv-many-to-many",
+                    "name": "Ada",
+                    "roles": [{"id": "nv-role", "name": "admin"}],
+                },
+                {
+                    "id": "nv-many-to-many",
+                    "name": "Ada",
+                    "roles": [{"id": "nv-role", "name": 1}],
+                },
+                "roles[0].name",
+            ),
+        )
+
+        for owner, relationship, target, valid, invalid, error_path in cases:
+            validated = owner.validate(valid)
+            value = getattr(validated, relationship)
+            if isinstance(value, list):
+                assert value and isinstance(value[0], target)
+            else:
+                assert isinstance(value, target)
+
+            with pytest.raises(ValidationError) as exc_info:
+                owner.validate(invalid)
+            assert any(
+                error_path in message
+                for messages in exc_info.value.errors.values()
+                for message in messages
+            )
+    finally:
+        await cleanup(db)
 
 
 @pytest.mark.asyncio

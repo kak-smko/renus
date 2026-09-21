@@ -152,6 +152,10 @@ class Field:
         if validators is not None:
             parsed_rules.extend(validators)
         for r in parsed_rules:
+            if hasattr(r, "__class__") and r.__class__.__name__ == "Default":
+                if self.default is _UNSET and self.default_factory is None:
+                    self.default = r.d
+                continue
             self.rules.append(r)
 
 class FieldInfo:

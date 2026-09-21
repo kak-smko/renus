@@ -141,7 +141,22 @@ class ModelMeta(type):
         for rname, rel in all_relationships.items():
             rel.__set_name__(cls, rname)
             setattr(cls, rname, rel)
-            validation_fields.pop(rname, None)
+            if rname not in validation_fields:
+                target = rel.target
+                field_type = (
+                    list[target]
+                    if rel.is_collection
+                    and isinstance(target, type)
+                    and target not in (list, dict)
+                    else (list if rel.is_collection else target)
+                )
+                validation_fields[rname] = FieldInfo(
+                    name=rname,
+                    field_type=field_type,
+                    field=Field(default=None if not rel.is_collection else []),
+                    default=None if not rel.is_collection else [],
+                    model_base=Model,
+                )
 
         if "_id" in annotations or "_id" in declared_db_fields:
             _id_type = annotations.get("_id", ID)
@@ -452,6 +467,7 @@ class Model(metaclass=ModelMeta):
 
         return cls(data)
 
+
     @staticmethod
     def _is_model_type(field_type: Any) -> bool:
         return bool(field_type) and isinstance(field_type, type) and issubclass(field_type, Model)
@@ -548,16 +564,6 @@ class Model(metaclass=ModelMeta):
         object.__setattr__(self, "_db_original_snapshot", {})
 
         meta = getattr(self.__class__, "__db_metadata__", None)
-        rel_values: dict[str, Any] = {}
-
-        if meta and meta.relationships:
-            if doc and isinstance(doc, dict):
-                for rname in meta.relationships:
-                    if rname in doc:
-                        rel_values[rname] = doc[rname]
-            for rname in meta.relationships:
-                if rname in kwargs:
-                    rel_values[rname] = kwargs.pop(rname)
 
         try:
 
@@ -621,8 +627,6 @@ class Model(metaclass=ModelMeta):
                 raise
             raise ValidationError(e.args or str(e)) from e
 
-        for rname, rval in rel_values.items():
-            setattr(self, rname, rval)
 
         if meta and meta.timestamps:
             now = datetime.now(timezone.utc)
