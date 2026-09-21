@@ -3,7 +3,7 @@
 Validation turns untrusted input into data that satisfies the rules your application expects. Renus provides two validation styles:
 
 - `Model` and `Field` validation for structured application data.
-- `Validate` with callable rules for dictionaries, forms, and nested input.
+- `Validate` with `Rule` rules for dictionaries, forms, and nested input.
 
 Validation is not authorization. A value can have the correct type and format but still be disallowed for the current user or operation.
 
@@ -22,7 +22,7 @@ class Registration(Model):
     role: str = Field(In("user", "editor"))
 ```
 
-Constructing the model validates its values. `Model.validate` accepts either a dictionary or a JSON string/bytes value:
+Constructing the model validates its values, including dictionary input:
 
 ```python
 from renus.db import ValidationError
@@ -34,13 +34,13 @@ payload = {
 }
 
 try:
-    registration = Registration.validate(payload)
+    registration = Registration(payload)
 except ValidationError as error:
     # error.errors maps field names to lists of messages.
     print(error.errors)
 ```
 
-Invalid JSON raises `ValidationError`. A non-dictionary value also raises `ValidationError`.
+A non-dictionary value raises `ValidationError`.
 
 For a complete reference to `Model`, `Field`, defaults, conversion, nested models, and field rules, see [`/docs/database/fields.md`](/docs/database/fields.md).
 
@@ -98,27 +98,38 @@ profile_rule = Schema({
 })
 ```
 
+`String` is a `Rule` class, so `Each(String)` is normalized to an instance. You can also write `Each(String())`.
+
 Use `MaxDepth` and input-size limits when accepting deeply nested or attacker-controlled structures. Request body, header, cookie, and query limits are described in [`/docs/development/request.md`](/docs/development/request.md).
 
 ## Combining and writing rules
 
-Rules are callable. A custom rule returns `True` for success, `False` for a generic failure, or a Renus error tuple such as `['custom_error', [value]]`:
+Every validation rule must inherit `Rule`. `Rule` requires both a callable `__call__` method and a `json_schema()` method. The callable returns `True` for success, `False` for a generic failure, or a Renus error tuple such as `['custom_error', [value]]`:
 
 ```python
+from typing import Any
+
 from renus.db import Field, Model
+from renus.db.validation import Rule
 
 
-def positive(value):
-    if value is None or value > 0:
-        return True
-    return ["positive_error", [value]]
+class PositiveRule(Rule):
+    def __call__(self, value: Any):
+        if value is None or value > 0:
+            return True
+        return ["positive_error", [value]]
+
+    def json_schema(self):
+        return {"exclusiveMinimum": 0}
 
 
 class Invoice(Model):
-    total: float = Field(positive)
+    total: float = Field(PositiveRule())
 ```
 
-Use `And(rule_a, rule_b)` when every rule must pass and `Or(rule_a, rule_b)` when at least one must pass. Use `Convert` before later rules when input needs normalization or type conversion.
+`Field` rejects plain functions, lambdas, and other opaque callables. If a rule cannot be represented by JSON Schema, its `json_schema()` method should return `{}` rather than guessing at a constraint. `Model.schema()` includes the fragments returned by these methods.
+
+Use `And(rule_a, rule_b)` when every rule must pass and `Or(rule_a, rule_b)` when at least one must pass. Nested rules supplied to `Each`, `And`, and `Or` must also inherit `Rule`. Use `Convert` before later rules when input needs normalization or type conversion.
 
 ## Security checklist
 

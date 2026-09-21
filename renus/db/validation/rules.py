@@ -1,65 +1,94 @@
 import os
 import re
 
+from renus.db.validation.base import Rule
 from renus.db.validation.primitives import Convert, Default, Required
 from renus.db.validation.schema import Schema
 
-def String(input) -> any:
+class String(Rule):
     """Pass when the input is a string."""
-    if input is None:
-        return True
-    t = type(input)
-    if t is str:
-        return True
-    return ['type_error', ['string', str(t)]]
 
-def Bool(input) -> any:
+    def __call__(self, input) -> any:
+        if input is None:
+            return True
+        if type(input) is str:
+            return True
+        return ['type_error', ['string', str(type(input))]]
+
+    def json_schema(self):
+        return {"type": "string"}
+
+
+class Bool(Rule):
     """Pass when the input is a boolean."""
-    if input is None:
-        return True
-    t = type(input)
-    if t is bool:
-        return True
-    return ['type_error', ['bool', str(t)]]
 
-def List(input) -> any:
+    def __call__(self, input) -> any:
+        if input is None:
+            return True
+        if type(input) is bool:
+            return True
+        return ['type_error', ['bool', str(type(input))]]
+
+    def json_schema(self):
+        return {"type": "boolean"}
+
+
+class List(Rule):
     """Pass when the input is a list."""
-    if input is None:
-        return True
-    t = type(input)
-    if t is list:
-        return True
-    return ['type_error', ['list', str(t)]]
 
-def Dict(input) -> any:
+    def __call__(self, input) -> any:
+        if input is None:
+            return True
+        if type(input) is list:
+            return True
+        return ['type_error', ['list', str(type(input))]]
+
+    def json_schema(self):
+        return {"type": "array"}
+
+
+class Dict(Rule):
     """Pass when the input is a dict."""
-    if input is None:
-        return True
-    t = type(input)
-    if t is dict:
-        return True
-    return ['type_error', ['dict', str(t)]]
 
-def Int(input) -> any:
+    def __call__(self, input) -> any:
+        if input is None:
+            return True
+        if type(input) is dict:
+            return True
+        return ['type_error', ['dict', str(type(input))]]
+
+    def json_schema(self):
+        return {"type": "object"}
+
+
+class Int(Rule):
     """Pass when the input is an integer."""
-    if input is None:
-        return True
-    t = type(input)
-    if t is int:
-        return True
-    return ['type_error', ['int', str(t)]]
 
-def Float(input) -> any:
+    def __call__(self, input) -> any:
+        if input is None:
+            return True
+        if type(input) is int:
+            return True
+        return ['type_error', ['int', str(type(input))]]
+
+    def json_schema(self):
+        return {"type": "integer"}
+
+
+class Float(Rule):
     """Pass when the input is a float or integer."""
-    if input is None:
-        return True
-    t = type(input)
-    if t is float or t is int:
-        return True
 
-    return ['type_error', ['float', str(t)]]
+    def __call__(self, input) -> any:
+        if input is None:
+            return True
+        if type(input) in (float, int):
+            return True
+        return ['type_error', ['float', str(type(input))]]
 
-class Len:
+    def json_schema(self):
+        return {"type": "number"}
+
+class Len(Rule):
     """Pass when the input length equals a given value."""
     def __init__(self, length: int):
         """Set the expected length.
@@ -82,7 +111,10 @@ class Len:
         except Exception as e:
             return ['len_error', [self.l, 'type_error']]
 
-class MinLen:
+    def json_schema(self):
+        return {"minLength": self.l, "maxLength": self.l}
+
+class MinLen(Rule):
     """Pass when the input length is at least a given value."""
     def __init__(self, length: int):
         """Set the minimum length.
@@ -105,7 +137,10 @@ class MinLen:
         except Exception as e:
             return ['min_len_error', [self.l, 'type_error']]
 
-class MaxLen:
+    def json_schema(self):
+        return {"minLength": self.l}
+
+class MaxLen(Rule):
     """Pass when the input length is at most a given value."""
     def __init__(self, length: int):
         """Set the maximum length.
@@ -128,7 +163,10 @@ class MaxLen:
         except Exception as e:
             return ['max_len_error', [self.l, 'type_error']]
 
-class Eq:
+    def json_schema(self):
+        return {"maxLength": self.l}
+
+class Eq(Rule):
     """Pass when the input equals a given value."""
     def __init__(self, length: float):
         """Set the expected value.
@@ -148,7 +186,10 @@ class Eq:
             return True
         return ['eq_error', [self.l, input]]
 
-class Min:
+    def json_schema(self):
+        return {"const": self.l}
+
+class Min(Rule):
     """Pass when the input is at least a given value."""
     def __init__(self, length: float):
         """Set the minimum value.
@@ -168,7 +209,10 @@ class Min:
             return True
         return ['min_error', [self.l, input]]
 
-class Max:
+    def json_schema(self):
+        return {"minimum": self.l}
+
+class Max(Rule):
     """Pass when the input is at most a given value."""
     def __init__(self, length: float):
         """Set the maximum value.
@@ -188,26 +232,41 @@ class Max:
             return True
         return ['max_error', [self.l, input]]
 
-def Numeric(input) -> any:
+    def json_schema(self):
+        return {"maximum": self.l}
+
+class Numeric(Rule):
     """Pass when the input contains only digits."""
-    if input is None:
-        return True
-    if re.compile(r'[\d]+').fullmatch(str(input)) != None:
-        return True
-    return ['numeric_error', [input]]
 
-def Accepted(input) -> any:
+    def __call__(self, input) -> any:
+        if input is None:
+            return True
+        if re.fullmatch(r'[\d]+', str(input)) is not None:
+            return True
+        return ['numeric_error', [input]]
+
+    def json_schema(self):
+        return {"type": "string", "pattern": r"^[\d]+$"}
+
+
+class Accepted(Rule):
     """Pass for common affirmative values such as yes, on, or 1."""
-    if input is None:
-        return True
-    if String(input) == True:
-        input = input.lower()
-    acceptable = ['yes', 'on', '1', 1, True, 'true']
-    if input in acceptable:
-        return True
-    return ['accepted_error', [input]]
 
-class Email:
+    def __call__(self, input) -> any:
+        if input is None:
+            return True
+        string_result = String()(input)
+        if string_result is True:
+            input = input.lower()
+        acceptable = ['yes', 'on', '1', 1, True, 'true']
+        if input in acceptable:
+            return True
+        return ['accepted_error', [input]]
+
+    def json_schema(self):
+        return {"enum": ['yes', 'on', '1', 1, True, 'true']}
+
+class Email(Rule):
     """Pass when the input is a valid email address."""
     def __init__(self, allow_domain: list = None):
         """Configure the email rule.
@@ -224,7 +283,7 @@ class Email:
         if input is None:
             return True
 
-        is_string = String(input)
+        is_string = String()(input)
         if is_string == True:
             input = input.lower()
         else:
@@ -249,7 +308,10 @@ class Email:
 
         return True
 
-class In:
+    def json_schema(self):
+        return {"format": "email"}
+
+class In(Rule):
     """Pass when the input is in the allowed set of values."""
     def __init__(self, *vars):
         """Set the allowed values.
@@ -268,7 +330,10 @@ class In:
             return True
         return ['in_error', [input, str(self.vars)]]
 
-class NotIn:
+    def json_schema(self):
+        return {"enum": list(self.vars)}
+
+class NotIn(Rule):
     """Pass when the input is not in the forbidden set of values."""
     def __init__(self, *vars):
         """Set the forbidden values.
@@ -288,7 +353,10 @@ class NotIn:
             return True
         return ['not_in_error', [input, str(self.vars)]]
 
-class Regex:
+    def json_schema(self):
+        return {"not": {"enum": list(self.vars)}}
+
+class Regex(Rule):
     """Pass when the input matches a regular expression."""
     def __init__(self, rule: str, msg: str = None):
         """Configure the regex rule.
@@ -312,33 +380,48 @@ class Regex:
             return True
         return ['regex_error', [input, msg]]
 
-def Url(input):
+    def json_schema(self):
+        return {"pattern": self.rule}
+
+class Url(Rule):
     """Pass when the input is a valid URL."""
-    if input is None:
-        return True
-    string = String(input)
-    if string is not True:
-        return string
-    pattern = r"(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'\".,<>?«»“”‘’]))"
 
-    if re.compile(pattern).fullmatch(input) is not None:
-        return True
-    return ['url_error', [input]]
+    _pattern = r"(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'\".,<>?«»“”‘’]))"
 
-def Ip(input):
+    def __call__(self, input) -> any:
+        if input is None:
+            return True
+        string_result = String()(input)
+        if string_result is not True:
+            return string_result
+        if re.fullmatch(self._pattern, input) is not None:
+            return True
+        return ['url_error', [input]]
+
+    def json_schema(self):
+        return {"type": "string", "format": "uri"}
+
+
+class Ip(Rule):
     """Pass when the input is a valid IPv4 address."""
-    if input is None:
-        return True
-    string = String(input)
-    if string is not True:
-        return string
-    ipv = re.match(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$", input)
-    if bool(ipv) and all(map(lambda n: 0 <= int(n) <= 255, ipv.groups())):
-        return True
 
-    return ['ip_error', [input]]
+    _pattern = r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$"
 
-class Extension:
+    def __call__(self, input) -> any:
+        if input is None:
+            return True
+        string_result = String()(input)
+        if string_result is not True:
+            return string_result
+        ipv = re.match(self._pattern, input)
+        if ipv is not None and all(0 <= int(number) <= 255 for number in ipv.groups()):
+            return True
+        return ['ip_error', [input]]
+
+    def json_schema(self):
+        return {"type": "string", "format": "ipv4"}
+
+class Extension(Rule):
     """Pass when the input has an allowed file extension."""
     def __init__(self, extensions: list = None):
         """Set the allowed extensions.
@@ -369,7 +452,11 @@ class Extension:
             return ['extension_error', [string]]
         return True
 
-class Unique:
+    def json_schema(self):
+        suffixes = [re.escape(str(extension)) for extension in self.allowed]
+        return {"pattern": rf"(?:{'|'.join(suffixes)})$"} if suffixes else {}
+
+class Unique(Rule):
     """Pass when the field value is unique on the model."""
     def __init__(self, model, field, current_id=None):
         """Configure the unique rule.
@@ -402,7 +489,10 @@ class Unique:
             return True
         return ['unique_error', [input]]
 
-class Exists:
+    def json_schema(self):
+        return {}
+
+class Exists(Rule):
     """Pass when the field value exists on the model."""
     def __init__(self, model, field):
         """Configure the exists rule.
@@ -429,7 +519,10 @@ class Exists:
             return True
         return ['exists_error', [input]]
 
-class ExistsCount:
+    def json_schema(self):
+        return {}
+
+class ExistsCount(Rule):
     """Pass when matching record counts satisfy the configured bounds."""
     def __init__(self, model, field, count: int = None, minCount: int = None, maxCount: int = None):
         """Configure the existence-count constraints.
@@ -467,7 +560,10 @@ class ExistsCount:
             return True
         return ['exists_count_error', [input]]
 
-class FileSize:
+    def json_schema(self):
+        return {}
+
+class FileSize(Rule):
     """Pass when file sizes fall within the allowed byte range."""
     def __init__(self, max_byte: int = 0, min_byte: int = 0, replace: list = None, item_dict: str = None):
         """Configure the file size constraints.
@@ -526,8 +622,11 @@ class FileSize:
 
         return passed
 
+    def json_schema(self):
+        return {}
 
-class Each:
+
+class Each(Rule):
     """Apply a set of rules to every item of a collection."""
 
     def __init__(self, *rules):
@@ -538,7 +637,14 @@ class Each:
         rules:
             Rules to run against every collection item.
         """
-        self.rules = rules
+        normalized = []
+        for rule in rules:
+            if isinstance(rule, type) and issubclass(rule, Rule):
+                rule = rule()
+            if not isinstance(rule, Rule):
+                raise TypeError("Validation rules must inherit Rule")
+            normalized.append(rule)
+        self.rules = tuple(normalized)
 
     def __call__(self, input):
         if input is None:
@@ -565,7 +671,17 @@ class Each:
             return ['each_error', [errors]]
         return True
 
-class MaxDepth:
+    def json_schema(self):
+        fragments = []
+        for rule in self.rules:
+            exporter = getattr(rule, "json_schema", None)
+            if callable(exporter):
+                fragment = exporter()
+                if fragment:
+                    fragments.append(fragment)
+        return {"items": {"allOf": fragments}} if fragments else {}
+
+class MaxDepth(Rule):
     """Pass when nested input stays within a maximum depth."""
 
     def __init__(self, max_depth: int ):
@@ -601,7 +717,10 @@ class MaxDepth:
             return max(self._calculate_depth(item, current_depth + 1) for item in obj)
         return current_depth
 
-class Or:
+    def json_schema(self):
+        return {}
+
+class Or(Rule):
     """Pass when at least one of the given rules passes."""
 
     def __init__(self, *rules):
@@ -612,7 +731,14 @@ class Or:
         rules:
             Rules of which at least one must pass.
         """
-        self.rules = rules
+        normalized = []
+        for rule in rules:
+            if isinstance(rule, type) and issubclass(rule, Rule):
+                rule = rule()
+            if not isinstance(rule, Rule):
+                raise TypeError("Validation rules must inherit Rule")
+            normalized.append(rule)
+        self.rules = tuple(normalized)
 
     def __call__(self, input):
         if input is None:
@@ -627,7 +753,17 @@ class Or:
 
         return ['or_error', [errors]]
 
-class And:
+    def json_schema(self):
+        fragments = []
+        for rule in self.rules:
+            exporter = getattr(rule, "json_schema", None)
+            if callable(exporter):
+                fragment = exporter()
+                if fragment:
+                    fragments.append(fragment)
+        return {"anyOf": fragments} if fragments else {}
+
+class And(Rule):
     """Pass when all of the given rules pass."""
 
     def __init__(self, *rules):
@@ -638,7 +774,14 @@ class And:
         rules:
             Rules of which every one must pass.
         """
-        self.rules = rules
+        normalized = []
+        for rule in rules:
+            if isinstance(rule, type) and issubclass(rule, Rule):
+                rule = rule()
+            if not isinstance(rule, Rule):
+                raise TypeError("Validation rules must inherit Rule")
+            normalized.append(rule)
+        self.rules = tuple(normalized)
 
     def __call__(self, input):
         if input is None:
@@ -653,3 +796,13 @@ class And:
             return True
 
         return ['and_error', [errors]]
+
+    def json_schema(self):
+        fragments = []
+        for rule in self.rules:
+            exporter = getattr(rule, "json_schema", None)
+            if callable(exporter):
+                fragment = exporter()
+                if fragment:
+                    fragments.append(fragment)
+        return {"allOf": fragments} if fragments else {}

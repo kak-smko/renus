@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, ClassVar
 
 from renus.db.core.exceptions import ValidationError
@@ -16,10 +16,10 @@ from renus.db.metadata.core import (
 from renus.db.metadata.inference import analyze_field_type, infer_identity_kind, is_optional_type
 from renus.db.models.db_field import UNSET, DatabaseField
 from renus.db.models.field import Field, FieldInfo, _UNSET
+from renus.db.validation.base import Rule
 from renus.datastructures.id import ID
 from renus.db.query.ast import Path
 from renus.db.relationships import EmbeddedMany, EmbeddedOne, Relationship
-from renus.util.codec import json_decode
 
 
 _MODEL_REGISTRY: dict[str, type] = {}
@@ -453,20 +453,205 @@ class Model(metaclass=ModelMeta):
 
         cls._model_fields = fields
 
+
     @classmethod
-    def validate(cls, data: Any) -> Model:
-        """Validate input data and construct a new model instance."""
-        if isinstance(data, (str, bytes)):
-            try:
-                data = json_decode(data)
-            except Exception as e:
-                raise ValidationError(f"Invalid JSON format: {e}")
+    def schema(cls) -> dict[str, Any]:
+        """Return a JSON Schema for the model.
 
-        if not isinstance(data, dict):
-            raise ValidationError(f"Expected dict or JSON object, got {type(data).__name__}")
+        The schema is derived from the model's annotations, validation rules,
+        and relationship metadata. Nested model fields and relationships are
+        represented recursively, including relationships declared without an
+        annotation such as ``items = EmbeddedMany(Item)``.
 
-        return cls(data)
+        The returned dictionary is JSON-serializable and follows the JSON
+        Schema vocabulary. Models that contain recursive relationships use
+        ``$defs`` and ``$ref`` to avoid infinite schemas.
+        """
+        referenced: set[type] = set()
+        definitions: dict[str, dict[str, Any]] = {}
 
+        def definition_name(model: type) -> str:
+            return model.__name__
+
+        def json_value(value: Any) -> Any:
+            if isinstance(value, (datetime, date)):
+                return value.isoformat()
+            if isinstance(value, ID):
+                return json_value(value.value)
+            if isinstance(value, Model):
+                return {key: json_value(item) for key, item in dict(value).items()}
+            if isinstance(value, list):
+                return [json_value(item) for item in value]
+            if isinstance(value, tuple):
+                return [json_value(item) for item in value]
+            if isinstance(value, dict):
+                return {str(key): json_value(item) for key, item in value.items()}
+            if value is None or isinstance(value, (str, int, float, bool)):
+                return value
+            return None
+
+        def add_nullable(value_schema: dict[str, Any]) -> dict[str, Any]:
+            if not value_schema or value_schema.get("type") == "null":
+                return value_schema
+            result = dict(value_schema)
+            value_type = result.get("type")
+            if isinstance(value_type, str):
+                result["type"] = [value_type, "null"]
+            else:
+                result = {"anyOf": [value_schema, {"type": "null"}]}
+            return result
+
+        def rule_schema(field_info: FieldInfo) -> dict[str, Any]:
+            """Collect schema fragments explicitly supplied by validation rules.
+
+            Every validation rule is a ``Rule`` and provides its own JSON
+            Schema fragment through ``json_schema()``.
+            """
+            result: dict[str, Any] = {}
+            for rule in field_info.field.rules:
+                if not isinstance(rule, Rule):
+                    raise TypeError("Validation rules must inherit Rule")
+                fragment = rule.json_schema()
+                if not isinstance(fragment, dict):
+                    raise TypeError(
+                        f"{type(rule).__name__}.json_schema() must return a dict"
+                    )
+                result.update(fragment)
+            return result
+
+        def type_schema(field_info: FieldInfo, stack: set[type]) -> dict[str, Any]:
+            if field_info.is_model and field_info.model_cls is not None:
+                return model_schema(field_info.model_cls, stack)
+            if field_info.is_model_list and field_info.model_cls is not None:
+                return {
+                    "type": "array",
+                    "items": model_schema(field_info.model_cls, stack),
+                }
+
+            type_names: list[str] = []
+            formats: list[str] = []
+            for field_type in field_info.effective_types:
+                if field_type is str:
+                    type_name = "string"
+                elif field_type is int:
+                    type_name = "integer"
+                elif field_type is float:
+                    type_name = "number"
+                elif field_type is bool:
+                    type_name = "boolean"
+                elif field_type is list:
+                    type_name = "array"
+                elif field_type is dict:
+                    type_name = "object"
+                elif field_type is date:
+                    type_name = "string"
+                    formats.append("date")
+                elif field_type is datetime:
+                    type_name = "string"
+                    formats.append("date-time")
+                elif field_type is ID:
+                    type_name = "string"
+                elif field_type in (Any, object):
+                    continue
+                else:
+
+                    # Custom runtime types need an explicit schema rule or a
+                    # custom Model schema implementation.
+                    continue
+                if type_name not in type_names:
+                    type_names.append(type_name)
+
+            if not type_names:
+                result: dict[str, Any] = {}
+            elif type_names == ["integer|string"]:
+                result = {"type": ["integer", "string"]}
+            elif len(type_names) == 1:
+                result = {"type": type_names[0]}
+            else:
+                result = {"type": type_names}
+            if formats and result.get("type") == "string":
+                result["format"] = formats[0]
+            return result
+
+        def field_schema(field_info: FieldInfo, stack: set[type]) -> dict[str, Any]:
+            result = type_schema(field_info, stack)
+            result.update(rule_schema(field_info))
+            if field_info.field.description:
+                result["description"] = field_info.field.description
+            if field_info.has_default and field_info.field.default is not _UNSET:
+                result["default"] = json_value(field_info.field.default)
+            if field_info.is_nullable:
+                result = add_nullable(result)
+            return result
+
+        def relationship_schema(rel: RelationshipMetadata, stack: set[type]) -> dict[str, Any]:
+            target = rel.target
+            if target is dict:
+                result: dict[str, Any] = {"type": "object"}
+            elif target is list:
+                result = {"type": "array", "items": {}}
+            elif isinstance(target, type) and issubclass(target, Model):
+                result = model_schema(target, stack)
+            else:
+                result = {}
+
+            if rel.is_collection:
+                if result.get("type") != "array":
+                    result = {"type": "array", "items": result}
+            else:
+                result = add_nullable(result)
+            return result
+
+        def model_schema(model: type, stack: set[type]) -> dict[str, Any]:
+            if model in stack:
+                referenced.add(model)
+                return {"$ref": f"#/$defs/{definition_name(model)}"}
+
+            next_stack = set(stack)
+            next_stack.add(model)
+            metadata = model.metadata()
+            relationships = metadata.relationships
+            properties: dict[str, Any] = {}
+            required: list[str] = []
+
+            for name, field_info in model._model_fields.items():
+                if name in relationships:
+                    continue
+                properties[name] = field_schema(field_info, next_stack)
+                if field_info.required or any(
+                    getattr(rule, "is_required", False)
+                    for rule in field_info.field.rules
+                ):
+                    required.append(name)
+
+            for name, relationship in relationships.items():
+                properties[name] = relationship_schema(relationship, next_stack)
+
+            result: dict[str, Any] = {
+                "title": model.__name__,
+                "type": "object",
+                "properties": properties,
+                "additionalProperties": True,
+            }
+            if required:
+                result["required"] = required
+            return result
+
+        result = model_schema(cls, set())
+        pending = list(referenced)
+        while pending:
+            model = pending.pop()
+            name = definition_name(model)
+            if name in definitions:
+                continue
+            before = set(referenced)
+            definitions[name] = model_schema(model, {model})
+            pending.extend(referenced - before)
+
+        if definitions:
+            result["$defs"] = definitions
+        result["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+        return result
 
     @staticmethod
     def _is_model_type(field_type: Any) -> bool:

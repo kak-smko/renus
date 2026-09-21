@@ -121,7 +121,7 @@ Use `Field` for application-level behavior:
 - descriptions;
 - sensitive-value masking.
 
-Validation constraints are supplied as callable rules, for example `Field(MinLen(3), MaxLen(30))`.
+Validation constraints are supplied as `Rule` instances, for example `Field(MinLen(3), MaxLen(30))`. Custom rules must inherit `Rule` and implement both `__call__()` and `json_schema()`.
 
 Use `DatabaseField` for persistence behavior:
 
@@ -223,7 +223,7 @@ class Product(Model):
     code: str = Field(Regex(r"[A-Z]{3}-[0-9]{4}"))
 ```
 
-Validation constraints are callable rules. Use `Field(MinLen(2), MaxLen(100))`, `Field(In(...))`, `Field(Regex(...))`, or your own validator function. `default`, `default_factory`, `validator`, `validators`, `description`, and `sensitive` are `Field` options.
+Validation constraints are `Rule` instances. Use `Field(MinLen(2), MaxLen(100))`, `Field(In(...))`, or `Field(Regex(...))`. Custom rules must inherit `Rule` and implement `__call__()` and `json_schema()`. `default`, `default_factory`, `validator`, `validators`, `description`, and `sensitive` are `Field` options.
 
 ### Validation rules
 
@@ -240,20 +240,27 @@ class User(Model):
     role: str = Field(In("admin", "member"))
 ```
 
-A rule is a callable. It returns `True` for valid input or an error result for invalid input. Custom validators can therefore be ordinary functions:
+A rule inherits `Rule`. Its `__call__()` method returns `True` for valid input or an error result for invalid input, and `json_schema()` returns the corresponding JSON Schema fragment:
 
 ```python
+from typing import Any
+
 from renus.db import Field, Model
+from renus.db.validation import Rule
 
 
-def positive_number(value):
-    if value is None or value > 0:
-        return True
-    return "must be positive"
+class PositiveNumber(Rule):
+    def __call__(self, value: Any):
+        if value is None or value > 0:
+            return True
+        return "must be positive"
+
+    def json_schema(self):
+        return {"exclusiveMinimum": 0}
 
 
 class Invoice(Model):
-    total: float = Field(positive_number)
+    total: float = Field(PositiveNumber())
 ```
 
 ### Handling validation errors
@@ -275,11 +282,11 @@ except ValidationError as error:
     # }
 ```
 
-Use `Model.validate` when the input may be a dictionary or a JSON object:
+Pass dictionary input to the model constructor for validation:
 
 ```python
-payload = '{"username": "alice", "email": "alice@example.com", "role": "member"}'
-user = User.validate(payload)
+payload = {"username": "alice", "email": "alice@example.com", "role": "member"}
+user = User(payload)
 ```
 
 ## 6. Nested models and embedded data
@@ -756,7 +763,7 @@ class Employee(Model):
         )
 ```
 
-Use `Field` validation options and callable rules for application-level data rules.
+Use `Field` validation options and `Rule` instances for application-level data rules.
 
 ```python
 class Assignment(Model):

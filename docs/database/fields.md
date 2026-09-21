@@ -185,7 +185,7 @@ class Product(Model):
     code: str = Field(Regex(r"[A-Z]{3}-[0-9]{4}"))
 ```
 
-Built-in rules are callable objects or functions. Common rules include:
+Built-in rules are callable `Rule` objects. Every rule implements `json_schema()` so it can describe its JSON Schema fragment. Common rules include:
 
 | Rule | Purpose | Example |
 | --- | --- | --- |
@@ -219,46 +219,32 @@ A rule can return:
 
 Rules run before Renus performs the field's type check.
 
-### Custom validation functions
+### Custom validation rules
 
-A custom validator is an ordinary callable. Return `True` for a valid value or return an error message for invalid input:
+Custom rules must inherit `Rule` and implement both `__call__()` and `json_schema()`. Return `True` for a valid value or return an error-compatible result for invalid input:
 
 ```python
+from typing import Any
+
 from renus.db import Field, Model
+from renus.db.validation import Rule
 
 
-def positive_number(value):
-    if value is None or value > 0:
-        return True
-    return "must be positive"
+class PositiveNumber(Rule):
+    def __call__(self, value: Any):
+        if value is None or value > 0:
+            return True
+        return ["positive_error", [value]]
+
+    def json_schema(self):
+        return {"exclusiveMinimum": 0}
 
 
 class Invoice(Model):
-    total: float = Field(positive_number)
+    total: float = Field(PositiveNumber())
 ```
 
-You can pass one callable with `validator=`:
-
-```python
-class Account(Model):
-    username: str = Field(
-        validator=lambda value: value.strip().lower()
-    )
-```
-
-Or pass several callables with `validators=`:
-
-```python
-class Account(Model):
-    username: str = Field(
-        validators=[
-            lambda value: value.strip(),
-            lambda value: value.lower(),
-        ]
-    )
-```
-
-The result of a callable becomes the next value when it is not `True`, `False`, or a recognized error result. This makes validators useful for normalization, but keep each transformation predictable.
+`Field` rejects plain functions, lambdas, and other opaque callables. If a rule cannot be expressed in JSON Schema, return `{}` from `json_schema()`. The runtime callable may still normalize values by returning the transformed value, but the rule remains an explicit `Rule` class.
 
 ### Conversion rules
 
@@ -309,14 +295,14 @@ except ValidationError as error:
 
 `ValidationError.errors` maps each field name to a list of messages. This makes it suitable for returning field-specific errors from an application boundary.
 
-For dictionaries or JSON objects, use `Model.validate`:
+For dictionaries or JSON objects, pass the dictionary to the model constructor:
 
 ```python
-payload = '{"username": "ada"}'
-user = User.validate(payload)
+payload = {"username": "ada"}
+user = User(payload)
 ```
 
-`Model.validate` accepts a dictionary or a JSON string/bytes value and constructs a validated model.
+The model constructor validates the dictionary and constructs a validated model.
 
 ## 7. Nested model fields
 

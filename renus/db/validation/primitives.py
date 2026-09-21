@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
+
+from renus.db.validation.base import Rule
 
 
-class Default:
+class Default(Rule):
     """Provide a default value when the input is ``None``."""
 
     def __init__(self, data):
@@ -16,8 +19,11 @@ class Default:
             return self.d
         return True
 
+    def json_schema(self) -> dict[str, Any]:
+        return {} if callable(self.d) else {"default": self.d}
 
-class Convert:
+
+class Convert(Rule):
     """Convert the input value before further validation."""
 
     def __init__(self, func=None, inputs: list = None):
@@ -42,7 +48,21 @@ class Convert:
             return self.func(input)
         return input
 
+    def json_schema(self) -> dict[str, Any]:
+        if self.func is date:
+            return {"format": "date"}
+        if self.func is datetime:
+            return {"format": "date-time"}
+        return {}
 
-def Required(input) -> any:
+
+class Required(Rule):
     """Pass when the input is not ``None``."""
-    return True if input is not None else "required_error"
+
+    is_required = True
+
+    def __call__(self, input) -> Any:
+        return True if input is not None else "required_error"
+
+    def json_schema(self) -> dict[str, Any]:
+        return {}

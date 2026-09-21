@@ -210,8 +210,6 @@ def from_dict(
                 if target_model_cls is not None:
                     cleaned_data[fname] = from_dict(target_model_cls, raw_val, validate=validate)
 
-    if validate:
-        return model_cls.validate(cleaned_data)
     return model_cls(cleaned_data)
 
 class _DBJSONEncoder(json.JSONEncoder):

@@ -312,7 +312,7 @@ class TestAppScaffolding:
         assert "db = self.request.db" in ctrl_code
         assert self._count_in(ctrl_code, "db.repository(Article)") >= 1
 
-        assert "Article.validate(self.request.inputs).to_dict()" in ctrl_code
+        assert "Article(self.request.inputs).to_dict()" in ctrl_code
         assert "Validate(self.request.inputs).rules" not in ctrl_code
 
         assert "await self.repo.query().all()" in ctrl_code
@@ -400,7 +400,7 @@ class TestGeneratedScaffoldRunsAgainstDatabase:
 
         widget = mod.Widget
 
-        validated = widget.validate({"id": "w1", "name": "gadget"})
+        validated = widget({"id": "w1", "name": "gadget"})
         assert validated.name == "gadget"
         assert widget.__db_metadata__.table == "widgets"
 

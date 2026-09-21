@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 
+from renus.db.validation.base import Rule
 from renus.db.validation.primitives import Convert, Default, Required
 from renus.response import abort_if
 from renus.log import Log
@@ -92,18 +93,14 @@ class Validate:
         error = False
         messages = []
         for rule in rules:
-            if rule != "$or" and not isinstance(rule, (Default, Convert)):
-                test = rule(value)
-                if test is not True:
-                    error = True
-                    messages.append(test)
-            elif rule == "$or":
-                test = False
-                for item in rules["$or"]:
-                    test = item(value)
-                    if test is True:
-                        break
-                if test is not True:
-                    error = True
-                    messages.append(test)
+            if isinstance(rule, type) and issubclass(rule, Rule):
+                rule = rule()
+            if not isinstance(rule, Rule):
+                raise TypeError("Validation rules must inherit Rule")
+            if isinstance(rule, (Default, Convert)):
+                continue
+            test = rule(value)
+            if test is not True:
+                error = True
+                messages.append(test)
         return True if not error else messages

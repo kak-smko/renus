@@ -1917,7 +1917,7 @@ async def test_nested_relationship_validation(kind):
         )
 
         for owner, relationship, target, valid, invalid, error_path in cases:
-            validated = owner.validate(valid)
+            validated = owner(valid)
             value = getattr(validated, relationship)
             if isinstance(value, list):
                 assert value and isinstance(value[0], target)
@@ -1925,7 +1925,7 @@ async def test_nested_relationship_validation(kind):
                 assert isinstance(value, target)
 
             with pytest.raises(ValidationError) as exc_info:
-                owner.validate(invalid)
+                owner(invalid)
             assert any(
                 error_path in message
                 for messages in exc_info.value.errors.values()

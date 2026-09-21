@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime
 import pytest
 
-from renus.db import Embedded, EmbeddedOne
+from renus.db import Embedded, EmbeddedOne, Field, Model, ValidationError
+from renus.db.validation.base import Rule
 from renus.db.validation import (
     Convert,
     Default,
@@ -15,15 +16,17 @@ from renus.db.validation import (
     Min,
     MinLen,
     Regex,
-    Field,
-    Model,
     Required,
     Validate,
-    ValidationError,
 )
 
-def custom_username_validator(val: str) -> str:
-    return val.strip().lower()
+class CustomUsernameRule(Rule):
+    def __call__(self, value: str) -> str:
+        return value.strip().lower()
+
+    def json_schema(self):
+        return {}
+
 
 class Address(Model):
     street: str
@@ -33,7 +36,7 @@ class Address(Model):
 
 class User(Model):
     id: int
-    username: str = Field(custom_username_validator, MinLen(3), MaxLen(50))
+    username: str = Field(CustomUsernameRule(), MinLen(3), MaxLen(50))
     email: str = Field(Email("gmail"))
     age: int = Field(Min(18), Max(120))
 
@@ -108,18 +111,20 @@ def test_validation_error_on_invalid_user_data():
     assert "age" in err.errors
     assert "Validation failed:" in str(err)
 
-def test_user_validate_classmethod():
-    json_data = (
-        '{"id": 1, "username": "  JohnDoe  ", "email": "john@example.com", '
-        '"age": 25, "address": {"street": "123 Main Street", "city": "Baku"}}'
-    )
-    user = User.validate(json_data)
+def test_user_constructor_validates_dict():
+    user = User({
+        "id": 1,
+        "username": "  JohnDoe  ",
+        "email": "john@example.com",
+        "age": 25,
+        "address": {"street": "123 Main Street", "city": "Baku"},
+    })
     assert user.id == 1
     assert user.username == "johndoe"
     assert user.email == "john@example.com"
     assert user.address.city == "Baku"
 
-    user_from_dict = User.validate({
+    user_from_dict = User({
         "id": 2,
         "username": "Alice",
         "email": "alice@example.com",
@@ -186,8 +191,15 @@ def test_nested_models_simple():
     assert dict(user)["address"] == {"street": "Some Street", "city": "Baku", "id": None}
 
 def test_field_keyword_validator():
+    class NormalizeHandle(Rule):
+        def __call__(self, value):
+            return value.strip().lower()
+
+        def json_schema(self):
+            return {}
+
     class Profile(Model):
-        handle: str = Field(MinLen(3), validator=lambda s: s.strip().lower())
+        handle: str = Field(MinLen(3), validator=NormalizeHandle())
 
     p = Profile(handle="  CoolGuy  ")
     assert p.handle == "coolguy"

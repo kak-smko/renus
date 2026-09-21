@@ -18,7 +18,7 @@ class {name_camel}Controller:
 
     @property
     def __inputs(self):
-        return {name_camel}.validate(self.request.inputs).to_dict()
+        return {name_camel}(self.request.inputs).to_dict()
 
     async def index(self):
         """Get {name_camel} Records.

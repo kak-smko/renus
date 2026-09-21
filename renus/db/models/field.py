@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from renus.db.models.db_field import DatabaseField
 
 from renus.db.core.exceptions import ValidationError
+from renus.db.validation.base import Rule
 
 class _Unset:
     def __repr__(self) -> str:
@@ -152,6 +153,10 @@ class Field:
         if validators is not None:
             parsed_rules.extend(validators)
         for r in parsed_rules:
+            if isinstance(r, type) and issubclass(r, Rule):
+                r = r()
+            if not isinstance(r, Rule):
+                raise TypeError("Validation rules must inherit Rule")
             if hasattr(r, "__class__") and r.__class__.__name__ == "Default":
                 if self.default is _UNSET and self.default_factory is None:
                     self.default = r.d
