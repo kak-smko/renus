@@ -333,7 +333,11 @@ class RelationshipCoordinator:
     ) -> None:
         if rel.target is dict:
             return await self._persist_raw_embedded_one(
-                parent_meta, rel_name, parent_id, child
+                parent_meta,
+                rel_name,
+                parent_id,
+                child,
+                table_prefix=table_prefix,
             )
 
         child_dict = child.to_dict() if hasattr(child, "to_dict") else dict(child)
@@ -404,7 +408,11 @@ class RelationshipCoordinator:
     ) -> None:
         if rel.target is list:
             return await self._persist_raw_embedded_many(
-                parent_meta, rel_name, parent_id, items
+                parent_meta,
+                rel_name,
+                parent_id,
+                items,
+                table_prefix=table_prefix,
             )
 
         table_name = (
@@ -470,8 +478,14 @@ class RelationshipCoordinator:
         rel_name: str,
         parent_id: Any,
         data: dict[str, Any] | None,
+        *,
+        table_prefix: str | None = None,
     ) -> None:
-        table_name = f"{parent_meta.table}_{rel_name}"
+        table_name = (
+            f"{table_prefix}_{rel_name}"
+            if table_prefix is not None
+            else f"{parent_meta.table}_{rel_name}"
+        )
         embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
 
         async with self._atomic():
@@ -496,8 +510,14 @@ class RelationshipCoordinator:
         rel_name: str,
         parent_id: Any,
         items: Iterable[Any],
+        *,
+        table_prefix: str | None = None,
     ) -> None:
-        table_name = f"{parent_meta.table}_{rel_name}"
+        table_name = (
+            f"{table_prefix}_{rel_name}"
+            if table_prefix is not None
+            else f"{parent_meta.table}_{rel_name}"
+        )
         embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
 
         records = [
@@ -899,6 +919,21 @@ class RelationshipCoordinator:
                     f"{table_prefix}_{nested_name}",
                 )
 
+    def _hydrate_embedded_target(self, target_cls: type, row: dict[str, Any]) -> Any:
+        """Hydrate an embedded model row and initialize unloaded relationships.
+        """
+        target_meta = getattr(target_cls, "__db_metadata__", None)
+        data = self.adapter.decode_row(dict(row), target_meta)
+        if target_meta is not None:
+            for nested_name, nested_rel in target_meta.relationships.items():
+                if nested_name in data:
+                    continue
+                if nested_rel.target is dict:
+                    data[nested_name] = {}
+                elif nested_rel.target is list:
+                    data[nested_name] = []
+        return target_cls(data)
+
     async def _load_embedded_one_batch(
         self,
         meta: Any,
@@ -936,7 +971,7 @@ class RelationshipCoordinator:
             row_dict = dict(r)
             pid = row_dict.pop("parent_id", None)
             if pid is not None:
-                child_map[pid] = target_cls(row_dict)
+                child_map[pid] = self._hydrate_embedded_target(target_cls, row_dict)
 
         if table_prefix and len(parent_ids) == 1 and child_map:
             child = next(iter(child_map.values()))
@@ -988,16 +1023,13 @@ class RelationshipCoordinator:
             row_dict = dict(r)
             pid = row_dict.pop("parent_id", None)
             if pid in items_map:
-                items_map[pid].append(target_cls(row_dict))
+                items_map[pid].append(
+                    self._hydrate_embedded_target(target_cls, row_dict)
+                )
 
-        if table_prefix and len(parent_ids) == 1 and items_map:
-            items = next(iter(items_map.values()))
-            for obj in objects:
-                object.__setattr__(obj, rel_name, items)
-        else:
-            for obj in objects:
-                pid = getattr(obj, meta.primary_key_field, None)
-                object.__setattr__(obj, rel_name, items_map.get(pid, []))
+        for obj in objects:
+            pid = getattr(obj, meta.primary_key_field, None)
+            object.__setattr__(obj, rel_name, list(items_map.get(pid, [])))
 
     async def _load_one_to_many_batch(
         self,

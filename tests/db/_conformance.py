@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from renus.db.validation import Max
+
 """Adapter conformance interface (the "test interface every adapter must pass").
 
 This module defines the *contract* a database adapter must honour to be
@@ -101,7 +103,7 @@ class User(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     username: str = Field(database=DatabaseField(unique=True))
     name: str | None = None
-    age: int = 0
+    age: int =Field(Max(120),default=0)
     active: bool = True
     profile: Profile = Embedded(Profile)
     posts: list[Post] = OneToMany(

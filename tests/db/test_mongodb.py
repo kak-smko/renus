@@ -8,10 +8,7 @@ import pytest
 from renus.db import (
     Avg,
     Count,
-    Database,
-    DatabaseError,
     DatabaseField,
-    DuplicateKeyError,
     Embedded,
     Field,
     EmbeddedMany,
@@ -19,7 +16,6 @@ from renus.db import (
     Min,
     MongoDBAdapter,
     MutationResult,
-    Path,
     Model,
     Repository,
     Sum,

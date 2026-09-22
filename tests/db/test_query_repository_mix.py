@@ -1,8 +1,8 @@
 """End-to-end tests mixing the fluent query builder with the repository.
 
-These tests exercise the repository + query API against a real SQLite backend
-using five distinct datasets ("scenarios"). Each scenario runs the same full
-checklist of operations so behaviour is verified against varying data sizes.
+These tests exercise the repository + query API against every available
+adapter using four distinct datasets ("scenarios"). Each scenario runs the same
+full checklist of operations so behaviour is verified against varying data sizes.
 
 Operations covered:
     create, save, get/where().first(), update,
@@ -23,22 +23,27 @@ from renus.db import (
     Include,
     OneToMany,
     Model,
-    SQLiteAdapter,
+)
+from tests.db._conformance import (
+    adapter_for,
+    cleanup,
+    conformance_tests,
+    database_for,
 )
 
 
 class Post(Model):
     """A post owned by a user (one-to-many target)."""
 
-    id: int = Field(database=DatabaseField(primary_key=True, generated=True))
+    id: str = Field(database=DatabaseField(primary_key=True))
     title: str
-    user_id: int = 0
+    user_id: str = ""
 
 
 class User(Model):
     """The primary model under test."""
 
-    id: int = Field(database=DatabaseField(primary_key=True, generated=True))
+    id: str = Field(database=DatabaseField(primary_key=True))
     username: str = Field(database=DatabaseField(unique=True))
     name: str | None = None
     age: int = 0
@@ -51,7 +56,7 @@ class User(Model):
 class SoftUser(Model):
     """A soft-deletable model used for deleted-count checks."""
 
-    id: int = Field(database=DatabaseField(primary_key=True, generated=True))
+    id: str = Field(database=DatabaseField(primary_key=True))
     username: str
 
     class Meta:
@@ -59,27 +64,26 @@ class SoftUser(Model):
         timestamps = True
 
 
-def _make_db() -> Database:
-    db = Database(SQLiteAdapter({"database": ":memory:"}))
-    return db
+ADAPTERS = conformance_tests()
 
-
-async def _connect(db: Database) -> None:
-    await db.connect()
-    await db.create_schema([User, Post, SoftUser])
 
 
 async def _seed(db: Database, rows: list[dict]) -> object:
     """Create users (and any nested posts) and return the user repository."""
     u_repo = db.repository(User)
     for row in rows:
+        username = row["username"]
         await u_repo.create(
             User(
-                username=row["username"],
+                id=f"user-{username}",
+                username=username,
                 name=row.get("name"),
                 age=row.get("age", 0),
                 active=row.get("active", True),
-                posts=[Post(title=t) for t in row.get("posts", [])],
+                posts=[
+                    Post(id=f"{username}-post-{index}", title=title)
+                    for index, title in enumerate(row.get("posts", []))
+                ],
             )
         )
     return u_repo
@@ -97,7 +101,7 @@ async def _full_checklist(
 
     # --- create -----------------------------------------------------------
     created = await u_repo.create(
-        User(username="zz_new", name="New", age=10, active=True)
+        User(id="user-zz_new", username="zz_new", name="New", age=10, active=True)
     )
     assert created.id is not None
     assert created.is_persisted() is True
@@ -105,7 +109,7 @@ async def _full_checklist(
     active += 1
 
     # --- save (create-then-update on a single instance) -------------------
-    obj = User(username="zz_saved", name="First", age=5, active=True)
+    obj = User(id="user-zz_saved", username="zz_saved", name="First", age=5, active=True)
     await u_repo.save(obj)
     assert obj.is_persisted() is True
     obj.name = "Second"
@@ -198,8 +202,8 @@ async def _full_checklist(
     assert {r["username"] for r in sel} == {o.username for o in ordered}
 
     # --- soft-delete counts ------------------------------------------------
-    s1 = await s_repo.create(SoftUser(username="sd1"))
-    s2 = await s_repo.create(SoftUser(username="sd2"))
+    s1 = await s_repo.create(SoftUser(id="soft-sd1", username="sd1"))
+    s2 = await s_repo.create(SoftUser(id="soft-sd2", username="sd2"))
     await s_repo.delete(s1)  # s1 soft-deleted
 
     assert await s_repo.query().count() == 1  # without deleted
@@ -217,22 +221,22 @@ async def _full_checklist(
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_mixed_operations_scenario_empty():
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_mixed_operations_scenario_empty(kind: str):
     """Scenario 1: start empty, build the whole dataset through the API."""
-    db = _make_db()
-    await _connect(db)
+    db = await database_for(kind, [User, Post, SoftUser])
     try:
         repo = db.repository(User)
         await _full_checklist(db, repo, total=0, active=0)
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
-async def test_mixed_operations_scenario_single():
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_mixed_operations_scenario_single(kind: str):
     """Scenario 2: one pre-seeded home user."""
-    db = _make_db()
-    await _connect(db)
+    db = await database_for(kind, [User, Post, SoftUser])
     try:
         repo = await _seed(
             db,
@@ -243,14 +247,14 @@ async def test_mixed_operations_scenario_single():
         )
         await _full_checklist(db, repo, total=1, active=1)
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
-async def test_mixed_operations_scenario_three():
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_mixed_operations_scenario_three(kind: str):
     """Scenario 3: three pre-seeded users."""
-    db = _make_db()
-    await _connect(db)
+    db = await database_for(kind, [User, Post, SoftUser])
     try:
         repo = await _seed(
             db,
@@ -263,14 +267,14 @@ async def test_mixed_operations_scenario_three():
         )
         await _full_checklist(db, repo, total=3, active=2)
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
 @pytest.mark.asyncio
-async def test_mixed_operations_scenario_five():
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_mixed_operations_scenario_five(kind: str):
     """Scenario 4: five pre-seeded users."""
-    db = _make_db()
-    await _connect(db)
+    db = await database_for(kind, [User, Post, SoftUser])
     try:
         repo = await _seed(
             db,
@@ -286,5 +290,5 @@ async def test_mixed_operations_scenario_five():
         )
         await _full_checklist(db, repo, total=5, active=3)
     finally:
-        await db.disconnect()
+        await cleanup(db)
 

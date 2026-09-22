@@ -11,6 +11,7 @@ Run with::
 """
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -92,6 +93,13 @@ from tests.db._conformance import (
 )
 
 ADAPTERS = conformance_tests()
+
+
+def _utc_timestamp(value: datetime) -> datetime:
+    """Normalize adapter timestamps for portable ordering assertions."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _u(uid: str, username: str, **kw):
@@ -3003,6 +3011,99 @@ async def test_soft_delete_visibility(kind):
         only = await repo.query().only_deleted().first()
         assert only is not None
         assert only.username == "sd1"
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_updates_refresh_updated_at(kind):
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        first = await repo.create(_u("timestamp-1", "timestamp-1", age=1))
+        second = await repo.create(_u("timestamp-2", "timestamp-2", age=2))
+        first_updated_at = first.updated_at
+        second_updated_at = second.updated_at
+        assert first_updated_at is not None
+        assert second_updated_at is not None
+
+        rows = await repo.update(
+            User.username == "timestamp-1",
+            values={"name": "changed"},
+        )
+        assert rows == 1
+        updated = await repo.where(User.username == "timestamp-1").first()
+        assert updated is not None
+        assert updated.updated_at is not None
+        assert _utc_timestamp(updated.updated_at) > _utc_timestamp(first_updated_at)
+
+        rows_many = await repo.update_many(values={"name": "bulk"})
+        assert rows_many == 2
+        refreshed_first = await repo.where(User.username == "timestamp-1").first()
+        refreshed_second = await repo.where(User.username == "timestamp-2").first()
+        assert refreshed_first is not None
+        assert refreshed_second is not None
+        assert refreshed_first.updated_at is not None
+        assert refreshed_second.updated_at is not None
+        assert _utc_timestamp(refreshed_first.updated_at) > _utc_timestamp(updated.updated_at)
+        assert _utc_timestamp(refreshed_second.updated_at) > _utc_timestamp(second_updated_at)
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_repository_updates_validate_values_before_execution(kind):
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        account = await repo.create(_u("validation-1", "validation-1", age=10))
+
+        with pytest.raises(ValidationError, match="'age' must be of type int"):
+            await repo.where(User.username == "validation-1").update(
+                {"age": "invalid"}
+            )
+
+        with pytest.raises(ValidationError, match="'age' must be less than or equal to 120"):
+            await repo.where(User.username == "validation-1").update(
+                {"age": 150}
+            )
+
+        with pytest.raises(ValidationError, match="Unknown field 'missing'"):
+            await repo.update_many(User.active == True, values={"missing": 1})
+
+        unchanged = await repo.where(User.username == "validation-1").first()
+        assert unchanged is not None
+        assert unchanged.age == account.age == 10
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_restore_soft_deleted_rows(kind):
+    db = await database_for(kind)
+    try:
+        repo = db.repository(SoftUser)
+        deleted = await repo.create(SoftUser(id="restore-1", username="restore-1"))
+        await repo.create(SoftUser(id="restore-2", username="restore-2"))
+        await repo.delete(deleted)
+
+        assert await repo.query().count() == 1
+        assert await repo.query().only_deleted().count() == 1
+        assert await repo.where(SoftUser.username == "restore-1").restore() == 1
+
+        restored = await repo.where(SoftUser.username == "restore-1").first()
+        assert restored is not None
+        assert restored.is_deleted() is False
+        assert await repo.query().count() == 2
+
+        await repo.delete(restored)
+        loaded_deleted = await repo.query().only_deleted().first()
+        assert loaded_deleted is not None
+        assert await repo.restore(loaded_deleted) == 1
+        assert loaded_deleted.is_deleted() is False
     finally:
         await cleanup(db)
 

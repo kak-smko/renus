@@ -35,12 +35,21 @@ class SQLAdapter(AsyncDatabaseAdapter):
 
     _raw_embedded_table_options: ClassVar[str] = ""
 
-    def _raw_embedded_table_sql(self, meta: Any, rel_name: str, rel: Any) -> str:
-        quoted_table = self.dialect.quote(f"{meta.table}_{rel_name}")
+    def _raw_embedded_table_sql(
+        self,
+        meta: Any,
+        rel_name: str,
+        rel: Any,
+        *,
+        table_prefix: str | None = None,
+        parent_pk_type: str | None = None,
+    ) -> str:
+        table_name = f"{table_prefix}_{rel_name}" if table_prefix else f"{meta.table}_{rel_name}"
+        quoted_table = self.dialect.quote(table_name)
         parent_table = self.dialect.quote(meta.table)
         parent_pk = self.dialect.quote(meta.primary_key_field)
         pk_fmeta = meta.fields.get(meta.primary_key_field)
-        pk_type = (
+        pk_type = parent_pk_type or (
             self.dialect.type_to_sql(pk_fmeta).split()[0]
             if pk_fmeta is not None
             else "INTEGER"
@@ -64,10 +73,11 @@ class SQLAdapter(AsyncDatabaseAdapter):
                 f"{value_col} TEXT NULL",
                 f"PRIMARY KEY ({pid}, {pos_col})",
             ]
-        cols.append(
-            f"FOREIGN KEY ({pid}) REFERENCES {parent_table}({parent_pk}) "
-            f"ON DELETE CASCADE"
-        )
+        if table_prefix is None:
+            cols.append(
+                f"FOREIGN KEY ({pid}) REFERENCES {parent_table}({parent_pk}) "
+                f"ON DELETE CASCADE"
+            )
         return (
             f"CREATE TABLE {self._ddl_if_not_exists} {quoted_table} "
             f"({', '.join(cols)}){self._raw_embedded_table_options};"
@@ -255,8 +265,15 @@ class SQLAdapter(AsyncDatabaseAdapter):
         if not rel.is_embedded:
             return
         if rel.target is dict or rel.target is list:
-            if table_prefix is None:
-                await self._execute_ddl(self._raw_embedded_table_sql(meta, rel_name, rel))
+            await self._execute_ddl(
+                self._raw_embedded_table_sql(
+                    meta,
+                    rel_name,
+                    rel,
+                    table_prefix=table_prefix,
+                    parent_pk_type=parent_pk_type,
+                )
+            )
             return
 
         child_meta = getattr(rel.target, "__db_metadata__", None)
