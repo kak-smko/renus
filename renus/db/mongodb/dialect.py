@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 from renus.db.core import convert
+from renus.db.models.base import Model
 from renus.datastructures.id import ID, is_identity
 
 _ID_NATIVE_TYPES: tuple[type, ...] = (int,)
@@ -81,6 +82,8 @@ class MongoDialect:
         """
         if value is None:
             return None
+        if isinstance(value, Model):
+            return self.encode_value(dict(value))
         if isinstance(value, dict):
             return {k: self.encode_value(v) for k, v in value.items()}
         if isinstance(value, (list, tuple, set)):

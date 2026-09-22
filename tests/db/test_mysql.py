@@ -102,8 +102,10 @@ def test_mysql_compiler_mutations():
 
     upd = Update(Customer, values={"balance": 75.0}, filters=(Customer.username == "bob",))
     compiled_upd = mut_comp.compile(upd)
-    assert "UPDATE `customers` SET `balance` = %s WHERE `username` = %s" in compiled_upd.sql
-    assert compiled_upd.params == (75.0, "bob")
+    assert "UPDATE `customers` SET `balance` = %s, `updated_at` = %s WHERE `username` = %s" in compiled_upd.sql
+    assert compiled_upd.params[0] == 75.0
+    assert compiled_upd.params[1].tzinfo is not None
+    assert compiled_upd.params[2] == "bob"
 
     del_ast = Delete(Customer, filters=(Customer.username == "bob",))
     compiled_del = mut_comp.compile(del_ast)

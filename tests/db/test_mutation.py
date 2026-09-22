@@ -15,6 +15,7 @@ from renus.db import (
     Model,
     Update,
     UpdateMany,
+    ValidationError,
 )
 from renus.db.mutation.ast import normalize_values
 
@@ -135,6 +136,22 @@ def test_update_many():
 
     chained = ast.where(Member.points == 0)
     assert len(chained.filters) == 2
+
+
+def test_update_validates_supplied_fields():
+    ast = Update(Member, values={Member.points: 25})
+    assert ast.values == {"points": 25}
+
+    with pytest.raises(ValidationError, match="'points' must be of type int"):
+        Update(Member, values={"points": "twenty-five"})
+
+
+def test_update_many_validates_supplied_fields_and_rejects_unknown_fields():
+    with pytest.raises(ValidationError, match="'is_active' must be of type bool"):
+        UpdateMany(Member, values={"is_active": 1})
+
+    with pytest.raises(ValidationError, match="Unknown field 'missing'"):
+        UpdateMany(Member, values={"missing": True})
 
 def test_delete_basic():
     cond = Member.id == 99

@@ -107,7 +107,7 @@ The values dictionary may be the final positional argument:
 await users.update(User.username == "ada", {"name": "Ada"})
 ```
 
-Values may use field names or field paths. The mutation normalizes a path to its final field name before compilation. Prefer ordinary model field names for portable writes.
+Values may use field names or field paths. The mutation normalizes a path to its final field name before validation and compilation. Supplied fields are validated and converted with the model's field rules, and unknown fields or invalid values raise `ValidationError` before the adapter executes. Updates remain partial: fields omitted from the dictionary are not required.
 
 ## 6. Update many rows
 

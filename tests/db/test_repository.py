@@ -18,6 +18,7 @@ from renus.db import (
     Insert,
     InsertMany,
     MutationResult,
+    Operator,
     QueryResult,
     Model,
     Repository,
@@ -26,6 +27,7 @@ from renus.db import (
     UnsupportedOperationError,
     Update,
     UpdateMany,
+    ValidationError,
 )
 
 from tests.db._fakes import DDLFakeMixin
@@ -126,7 +128,11 @@ class InMemoryAdapter(DDLFakeMixin, AsyncDatabaseAdapter):
                 matches = True
                 for f in compiled.filters:
                     attr = f.path.parts[-1]
-                    if r.get(attr) != f.value:
+                    if f.operator is Operator.IS_NOT_NULL:
+                        condition_matches = r.get(attr) is not None
+                    else:
+                        condition_matches = r.get(attr) == f.value
+                    if not condition_matches:
                         matches = False
                         break
                 if matches:
@@ -142,7 +148,11 @@ class InMemoryAdapter(DDLFakeMixin, AsyncDatabaseAdapter):
                 matches = True
                 for f in compiled.filters:
                     attr = f.path.parts[-1]
-                    if r.get(attr) != f.value:
+                    if f.operator is Operator.IS_NOT_NULL:
+                        condition_matches = r.get(attr) is not None
+                    else:
+                        condition_matches = r.get(attr) == f.value
+                    if not condition_matches:
                         matches = False
                         break
                 if matches:
@@ -267,13 +277,52 @@ async def test_repository_update_and_update_many():
     rows_many = await repo.update_many(Account.active == True, values={"balance": 30.0})
     assert rows_many == 1
 
+
+@pytest.mark.asyncio
+async def test_updates_refresh_updated_at_for_timestamped_models():
+    adapter = InMemoryAdapter()
+    repo = Repository(adapter, LogEntry)
+
+    first = await repo.create(LogEntry(message="first"))
+    second = await repo.create(LogEntry(message="second"))
+    first_updated_at = first.updated_at
+    second_updated_at = second.updated_at
+
+    rows = await repo.update(LogEntry.message == "first", values={"message": "changed"})
+    assert rows == 1
+    first_record = adapter.records[LogEntry][first.id]
+    first_direct_updated_at = first_record["updated_at"]
+    assert first_direct_updated_at > first_updated_at
+
+    rows_many = await repo.update_many(values={"message": "bulk"})
+    assert rows_many == 2
+    assert adapter.records[LogEntry][first.id]["updated_at"] > first_direct_updated_at
+    assert adapter.records[LogEntry][second.id]["updated_at"] > second_updated_at
+
+
+@pytest.mark.asyncio
+async def test_repository_updates_validate_values_before_execution():
+    adapter = InMemoryAdapter()
+    repo = Repository(adapter, Account)
+    account = await repo.create(Account(owner="Grace", balance=10.0, active=True))
+    mutation_count = len(adapter.executed_mutations)
+
+    with pytest.raises(ValidationError, match="'balance' must be of type float"):
+        await repo.where(Account.owner == "Grace").update({"balance": "invalid"})
+
+    with pytest.raises(ValidationError, match="Unknown field 'missing'"):
+        await repo.update_many(Account.active == True, values={"missing": 1})
+
+    assert len(adapter.executed_mutations) == mutation_count
+    assert adapter.records[Account][account.id]["balance"] == 10.0
+
 @pytest.mark.asyncio
 async def test_repository_delete_and_delete_many():
     adapter = InMemoryAdapter()
     repo = Repository(adapter, Account)
 
     acc = await repo.create(Account(owner="Heidi", balance=10.0))
-
+    
     rows = await repo.delete(acc)
     assert rows == 1
     assert acc.is_deleted() is True
@@ -281,6 +330,31 @@ async def test_repository_delete_and_delete_many():
     await repo.create(Account(owner="Ivan", balance=0.0))
     del_rows = await repo.delete_many(Account.owner == "Ivan")
     assert del_rows == 1
+
+
+@pytest.mark.asyncio
+async def test_repository_restore_soft_deleted_rows():
+    adapter = InMemoryAdapter()
+    repo = Repository(adapter, LogEntry)
+
+    deleted = await repo.create(LogEntry(message="deleted"))
+    live = await repo.create(LogEntry(message="live"))
+    await repo.delete(deleted)
+    deleted_record = adapter.records[LogEntry][deleted.id]
+    assert deleted_record["is_deleted"] is True
+    assert deleted_record["deleted_at"] is not None
+
+    assert await repo.where(LogEntry.message == "deleted").restore() == 1
+    restored = await repo.where(LogEntry.message == "deleted").first()
+    assert restored is not None
+    assert restored.is_deleted() is False
+    assert await repo.restore(LogEntry.message == "live") == 0
+
+    await repo.delete(deleted)
+    loaded_deleted = await repo.query().only_deleted().first()
+    assert loaded_deleted is not None
+    assert await repo.restore(loaded_deleted) == 1
+    assert loaded_deleted.is_deleted() is False
 
 @pytest.mark.asyncio
 async def test_repository_soft_delete():

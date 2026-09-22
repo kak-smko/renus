@@ -1082,8 +1082,9 @@ async def test_large_query_ast_features(kind):
             )
             .all()
         )
+        grouped.sort(key=lambda x: x['active'])
         assert grouped == [
-            {"active": False, "rows": 40, "unique_names": 4, "total_age": 2340},
+             {"active": False, "rows": 40, "unique_names": 4, "total_age": 2340},
             {"active": True,  "rows": 80, "unique_names": 4, "total_age": 4800},
         ]
     finally:

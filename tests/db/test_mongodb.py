@@ -188,6 +188,19 @@ def test_mongo_compiler_mutations():
     assert op == "update_many"
     assert filt["age"] == {"$lt": 18}
 
+    embedded_update = Update(
+        AccountDoc,
+        values={
+            "items": [{"name": "book", "price": 12.5, "qty": 2}],
+        },
+        filters=(AccountDoc.id == 1,),
+    )
+    _, op, _, updates = compiler.compile_mutation(embedded_update)
+    assert op == "update_one"
+    assert updates["$set"]["items"] == [
+        {"id": None, "name": "book", "price": 12.5, "qty": 2}
+    ]
+
     del_ast = Delete(AccountDoc, filters=(AccountDoc.id == 1,))
     coll, op, filt, _ = compiler.compile_mutation(del_ast)
     assert op == "delete_one"

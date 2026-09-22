@@ -246,6 +246,12 @@ class Query(Generic[T]):
             raise ConfigurationError("Cannot execute query without a bound repository")
         return await self.repository.delete_many(*self.ast.filters)
 
+    async def restore(self) -> int:
+        """Restore matching soft-deleted rows and return rows affected."""
+        if self.repository is None:
+            raise ConfigurationError("Cannot execute query without a bound repository")
+        return await self.repository.restore(*self.ast.filters)
+
     async def hard_delete(self) -> int:
         """Physically delete the matching rows, ignoring soft deletes.
 

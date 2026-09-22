@@ -234,6 +234,22 @@ deleted = await users.query().only_deleted().all()
 
 `with_deleted()` includes both live and deleted rows. `only_deleted()` includes only rows whose deletion timestamp is set. These methods also affect `count()`, `exists()`, projections, and aggregates built from the query.
 
+Restore a deleted row through a repository or query. Restore targets only rows whose deletion timestamp is set:
+
+```python
+await users.where(User.username == "ada").restore()
+# Equivalent:
+await users.restore(User.username == "ada")
+```
+
+For a loaded soft-deleted model, pass the instance directly:
+
+```python
+deleted = await users.only_deleted().first()
+if deleted is not None:
+    await users.restore(deleted)
+```
+
 ## 10. Aggregates and grouping
 
 Import aggregate factories from `renus.db` and add them with `aggregate()`:

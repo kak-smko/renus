@@ -193,6 +193,12 @@ class Repository(Generic[T]):
             await self._rel_coordinator.cascade_on_update(obj)
             update_ast = Update.from_model(obj)
             if update_ast.values:
+                if (
+                    getattr(self.model, "__db_metadata__", None)
+                    and getattr(self.model.__db_metadata__, "timestamps", False)
+                    and "updated_at" in update_ast.values
+                ):
+                    object.__setattr__(obj, "updated_at", update_ast.values["updated_at"])
                 await self._execute_mutation(update_ast)
 
             if hasattr(obj, "_mark_persisted"):
@@ -322,6 +328,53 @@ class Repository(Generic[T]):
             )
             res = await self._execute_mutation(del_many_ast)
             return res.rows_affected
+
+    async def restore(
+        self,
+        target_or_condition: T | Condition,
+        *conditions: Condition,
+    ) -> int:
+        """Restore matching soft-deleted rows and return rows affected."""
+        meta = getattr(self.model, "__db_metadata__", None)
+        if not meta or not meta.soft_delete:
+            raise ValueError(
+                f"Model '{self.model.__name__}' does not have soft_delete enabled"
+            )
+
+        if isinstance(target_or_condition, self.model):
+            obj: Any = target_or_condition
+            row_conditions: list[Condition] = []
+            if hasattr(obj, "identity_dict"):
+                for pk_name, pk_val in obj.identity_dict().items():
+                    row_conditions.append(Path(self.model, (pk_name,)) == pk_val)
+        else:
+            row_conditions = [target_or_condition, *conditions]
+
+        row_conditions.append(
+            Path(self.model, (meta.deleted_at_field or "deleted_at",)).is_not_null()
+        )
+        values: dict[str, Any] = {
+            "deleted_at": None,
+            "is_deleted": False,
+        }
+        if meta.timestamps:
+            values["updated_at"] = datetime.now(timezone.utc)
+
+        update_ast = Update(
+            source=self.model,
+            values=values,
+            filters=tuple(row_conditions),
+        )
+        result = await self._execute_mutation(update_ast)
+
+        if isinstance(target_or_condition, self.model) and result.rows_affected:
+            if hasattr(obj, "restore"):
+                obj.restore()
+            if meta.timestamps and "updated_at" in values:
+                object.__setattr__(obj, "updated_at", values["updated_at"])
+            if hasattr(obj, "_mark_persisted"):
+                obj._mark_persisted()
+        return result.rows_affected
 
     async def hard_delete(
         self,
