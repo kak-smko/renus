@@ -3,18 +3,21 @@ from __future__ import annotations
 import pytest
 
 from renus.db import (
-    Database,
     DatabaseField,
     Embedded,
     EmbeddedMany,
     Field,
+    LoadingStrategy,
     ManyToMany,
     ManyToOne,
     Model,
     OneToMany,
     OneToOne,
-    SQLiteAdapter,
 )
+from tests.db._conformance import cleanup, conformance_tests, database_for
+
+
+ADAPTERS = conformance_tests()
 
 
 class JoinedDepartment(Model):
@@ -98,26 +101,47 @@ class JoinedRoleOwner(Model):
     )
 
 
+class SelectinAddress(Model):
+    city: str
+
+
+class SelectinTag(Model):
+    label: str
+
+
+class SelectinEmbeddedOwner(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    name: str
+    address: SelectinAddress = Embedded(
+        SelectinAddress,
+        loading=LoadingStrategy.SELECTIN,
+    )
+    tags: list[SelectinTag] = EmbeddedMany(
+        SelectinTag,
+        loading=LoadingStrategy.SELECTIN,
+    )
+
+
 @pytest.mark.asyncio
-async def test_joined_relationships_are_included_by_default():
-    db = Database(SQLiteAdapter({"database": ":memory:"}))
-    await db.connect()
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_joined_relationships_are_included_by_default(kind):
+    db = await database_for(
+        kind,
+        [
+            JoinedDepartment,
+            JoinedEmployee,
+            JoinedAuthor,
+            JoinedPost,
+            JoinedAddress,
+            JoinedTag,
+            JoinedEmbeddedOwner,
+            JoinedProfile,
+            JoinedProfileOwner,
+            JoinedRole,
+            JoinedRoleOwner,
+        ],
+    )
     try:
-        await db.create_schema(
-            [
-                JoinedDepartment,
-                JoinedEmployee,
-                JoinedAuthor,
-                JoinedPost,
-                JoinedAddress,
-                JoinedTag,
-                JoinedEmbeddedOwner,
-                JoinedProfile,
-                JoinedProfileOwner,
-                JoinedRole,
-                JoinedRoleOwner,
-            ]
-        )
 
         department_repo = db.repository(JoinedDepartment)
         employee_repo = db.repository(JoinedEmployee)
@@ -190,4 +214,36 @@ async def test_joined_relationships_are_included_by_default():
         role_owner = (await role_owner_repo.query().all())[0]
         assert [role.name for role in role_owner.roles] == ["Admin", "Editor"]
     finally:
-        await db.disconnect()
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_selectin_embedded_relationships_are_not_loaded(kind):
+    
+    db = await database_for(kind, [SelectinEmbeddedOwner])
+    try:
+        repo = db.repository(SelectinEmbeddedOwner)
+        await repo.create(
+            SelectinEmbeddedOwner(
+                id="seo1",
+                name="Alice",
+                address=SelectinAddress(city="Oslo"),
+                tags=[SelectinTag(label="python"), SelectinTag(label="database")],
+            )
+        )
+
+        owner = await repo.query().first()
+        assert owner is not None
+        assert owner.address is None
+        assert owner.tags == []
+
+        included = await repo.query().include(
+            SelectinEmbeddedOwner.address,
+            SelectinEmbeddedOwner.tags,
+        ).first()
+        assert included is not None
+        assert included.address.city == "Oslo"
+        assert [tag.label for tag in included.tags] == ["python", "database"]
+    finally:
+        await cleanup(db)

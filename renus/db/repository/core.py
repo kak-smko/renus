@@ -387,9 +387,9 @@ class Repository(Generic[T]):
         if ast.projection or ast.aggregates:
             return [dict(r) if not isinstance(r, dict) else r for r in rows]
 
-        objects = [self._hydrate(r) for r in rows]
         includes = list(ast.includes)
         included_paths = {include.path.parts for include in includes}
+        objects = [self._hydrate(r, included_paths=included_paths) for r in rows]
 
         for include in self._includes_for_joined_relationships():
             if include.path.parts not in included_paths:
@@ -468,7 +468,12 @@ class Repository(Generic[T]):
             await plugins.dispatch_after_mutation(ast, result, context)
         return result
 
-    def _coerce_row_for_model(self, row: dict[str, Any]) -> dict[str, Any]:
+    def _coerce_row_for_model(
+        self,
+        row: dict[str, Any],
+        *,
+        included_paths: set[tuple[str, ...]] | None = None,
+    ) -> dict[str, Any]:
         meta = getattr(self.model, "__db_metadata__", None)
         if not meta:
             return row
@@ -479,6 +484,13 @@ class Repository(Generic[T]):
         if rel_meta:
             for rname, rmeta in rel_meta.items():
                 if not rmeta.is_embedded or rname not in data:
+                    continue
+                if (
+                    self.adapter.nested_documents
+                    and getattr(rmeta.loading, "value", rmeta.loading) == "selectin"
+                    and (rname,) not in (included_paths or set())
+                ):
+                    data.pop(rname, None)
                     continue
                 rval = data[rname]
                 target = rmeta.target if isinstance(rmeta.target, type) else None
@@ -495,11 +507,19 @@ class Repository(Generic[T]):
 
         return data
 
-    def _hydrate(self, row: Any) -> T:
+    def _hydrate(
+        self,
+        row: Any,
+        *,
+        included_paths: set[tuple[str, ...]] | None = None,
+    ) -> T:
         if isinstance(row, self.model):
             obj: Any = row
         else:
-            coerced = self._coerce_row_for_model(dict(row))
+            coerced = self._coerce_row_for_model(
+                dict(row),
+                included_paths=included_paths,
+            )
             model_cls: Any = self.model
             obj = model_cls(coerced)
 

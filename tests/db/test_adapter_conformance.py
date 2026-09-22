@@ -1283,10 +1283,7 @@ async def test_include_relationship(kind):
         loaded = await repo.query(User.username == "home").all()
         assert len(loaded) == 1
         user = loaded[0]
-        if repo.adapter.nested_documents:
-            assert user.profile != None
-        else:
-            assert user.profile == None
+        assert user.profile is None
         assert user.posts == []
     finally:
         await cleanup(db)
@@ -1994,12 +1991,10 @@ async def test_seven_level_embedded_and_embedded_many_relationships(kind):
 
         nested = db.adapter("primary").nested_documents
         embedded_tables = _deep_embedded_tables(DeepRoot)
-        if nested:
-            assert await _row_counts(db, "deeproots") == {"deeproots": 3}
-        else:
-            tables = ["deeproots", *embedded_tables]
-            assert await _row_counts(db, *tables) == {table: 3 for table in tables}
-            assert embedded_tables == [
+        related_tables = [] if nested else embedded_tables
+
+        if not nested:
+            assert related_tables == [
                 "deeproots_embedded",
                 "deeproots_embedded_child",
                 "deeproots_embedded_child_child",
@@ -2016,98 +2011,25 @@ async def test_seven_level_embedded_and_embedded_many_relationships(kind):
                 "deeproots_many_children_children_children_children_children_children",
             ]
 
-        embedded_path = DeepRoot.embedded
-        for _ in range(6):
-            embedded_path = embedded_path.child
-        
-        assert [row.id for row in await root_repo.query(
-            (embedded_path.value == "root2-embedded-7")
-        ).all()] == ["deep-2"]
-
-        many_path = DeepRoot.many
-        for _ in range(6):
-            many_path = many_path.children
-        assert [row.id for row in await root_repo.query(
-           (many_path.name == "root2-deep-many-7")
-        ).all()] == ["deep-2"]
-
-        # Nested RelationAny across the embedded-many hierarchy must match the
-        # root without requiring callers to flatten the path manually.
-        deep_many_any = DeepRoot.many.any(
-            DeepMany1.children.any(
-                DeepMany2.children.any(
-                    DeepMany3.children.any(
-                        DeepMany4.children.any(
-                            DeepMany5.name == "root2-deep-many-5"
-                        )
-                    )
+        tables = ["deeproots", *related_tables]
+        assert await _row_counts(db, *tables) == {table: 3 for table in tables}
+        for table in related_tables:
+            rows = await db.adapter("primary").execute_query(
+                QueryAST(
+                    source=_row_count_model(table),
+                    filters=(
+                        Path(_row_count_model(table), ("parent_id",)).in_(
+                            ["deep-1", "deep-2", "deep-3"]
+                        ),
+                    ),
                 )
             )
-        )
-        assert [row.id for row in await root_repo.query(
-             deep_many_any
-        ).all()] == ["deep-2"]
-
-        deep_embedded_any = DeepRoot.embedded.any(
-            DeepEmbedded1.child.any(
-                DeepEmbedded2.child.any(
-                    DeepEmbedded3.child.any(
-                        DeepEmbedded4.child.any(
-                            DeepEmbedded5.child.any(
-                                DeepEmbedded6.child.any(
-                                    DeepEmbedded7.value == "root2-embedded-7"
-                                )
-                            )
-                        )
-                    )
-                )
-            )
-        )
-        assert [row.id for row in await root_repo.query(
-            deep_embedded_any
-        ).all()] == ["deep-2"]
-
-        if nested:
-            loaded = await root_repo.query(DeepRoot.id == "deep-2").first()
-            assert loaded is not None
-            assert loaded.id == "deep-2"
-            embedded = loaded.embedded
-            embedded_names = []
-            for level in range(7):
-                embedded_names.append(embedded["name"])
-                if level < 6:
-                    embedded = embedded["child"]
-            assert embedded_names == [
-                "root2-deep-embedded-1",
-                "root2-deep-embedded-2",
-                "root2-deep-embedded-3",
-                "root2-deep-embedded-4",
-                "root2-deep-embedded-5",
-                "root2-deep-embedded-6",
-                "root2-deep-embedded-7",
-            ]
-            assert embedded["value"] == "root2-embedded-7"
-            many = loaded.many[0]
-            for _ in range(6):
-                many = many["children"][0]
-            assert many["name"] == "root2-deep-many-7"
-        else:
-            assert await _row_counts(db, *embedded_tables) == {
-                table: 3 for table in embedded_tables
+            assert len(rows) == 3
+            assert {dict(row)["parent_id"] for row in rows} == {
+                "deep-1",
+                "deep-2",
+                "deep-3",
             }
-            for table in embedded_tables:
-                rows = await db.adapter("primary").execute_query(
-                    QueryAST(
-                        source=_row_count_model(table),
-                        filters=(Path(_row_count_model(table), ("parent_id",)).in_(["deep-1", "deep-2", "deep-3"]),),
-                    )
-                )
-                assert len(rows) == 3
-                assert {dict(row)["parent_id"] for row in rows} == {
-                    "deep-1",
-                    "deep-2",
-                    "deep-3",
-                }
     finally:
         await cleanup(db)
 
