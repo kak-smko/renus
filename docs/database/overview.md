@@ -10,7 +10,7 @@ flowchart TD
     App[Renus application] --> DB[Database facade]
     DB --> Repo[Repository<Model>]
     Repo --> Query[Query builder]
-    Repo --> Mutation[Create, update, delete, upsert]
+    Repo --> Mutation[Create, update, delete]
     DB --> Tx[Transaction or UnitOfWork]
     DB --> Adapter[AsyncDatabaseAdapter]
     Adapter --> SQLite[SQLiteAdapter]
@@ -183,7 +183,7 @@ The main persistence operations are:
 - `update(...)` and `update_many(...)` update matching rows from a values dictionary.
 - `delete(...)` and `delete_many(...)` delete models or matching rows.
 - `hard_delete(...)` and `hard_delete_many(...)` physically remove rows, bypassing soft deletion.
-- `upsert(...)` inserts or updates on a conflict target.
+
 - `count(...)` and `exists(...)` provide direct aggregate checks.
 
 After a successful insert, Renus marks the model as persisted and populates adapter-generated values when available. Model instances track states such as new, persisted, dirty, deleted, and detached; inspect `is_new`, `is_persisted`, `is_dirty`, `is_deleted`, `dirty_fields`, and `get_dirty_changes()` when coordinating application changes.
@@ -288,7 +288,7 @@ Both methods return a dictionary of table names and row counts. See [Backup & Re
 
 - [Models & Fields](models.md) — declare models, fields, identities, relationships, and metadata.
 - [Queries](queries.md) — build and execute filters, projections, ordering, pagination, and aggregates.
-- [Mutations](mutations.md) — insert, update, delete, and upsert data.
+- [Mutations](mutations.md) — insert, update, and delete data.
 - [Repositories](repositories.md) — organize model persistence behind repository objects.
 - [Unit of Work](uow.md) — coordinate repositories in one application operation.
 - [Transactions](transactions.md) — control commit and rollback boundaries.

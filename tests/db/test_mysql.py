@@ -20,7 +20,6 @@ from renus.db import (
     Insert,
     InsertMany,
     Update,
-    Upsert,
 )
 from renus.db.mysql.adapter import MySQLTransactionContext
 from renus.db.sql import (
@@ -64,18 +63,6 @@ def test_mysql_dialect_type_mapping():
     active_sql = dialect.type_to_sql(meta.fields["active"])
     assert active_sql == "TINYINT(1)"
 
-def test_mysql_dialect_upsert_sql():
-    dialect = MySQLDialect()
-    sql, params = dialect.upsert_sql(
-        table="`customers`",
-        conflict_target=("username",),
-        create_values={"username": "alice", "balance": 100.0},
-        update_values={"balance": 200.0},
-    )
-
-    assert "INSERT INTO `customers`" in sql
-    assert "ON DUPLICATE KEY UPDATE `balance` = %s" in sql
-    assert params == ["alice", 100.0, 200.0]
 
 def test_mysql_compiler_query_compilation():
     dialect = MySQLDialect()

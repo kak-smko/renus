@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
 
 from renus.db.metadata.core import FieldMetadata
 from renus.db.sql.dialect.base import SQLDialect
@@ -52,26 +51,3 @@ class MySQLDialect(SQLDialect):
 
         return "VARCHAR(255)"
 
-    def upsert_sql(
-        self,
-        table: str,
-        conflict_target: tuple[str, ...],
-        create_values: dict[str, Any],
-        update_values: dict[str, Any],
-    ) -> tuple[str, list[Any]]:
-        """Build an upsert SQL statement using ON DUPLICATE KEY UPDATE."""
-        cols = list(create_values.keys())
-        col_names = ", ".join(self.quote(c) for c in cols)
-        val_placeholders = ", ".join(self.placeholder for _ in cols)
-        params: list[Any] = [create_values[c] for c in cols]
-
-        set_clauses: list[str] = []
-        for c in update_values:
-            set_clauses.append(f"{self.quote(c)} = {self.placeholder}")
-            params.append(update_values[c])
-
-        sql = f"INSERT INTO {table} ({col_names}) VALUES ({val_placeholders}) "
-        if set_clauses:
-            sql += f"ON DUPLICATE KEY UPDATE {', '.join(set_clauses)}"
-
-        return sql, params

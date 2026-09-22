@@ -21,7 +21,6 @@ from renus.db import (
     SQLiteAdapter,
     Sum,
     UnsupportedOperationError,
-    Upsert,
 )
 from renus.db.sql import (
     SQLCompiled,
@@ -84,22 +83,6 @@ def test_sqlite_compiler_select_query():
 
     assert compiled.params == (21, True)
 
-def test_sqlite_mutation_compiler_upsert():
-    dialect = SQLiteDialect()
-    mut_compiler = SQLMutationCompiler(dialect)
-
-    upsert_ast = Upsert(
-        Project,
-        conflict_target=("code",),
-        create_values={"code": "PRJ-1", "budget": 1000.0},
-        update_values={"budget": 2000.0},
-    )
-
-    compiled = mut_compiler.compile(upsert_ast)
-    assert "INSERT INTO" in compiled.sql
-    assert "ON CONFLICT (" in compiled.sql
-    assert "DO UPDATE SET" in compiled.sql
-    assert compiled.params == ("PRJ-1", 1000.0, 2000.0)
 
 @pytest.mark.asyncio
 async def test_sqlite_adapter_lifecycle_and_capabilities():
@@ -280,16 +263,6 @@ async def test_sqlite_end_to_end_repository_operations():
 
     assert await emp_repo.query().only_deleted().count() == 1
 
-    up_rows = await prj_repo.upsert(
-        conflict_target=("code",),
-        create_values={"code": "PRJ-A", "budget": 15000.0},
-        update_values={"budget": 18000.0},
-    )
-    assert up_rows == 1
-
-    prj_updated = await prj_repo.query(Project.code == "PRJ-A").first()
-    assert prj_updated is not None
-    assert prj_updated.budget == 18000.0
 
     async with db.unit_of_work() as uow:
         p_uow = uow.repository(Project)

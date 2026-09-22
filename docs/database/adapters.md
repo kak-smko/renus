@@ -132,7 +132,7 @@ Configuration keys:
 | `retries` | `3` | Connection attempts |
 | `retry_delay` | `0.5` | Initial retry delay in seconds; retries use backoff |
 
-The adapter creates an `aiomysql` pool with `autocommit=False`. Standalone mutations commit after execution; mutations inside an active transaction use that transaction's connection. MySQL uses `%s` parameter placeholders, backtick-quoted identifiers, and `ON DUPLICATE KEY UPDATE` for upserts.
+The adapter creates an `aiomysql` pool with `autocommit=False`. Standalone mutations commit after execution; mutations inside an active transaction use that transaction's connection. MySQL uses `%s` parameter placeholders and backtick-quoted identifiers.
 
 ## 4. MongoDB
 
@@ -277,7 +277,7 @@ Repositories create model-neutral query and mutation structures. SQL adapters us
 - SQL tables versus MongoDB collections;
 - SQL placeholders (`?` for SQLite and `%s` for MySQL);
 - quoted SQL identifiers versus document paths;
-- SQL `ON CONFLICT` / `ON DUPLICATE KEY UPDATE` versus MongoDB upsert operations;
+
 - embedded model storage in SQL auxiliary tables versus nested MongoDB documents.
 
 Use the repository and query APIs for portable application code. Use adapter-specific features only when the selected backend is intentional.

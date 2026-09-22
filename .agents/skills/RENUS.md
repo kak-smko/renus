@@ -5,7 +5,7 @@ description: Build, explain, debug, test, and extend applications with the Renus
 
 # Renus Framework: 0–100% Engineering Guide
 
-Use this skill whenever the task involves the Renus framework, a Renus application, or this repository's `renus` package. Treat the repository implementation and tests as the final authority. The checked-in documentation is useful but incomplete in places: `docs/menu.json`.
+Use this skill whenever the task involves the Renus framework, a Renus application, or this repository's `renus` package. Treat the repository implementation and tests as the final authority. The checked-in documentation is useful but incomplete in places: `renus/docs/menu.json`.
 
 ## Operating principles
 
@@ -357,11 +357,10 @@ created = await users.create_many([...])
 rows = await users.update(User.username == "ada", {"active": False})
 await users.delete(User.username == "ada")
 await users.hard_delete(User.username == "temporary")
-await users.upsert(
-    conflict_target=("username",),
-    create_values={"username": "ada", "email": "ada@example.com"},
-    update_values={"email": "ada@new.example.com"},
+await users.create(
+    User(username="ada", email="ada@example.com")
 )
+await users.update(User.username == "ada", {"email": "ada@new.example.com"})
 ```
 
 Query builders are immutable and asynchronous:

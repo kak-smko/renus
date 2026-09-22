@@ -29,7 +29,6 @@ from renus.db import (
     InsertMany,
     Update,
     UpdateMany,
-    Upsert,
 )
 from renus.db.mongodb.adapter import MongoTransactionContext
 from renus.db.mongodb.compiler import MongoCompiledQuery, MongoCompiler
@@ -199,17 +198,6 @@ def test_mongo_compiler_mutations():
     assert op == "delete_many"
     assert filt["active"] is False
 
-    ups_ast = Upsert(
-        AccountDoc,
-        conflict_target=("username",),
-        create_values={"username": "bob", "age": 30},
-        update_values={"age": 31},
-    )
-    coll, op, filt, update_doc = compiler.compile_mutation(ups_ast)
-    assert op == "upsert"
-    assert filt["username"] == "bob"
-    assert update_doc["$set"]["age"] == 31
-    assert update_doc["$setOnInsert"]["username"] == "bob"
 
 def test_mongodb_adapter_capabilities():
     adapter = MongoDBAdapter()
@@ -257,7 +245,7 @@ async def test_mongodb_mock_execution():
     mock_coll = MagicMock()
     mock_coll.find = MagicMock(return_value=mock_cursor)
     mock_coll.insert_one = AsyncMock(return_value=MagicMock(inserted_id=1))
-    mock_coll.update_one = AsyncMock(return_value=MagicMock(modified_count=1, upserted_id=None))
+    mock_coll.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
     mock_coll.delete_one = AsyncMock(return_value=MagicMock(deleted_count=1))
     mock_coll.create_index = AsyncMock()
 

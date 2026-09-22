@@ -5,7 +5,7 @@ using five distinct datasets ("scenarios"). Each scenario runs the same full
 checklist of operations so behaviour is verified against varying data sizes.
 
 Operations covered:
-    create, save, get/where().first(), update, upsert,
+    create, save, get/where().first(), update,
     limit, skip (offset), count, count with limit/skip,
     count with/without soft-deleted rows, paginate,
     include with filter, group_by, order_by + limit, select.
@@ -132,24 +132,6 @@ async def _full_checklist(
     assert refetched is not None
     assert refetched.age == 123
 
-    # --- upsert -----------------------------------------------------------
-    # WHERE on the unique username drives upsert conflict detection.
-    up_rows = await u_repo.where(User.username == "zz_upsert").upsert(
-        {"name": "FirstTry", "age": 1, "active": True}
-    )
-    assert up_rows == 1
-    up_fetched = await u_repo.where(User.username == "zz_upsert").first()
-    assert up_fetched is not None
-    assert up_fetched.name == "FirstTry"
-    total += 1
-    active += 1
-
-    # Existing row -> update branch.
-    up_rows2 = await u_repo.where(User.username == "zz_upsert").upsert(
-        {"age": 2}
-    )
-    assert up_rows2 == 1
-    assert (await u_repo.where(User.username == "zz_upsert").first()).age == 2
 
     # --- limit / skip (offset) --------------------------------------------
     ordered = await u_repo.query().order_by(User.username.asc()).all()

@@ -169,11 +169,6 @@ class UnannotatedEmbeddedOwner(Model):
 
 
 _row_count_models: dict[str, type] = {}
-class CompositeConflictRecord(Model):
-    id: str = Field(database=DatabaseField(primary_key=True))
-    left: str
-    right: str
-    value: int = 0
 
 
 _row_count_models: dict[str, type] = {}
@@ -641,38 +636,6 @@ async def test_query_limit_offset_ignored_for_update_delete(kind):
         await cleanup(db)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ADAPTERS)
-async def test_upsert_insert_then_update(kind):
-    db = await database_for(kind)
-    try:
-        repo = db.repository(User)
-        create = {"id": "x", "username": "up", "age": 1, "active": True}
-
-        rows = await repo.upsert(
-            conflict_target=("username",),
-            create_values=create,
-            update_values={"name": "Changed"},
-        )
-        assert rows == 1
-        row = await repo.where(User.username == "up").first()
-        assert row is not None
-        assert row.id == "x"
-        assert row.age == 1
-        assert row.active is True
-
-        rows2 = await repo.upsert(
-            conflict_target=("username",),
-            create_values=create,
-            update_values={"name": "Changed2"},
-        )
-        assert rows2 in (1, 2)
-        updated = await repo.where(User.username == "up").first()
-        assert updated is not None
-        assert updated.name == "Changed2"
-        assert updated.age == 1
-    finally:
-        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -950,32 +913,6 @@ async def test_query_delete_many(kind):
         await cleanup(db)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ADAPTERS)
-async def test_query_upsert(kind):
-    db = await database_for(kind)
-    try:
-        repo = db.repository(User)
-        create = {"id": "qu", "age": 5, "active": True}
-
-        # ``Query.upsert`` via ``where`` inserts when the row is absent...
-        rows = await repo.where(User.username == "qu").upsert(create)
-        assert rows in (1, 2)
-        row = await repo.where(User.username == "qu").first()
-        assert row is not None
-        assert row.id == "qu"
-        assert row.age == 5
-
-        # ...and updates it on a subsequent call.
-        rows2 = await repo.where(User.username == "qu").upsert(
-            {"id": "qu", "age": 9, "active": True}
-        )
-        assert rows2 in (1, 2)
-        updated = await repo.where(User.username == "qu").first()
-        assert updated is not None
-        assert updated.age == 9
-    finally:
-        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1210,85 +1147,8 @@ async def test_model_lifecycle_and_clean_save(kind):
         await cleanup(db)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ADAPTERS)
-async def test_upsert_model_target_and_primary_key_forms(kind):
-    db = await database_for(kind)
-    try:
-        repo = db.repository(User)
-        await repo.create(_u("model-upsert-1", "model-upsert-1", name="before"))
-
-        target = _u("model-upsert-1", "model-upsert-1", name="target", age=42)
-        assert await repo.upsert(
-            target=target,
-            conflict_target=(User.id,),
-        ) in (0, 1, 2)
-        row = await repo.where(User.id == "model-upsert-1").first()
-        assert row is not None
-        assert (row.username, row.name, row.age) == (
-            "model-upsert-1",
-            "target",
-            42,
-        )
-
-        # Positional model form defaults to the model primary key.
-        positional = _u("model-upsert-2", "model-upsert-2", name="positional")
-        assert await repo.upsert(positional) in (0, 1, 2)
-        inserted = await repo.where(User.id == "model-upsert-2").first()
-        assert inserted is not None
-        assert inserted.name == "positional"
-
-        positional.name = "positional-updated"
-        assert await repo.upsert(positional) in (0, 1, 2)
-        updated = await repo.where(User.id == "model-upsert-2").first()
-        assert updated is not None
-        assert updated.name == "positional-updated"
-    finally:
-        await cleanup(db)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ADAPTERS)
-async def test_upsert_composite_conflict_target(kind):
-    db = await database_for(kind, [CompositeConflictRecord])
-    try:
-        adapter = db.adapter("primary")
-        await adapter.create_index(
-            CompositeConflictRecord.metadata().table,
-            ["left", "right"],
-            unique=True,
-            name="uq_composite_conflict",
-        )
-        repo = db.repository(CompositeConflictRecord)
-        await repo.create(
-            CompositeConflictRecord(id="cc-1", left="a", right="b", value=1)
-        )
-
-        # The composite target updates the existing row, even though the id is
-        # different, and leaves the conflict columns unchanged.
-        assert await repo.upsert(
-            conflict_target=(CompositeConflictRecord.left, CompositeConflictRecord.right),
-            create_values={"id": "cc-existing", "left": "a", "right": "b"},
-            update_values={"value": 9},
-        ) in (0, 1, 2)
-        existing = await repo.where(
-            (CompositeConflictRecord.left == "a")
-            & (CompositeConflictRecord.right == "b")
-        ).first()
-        assert existing is not None
-        assert (existing.id, existing.value) == ("cc-1", 9)
-
-        # A new composite key takes the create branch.
-        assert await repo.upsert(
-            conflict_target=(CompositeConflictRecord.left, CompositeConflictRecord.right),
-            create_values={"id": "cc-2", "left": "a", "right": "c", "value": 3},
-            update_values={},
-        ) in (0, 1, 2)
-        created = await repo.where(CompositeConflictRecord.id == "cc-2").first()
-        assert created is not None
-        assert (created.left, created.right, created.value) == ("a", "c", 3)
-    finally:
-        await cleanup(db)
 
 
 @pytest.mark.asyncio
@@ -1333,8 +1193,8 @@ async def test_generated_fields_on_create_and_create_many(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_large_mutation_and_upsert_conformance(kind):
-    """Check mutation result contracts and upserts using 120 persisted rows."""
+async def test_large_mutation_conformance(kind):
+    """Check mutation result contracts using 120 persisted rows."""
     db = await database_for(kind)
     try:
         repo = db.repository(User)
@@ -1373,57 +1233,6 @@ async def test_large_mutation_and_upsert_conformance(kind):
         ) == 80
         assert await repo.count(User.name == "active") == 80
 
-        # Upsert by a unique non-primary field updates the existing row without
-        # replacing its primary key, then inserts a new row on the same target.
-        assert await repo.upsert(
-            conflict_target=(User.username,),
-            create_values={
-                "id": "m-000",
-                "username": "m-000",
-            },
-            update_values={"name": "upserted", "age": 1000},
-        ) in (1, 2)
-        existing = await repo.where(User.username == "m-000").first()
-        assert existing is not None
-        assert (existing.id, existing.name, existing.age) == (
-            "m-000",
-            "upserted",
-            1000,
-        )
-
-        assert await repo.upsert(
-            conflict_target=(User.username,),
-            create_values={
-                "id": "m-new",
-                "username": "m-new",
-                "name": "inserted-by-upsert",
-                "age": 7,
-                "active": True,
-            },
-            update_values={},
-        ) in (1, 2)
-        inserted = await repo.where(User.username == "m-new").first()
-        assert inserted is not None
-        assert (inserted.id, inserted.name, inserted.age) == (
-            "m-new",
-            "inserted-by-upsert",
-            7,
-        )
-
-        # Query upsert derives its conflict target from an equality condition.
-        assert await repo.where(User.username == "m-query").upsert(
-            {"id": "m-query", "name": "query-insert", "age": 9, "active": True}
-        ) in (1, 2)
-        assert await repo.where(User.username == "m-query").upsert(
-            {"id": "m-query", "name": "query-update", "age": 10, "active": True}
-        ) in (1, 2)
-        query_row = await repo.where(User.username == "m-query").first()
-        assert query_row is not None
-        assert (query_row.id, query_row.name, query_row.age) == (
-            "m-query",
-            "query-update",
-            10,
-        )
 
         # Single and bulk delete use the same count contract. User is a
         # soft-delete model, so the rows remain observable with_deleted().
@@ -1434,10 +1243,10 @@ async def test_large_mutation_and_upsert_conformance(kind):
                     == 1
                 )
 
-        assert await repo.delete_many(User.name == "active") == 79
+        assert await repo.delete_many(User.name == "active") == 80
         assert await repo.count(User.name == "active") == 0
         assert (
-                    await repo.query(User.name == "active").with_deleted().count() == 79
+                    await repo.query(User.name == "active").with_deleted().count() == 80
                 )
     finally:
         await cleanup(db)

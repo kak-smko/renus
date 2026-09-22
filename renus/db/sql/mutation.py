@@ -10,7 +10,6 @@ from renus.db.mutation.ast import (
     MutationAST,
     Update,
     UpdateMany,
-    Upsert,
 )
 from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
 from renus.db.sql.dialect.base import SQLDialect
@@ -24,7 +23,7 @@ class SQLMutationCompiler:
         Parameters
         ----------
         dialect:
-            SQL dialect used for quoting, placeholders, and upsert generation.
+            SQL dialect used for quoting and placeholders.
         """
         self.dialect = dialect
         self.qc = SQLCompiler(dialect)
@@ -48,8 +47,6 @@ class SQLMutationCompiler:
         if isinstance(m, (Delete, DeleteMany)):
             return self._compile_delete(quoted_table, m)
 
-        if isinstance(m, Upsert):
-            return self._compile_upsert(quoted_table, m)
 
         raise NotImplementedError(f"Unsupported mutation type: {type(m).__name__}")
 
@@ -118,11 +115,3 @@ class SQLMutationCompiler:
 
         return SQLCompiled(sql, tuple(params))
 
-    def _compile_upsert(self, table: str, m: Upsert) -> SQLCompiled:
-        sql, params = self.dialect.upsert_sql(
-            table=table,
-            conflict_target=m.conflict_target,
-            create_values=m.create_values,
-            update_values=m.update_values,
-        )
-        return SQLCompiled(sql, tuple(params))

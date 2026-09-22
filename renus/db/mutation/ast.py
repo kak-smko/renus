@@ -19,15 +19,6 @@ def normalize_values(values: dict[Any, Any]) -> dict[str, Any]:
             normalized[str(key)] = val
     return normalized
 
-def normalize_conflict_target(targets: Iterable[Path | str]) -> tuple[str, ...]:
-    """Extract the leaf field names from the given conflict targets."""
-    normalized: list[str] = []
-    for t in targets:
-        if isinstance(t, Path):
-            normalized.append(t.parts[-1])
-        else:
-            normalized.append(str(t).split(".")[-1])
-    return tuple(normalized)
 
 @dataclass(frozen=True, slots=True)
 class MutationAST:
@@ -310,83 +301,3 @@ class DeleteMany(FilterableMutation):
         object.__setattr__(self, "source", source)
         object.__setattr__(self, "filters", tuple(filters))
 
-@dataclass(frozen=True, slots=True)
-class Upsert(FilterableMutation):
-    """Mutation AST representing an upsert."""
-
-    conflict_target: tuple[str, ...] = ()
-    create_values: dict[str, Any] = field(default_factory=dict)
-    update_values: dict[str, Any] = field(default_factory=dict)
-
-    def __init__(
-        self,
-        source: type,
-        conflict_target: Iterable[Path | str],
-        create_values: dict[Any, Any],
-        update_values: dict[Any, Any],
-        filters: tuple[Condition, ...] = (),
-    ) -> None:
-        """Build an upsert AST with normalized values.
-
-        Parameters
-        ----------
-        source:
-            The model type the upsert targets.
-        conflict_target:
-            Fields used to detect an already existing row.
-        create_values:
-            Field values used when inserting.
-        update_values:
-            Field values used when updating an existing row.
-        filters:
-            Additional filter conditions. Defaults to empty.
-        """
-        object.__setattr__(self, "source", source)
-        object.__setattr__(self, "conflict_target", normalize_conflict_target(conflict_target))
-        object.__setattr__(self, "create_values", normalize_values(create_values))
-        object.__setattr__(self, "update_values", normalize_values(update_values))
-        object.__setattr__(self, "filters", tuple(filters))
-
-    @classmethod
-    def from_model(
-        cls,
-        instance: Any,
-        conflict_target: Iterable[Path | str] | None = None,
-    ) -> Upsert:
-        """Build an upsert AST from a model instance.
-
-        Parameters
-        ----------
-        instance:
-            Model instance providing insert and update values.
-        conflict_target:
-            Fields used to detect an existing row. Defaults to the model's
-            primary key when available.
-        """
-        source = instance.__class__
-        meta = getattr(source, "__db_metadata__", None)
-
-        targets: Iterable[Path | str]
-        if conflict_target is None:
-            if meta:
-                targets = meta.primary_key_fields
-            elif hasattr(instance, "identity_dict"):
-                targets = tuple(instance.identity_dict().keys())
-            else:
-                raise ValueError("Upsert requires conflict_target when model metadata is missing")
-        else:
-            targets = conflict_target
-
-        insert_ast = Insert.from_model(instance)
-        update_values = dict(insert_ast.values)
-
-        target_keys = set(normalize_conflict_target(targets))
-        for key in target_keys:
-            update_values.pop(key, None)
-
-        return cls(
-            source=source,
-            conflict_target=targets,
-            create_values=insert_ast.values,
-            update_values=update_values,
-        )

@@ -48,16 +48,6 @@ class SQLDialect(ABC):
         """Return the SQL column type for a field's metadata."""
         pass
 
-    @abstractmethod
-    def upsert_sql(
-        self,
-        table: str,
-        conflict_target: tuple[str, ...],
-        create_values: dict[str, Any],
-        update_values: dict[str, Any],
-    ) -> tuple[str, list[Any]]:
-        """Build an upsert statement with conflict handling."""
-        pass
 
     def _resolve_sql_type(self, col: Column) -> str:
         dialect_name = type(self).__name__.lower()

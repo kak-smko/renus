@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+
 from datetime import date, datetime, time, timezone
 from types import SimpleNamespace
 from uuid import UUID
@@ -180,30 +180,3 @@ async def test_query_after_connection_loss_reconnects(kind, tmp_path):
         await db.disconnect()
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ADAPTERS)
-async def test_concurrent_upserts_leave_one_consistent_row(kind):
-    db = await database_for(kind)
-    try:
-        await db.create_schema([FeatureRecord])
-        repo = db.repository(FeatureRecord)
-
-        async def write(value: str) -> None:
-            await repo.upsert(
-                conflict_target=("email",),
-                create_values={
-                    "id": "shared",
-                    "email": "shared@example.com",
-                    "payload": value,
-                },
-                update_values={"payload": value},
-            )
-
-        values = {f"writer-{index}" for index in range(8)}
-        await asyncio.gather(*(write(value) for value in values))
-        rows = await repo.where(FeatureRecord.email == "shared@example.com").all()
-        assert len(rows) == 1
-        assert rows[0].id == "shared"
-        assert rows[0].payload in values
-    finally:
-        await cleanup(db)

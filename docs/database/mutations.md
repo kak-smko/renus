@@ -160,49 +160,6 @@ await users.hard_delete_many(User.status == "expired")
 
 The model form of `hard_delete()` also uses the model identity. These methods are irreversible at the database layer unless the data is available from a backup.
 
-## 10. Upsert
-
-An upsert inserts a row when its conflict target is absent and updates it when the target already exists.
-
-### Explicit values
-
-```python
-rows = await users.upsert(
-    conflict_target=("username",),
-    create_values={
-        "username": "ada",
-        "name": "Ada Lovelace",
-    },
-    update_values={
-        "name": "Ada Byron Lovelace",
-    },
-)
-```
-
-The `conflict_target` is an iterable of field names or paths. `create_values` supplies the insert row. `update_values` supplies only the values to change when a conflict is found.
-
-### From a model
-
-Pass `target` to derive insert values from a model. If no conflict target is supplied, Renus uses the model's primary-key fields:
-
-```python
-user = User(username="ada", name="Ada Lovelace")
-await users.upsert(target=user)
-```
-
-A model without metadata or identity requires an explicit conflict target.
-
-### From a query
-
-A query can turn equality filters into an upsert conflict target:
-
-```python
-await users.where(User.username == "ada").upsert(
-    {"name": "Ada Byron Lovelace"}
-)
-```
-
-Only equality conditions with a non-`None` value become conflict-target fields. If no such condition exists, the model primary key is used when available; otherwise the operation raises `ValueError`.
 
 ## 11. Mutation ASTs and adapters
 
@@ -216,9 +173,9 @@ The public repository methods create these immutable mutation descriptions:
 | `UpdateMany` | `update_many()` | Bulk update |
 | `Delete` | `delete()` or `hard_delete()` | Delete one record or matching row |
 | `DeleteMany` | `delete_many()` or `hard_delete_many()` | Bulk delete |
-| `Upsert` | `upsert()` | Insert-or-update on conflict |
 
-SQL adapters compile these operations into parameterized SQL. MongoDB compiles them into collection operations such as `insert_one`, `insert_many`, `update_one`, `update_many`, `delete_one`, `delete_many`, and `update_one(..., upsert=True)`. See [`/docs/database/adapters.md`](adapters.md) for backend configuration and the adapter contract.
+
+SQL adapters compile these operations into parameterized SQL. MongoDB compiles them into collection operations such as `insert_one`, `insert_many`, `update_one`, `update_many`, `delete_one`, `delete_many`,. See [`/docs/database/adapters.md`](adapters.md) for backend configuration and the adapter contract.
 
 ## 12. Errors and affected rows
 
@@ -228,7 +185,7 @@ Common mutation failures include:
 - `DuplicateKeyError` when a unique or primary-key constraint is violated;
 - `IntegrityError` for other integrity violations;
 - `DatabaseError` or a backend-specific translated database error for execution failures;
-- `ValueError` for incomplete mutation arguments, such as an upsert without required values.
+
 
 Import database exceptions from `renus.db`:
 

@@ -53,7 +53,6 @@ from renus.db.mutation import (
     MutationAST,
     Update,
     UpdateMany,
-    Upsert,
 )
 from renus.db.query import (
     Aggregate,
@@ -221,7 +220,6 @@ __all__ = [
     "UnsupportedOperationError",
     "Update",
     "UpdateMany",
-    "Upsert",
     "ValidationError",
     "adapters",
     "clear_adapters",

@@ -26,7 +26,6 @@ from renus.db import (
     UnsupportedOperationError,
     Update,
     UpdateMany,
-    Upsert,
 )
 
 from tests.db._fakes import DDLFakeMixin
@@ -151,8 +150,6 @@ class InMemoryAdapter(DDLFakeMixin, AsyncDatabaseAdapter):
                     affected += 1
             return MutationResult(rows_affected=affected)
 
-        if isinstance(compiled, Upsert):
-            return MutationResult(rows_affected=1)
 
         return MutationResult(rows_affected=1)
 
@@ -299,15 +296,6 @@ async def test_repository_soft_delete():
     assert isinstance(adapter.executed_mutations[-1], Update)
     assert "deleted_at" in adapter.executed_mutations[-1].values
 
-@pytest.mark.asyncio
-async def test_repository_upsert():
-    adapter = InMemoryAdapter()
-    repo = Repository(adapter, Account)
-
-    acc = Account(id=10, owner="Judy", balance=50.0)
-    rows = await repo.upsert(target=acc)
-    assert rows == 1
-    assert isinstance(adapter.executed_mutations[-1], Upsert)
 
 
 @pytest.mark.asyncio

@@ -255,12 +255,4 @@ class Query(Generic[T]):
             raise ConfigurationError("Cannot execute query without a bound repository")
         return await self.repository.hard_delete_many(*self.ast.filters)
 
-    async def upsert(self, values: dict[Any, Any]) -> int:
-        """Insert a row, or update it on conflict with the given values.
 
-        Equality filters built through ``where`` identify the row to match on;
-        returns the rows affected.
-        """
-        if self.repository is None:
-            raise ConfigurationError("Cannot execute query without a bound repository")
-        return await self.repository._upsert_where(self.ast.filters, values)

@@ -31,9 +31,11 @@ from renus.db.query.ast import QueryAST
 
 try:
     from pymongo import AsyncMongoClient, ReturnDocument
+    from pymongo.errors import DuplicateKeyError as PyMongoDuplicateKeyError
 except ImportError:
     AsyncMongoClient = None
     ReturnDocument = None
+    PyMongoDuplicateKeyError = None
 
 
 DEFAULT_MAX_POOL = 100
@@ -362,11 +364,6 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
                 res = await coll.delete_many(filt_or_doc, session=session)
                 return MutationResult(rows_affected=res.deleted_count)
 
-            if op == "upsert":
-                res = await coll.update_one(filt_or_doc, extra, upsert=True, session=session)
-                last_id = res.upserted_id if res.upserted_id is not None else None
-                rows = 1 if (res.upserted_id is not None or res.modified_count > 0) else 0
-                return MutationResult(rows_affected=rows, last_id=last_id)
 
             raise NotImplementedError(f"Unsupported MongoDB operation: {op}")
         except Exception as e:
@@ -375,7 +372,7 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
     async def _next_sequence(self, coll_name: str, session: Any) -> int:
         """Atomically allocate the next integer id for a collection.
 
-        Uses an upserting ``$inc`` on a shared ``__counters__`` collection so
+        Uses an atomic ``$inc`` on a shared ``__counters__`` collection so
         concurrent inserts receive distinct ids.
         """
         if ReturnDocument is None:

@@ -12,7 +12,6 @@ from renus.db.mutation.ast import (
     MutationAST,
     Update,
     UpdateMany,
-    Upsert,
 )
 from renus.db.query.ast import (
     Condition,
@@ -610,30 +609,6 @@ class MongoCompiler:
             filt = self._compile_filters(m.filters, meta)
             return collection, "delete_many", filt, None
 
-        if isinstance(m, Upsert):
-            conflict_keys = list(m.conflict_target)
-            filt = self._map_doc_for_mongo(
-                {k: m.create_values.get(k) for k in conflict_keys},
-                meta,
-            )
-            set_values = self._map_doc_for_mongo(m.update_values, meta)
-            # MongoDB's immutable _id may be supplied for the insert branch,
-            # but must never appear in the update document.
-            set_values.pop("_id", None)
-            create_values = self._map_doc_for_mongo(m.create_values, meta)
-            update_doc: dict[str, Any] = {}
-            if set_values:
-                update_doc["$set"] = set_values
-            if create_values:
-                # MongoDB forbids a path in both ``$set`` and ``$setOnInsert``.
-                # On conflict, update_values win; the remaining create fields
-                # are applied atomically only on the insert branch.
-                insert_only = {
-                    k: v for k, v in create_values.items() if k not in set_values
-                }
-                if insert_only:
-                    update_doc["$setOnInsert"] = insert_only
-            return collection, "upsert", filt, update_doc
 
         raise NotImplementedError(f"Unsupported mutation: {type(m).__name__}")
 

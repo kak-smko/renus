@@ -9,8 +9,6 @@ from renus.db.mutation.ast import (
     MutationAST,
     Update,
     UpdateMany,
-    Upsert,
-    normalize_conflict_target,
     normalize_values,
 )
 
@@ -23,7 +21,5 @@ __all__ = [
     "MutationAST",
     "Update",
     "UpdateMany",
-    "Upsert",
-    "normalize_conflict_target",
     "normalize_values",
 ]

@@ -18,16 +18,12 @@ from renus.db.mutation.ast import (
     MutationAST,
     Update,
     UpdateMany,
-    Upsert,
 )
 from renus.db.query.ast import (
     Condition,
-    Logical,
-    Operator,
-    Path,
     Include,
+    Path,
     QueryAST,
-    RelationAny,
 )
 from renus.db.query.builder import Count, Query
 from renus.db.repository.relationships import RelationshipCoordinator
@@ -368,70 +364,6 @@ class Repository(Generic[T]):
             res = await self._execute_mutation(del_many_ast)
             return res.rows_affected
 
-    async def upsert(self, conflict_target: Iterable[Path | str] | None = None, create_values: dict[Any, Any] | None = None, update_values: dict[Any, Any] | None = None, target: T | None = None) -> int:
-        """Insert or update a row on conflict for the target and return rows affected."""
-        if target is not None:
-            upsert_ast = Upsert.from_model(target, conflict_target=conflict_target)
-        elif isinstance(conflict_target, self.model):
-            upsert_ast = Upsert.from_model(conflict_target)
-        else:
-            if conflict_target is None or create_values is None or update_values is None:
-                raise ValueError("upsert requires conflict_target, create_values, and update_values")
-            upsert_ast = Upsert(
-                source=self.model,
-                conflict_target=conflict_target,
-                create_values=create_values,
-                update_values=update_values,
-            )
-
-        res = await self._execute_mutation(upsert_ast)
-        return res.rows_affected
-
-    async def _upsert_where(
-        self,
-        filters: tuple[Condition, ...],
-        values: dict[Any, Any],
-    ) -> int:
-        """Perform an upsert keyed on the query's equality filters.
-
-        Equality conditions in ``filters`` become the conflict target and are
-        merged into the create values, so that ``repo.where(field == value)``
-        inserted-or-updates the row matching that field. Returns rows affected.
-        """
-        conflict_target: list[Path | str] = []
-        create_values: dict[Any, Any] = dict(values)
-        update_values: dict[Any, Any] = dict(values)
-
-        for cond in filters:
-            if (
-                isinstance(cond, Condition)
-                and not isinstance(cond, (Logical, RelationAny))
-                and cond.operator == Operator.EQ
-                and cond.path is not None
-                and cond.value is not None
-            ):
-                conflict_target.append(cond.path)
-                create_values[cond.path.parts[-1]] = cond.value
-
-        if not conflict_target:
-            meta = getattr(self.model, "__db_metadata__", None)
-            pk_fields = tuple(getattr(meta, "primary_key_fields", ()) or ())
-            if pk_fields:
-                conflict_target = list(pk_fields)
-            else:
-                raise ValueError(
-                    "upsert requires an equality where() condition or a primary key"
-                )
-
-        upsert_ast = Upsert(
-            source=self.model,
-            conflict_target=conflict_target,
-            create_values=create_values,
-            update_values=update_values,
-            filters=filters,
-        )
-        res = await self._execute_mutation(upsert_ast)
-        return res.rows_affected
 
     async def count(self, *conditions: Condition) -> int:
         """Return the number of rows matching the given conditions."""

@@ -15,12 +15,8 @@ from renus.db import (
     Model,
     Update,
     UpdateMany,
-    Upsert,
 )
-from renus.db.mutation.ast import (
-    normalize_conflict_target,
-    normalize_values,
-)
+from renus.db.mutation.ast import normalize_values
 
 
 class Member(Model):
@@ -170,42 +166,6 @@ def test_delete_many():
     chained = ast.where(Member.points == 0)
     assert len(chained.filters) == 2
 
-def test_upsert_basic():
-    ast = Upsert(
-        Member,
-        conflict_target=(Member.email,),
-        create_values={"username": "grace", "email": "grace@x.com", "points": 10},
-        update_values={"points": 20},
-    )
-    assert isinstance(ast, Upsert)
-    assert ast.conflict_target == ("email",)
-    assert ast.create_values == {
-        "username": "grace",
-        "email": "grace@x.com",
-        "points": 10,
-    }
-    assert ast.update_values == {"points": 20}
-
-def test_upsert_from_model():
-    member = Member(id=101, username="heidi", email="heidi@x.com", points=50)
-
-    ast = Upsert.from_model(member, conflict_target=(Member.email,))
-    assert ast.conflict_target == ("email",)
-    assert ast.create_values["username"] == "heidi"
-    assert ast.create_values["email"] == "heidi@x.com"
-    assert ast.create_values["id"] == 101
-
-    assert "email" not in ast.update_values
-    assert ast.update_values["username"] == "heidi"
-    assert ast.update_values["points"] == 50
-
-def test_upsert_from_model_default_pk():
-    member = Member(id=102, username="ivan", email="ivan@x.com", points=75)
-
-    ast = Upsert.from_model(member)
-    assert ast.conflict_target == ("id",)
-    assert "id" not in ast.update_values
-    assert ast.update_values["username"] == "ivan"
 
 def test_normalize_values():
     raw = {
@@ -220,8 +180,4 @@ def test_normalize_values():
         "role": "admin",
     }
 
-def test_normalize_conflict_target():
-    targets = [Member.username, "email", "member.id"]
-    norm = normalize_conflict_target(targets)
-    assert norm == ("username", "email", "id")
 

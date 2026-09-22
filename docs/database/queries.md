@@ -316,15 +316,6 @@ hard_deleted = await users.where(User.role == "expired").hard_delete()
 
 `update()` and `delete()` use the query filters. Query `limit()`, `offset()`, and ordering are not used to restrict these mutation operations; use precise filter conditions or the repository mutation methods described in [`/docs/database/mutations.md`](mutations.md).
 
-A query can also perform an equality-filter upsert:
-
-```python
-await users.where(User.username == "ada").upsert(
-    {"name": "Ada Lovelace"}
-)
-```
-
-The equality filters become the conflict target and are included in the inserted values.
 
 ## 14. Backend behavior
 

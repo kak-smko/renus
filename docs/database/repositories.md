@@ -1,6 +1,6 @@
 # Database & Repositories
 
-A `Repository` is the model-specific entry point for persistence and database operations. It binds one model to one database connection and provides model creation, updates, deletion, upserts, queries, counts, and existence checks.
+A `Repository` is the model-specific entry point for persistence and database operations. It binds one model to one database connection and provides model creation, updates, deletion, queries, counts, and existence checks.
 
 
 ## 1. Create a database and repository
@@ -170,37 +170,6 @@ await users.hard_delete_many(User.name.is_null())
 
 The methods return the number of affected rows. Relationship cascade behavior depends on the model relationship configuration; see [`/docs/database/models.md`](models.md).
 
-## 8. Upsert rows
-
-`upsert()` inserts a row and updates it when the conflict target already exists. The explicit form requires the fields used for conflict detection, insert values, and update values:
-
-```python
-rows = await users.upsert(
-    conflict_target=("username",),
-    create_values={
-        "username": "ada",
-        "name": "Ada Lovelace",
-    },
-    update_values={"name": "Ada Byron Lovelace"},
-)
-```
-
-For a model instance, pass `target` and let the model primary key be the default conflict target:
-
-```python
-user = User(username="ada", name="Ada Lovelace")
-await users.upsert(target=user)
-```
-
-A query can also express an equality-based conflict target:
-
-```python
-await users.where(User.username == "ada").upsert(
-    {"name": "Ada Byron Lovelace"}
-)
-```
-
-The query form uses equality conditions as the conflict target and includes those values when inserting. The result is the number of rows affected.
 
 ## 9. Connection and transaction boundaries
 
@@ -227,7 +196,7 @@ async with db.transaction():
 | `delete_many(...)` | Affected-row count; all matching rows |
 | `hard_delete(...)` | Affected-row count; physical deletion |
 | `hard_delete_many(...)` | Affected-row count; physical bulk deletion |
-| `upsert(...)` | Affected-row count |
+
 | `count(...)` | Matching-row count |
 | `exists(...)` | `True` if at least one row matches |
 | `query()` / `where()` | An immutable `Query` builder |
@@ -235,6 +204,6 @@ async with db.transaction():
 ## Next steps
 
 - [`/docs/database/queries.md`](queries.md) — build and execute reads and query-side writes.
-- [`/docs/database/mutations.md`](mutations.md) — understand insert, update, delete, and upsert operations in detail.
+- [`/docs/database/mutations.md`](mutations.md) — understand insert, update, and delete operations in detail.
 - [`/docs/database/adapters.md`](adapters.md) — choose and configure a backend.
 - [`/docs/database/transactions.md`](transactions.md) — control commit and rollback.
