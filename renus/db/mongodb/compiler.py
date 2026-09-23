@@ -36,6 +36,7 @@ class MongoCompiledQuery:
         "limit",
         "meta",
         "pipeline",
+        "joined",
         "projection",
         "skip",
         "sort",
@@ -51,6 +52,7 @@ class MongoCompiledQuery:
         limit: int | None = None,
         pipeline: list[dict[str, Any]] | None = None,
         meta: Any = None,
+        joined: tuple[str, ...] = (),
     ) -> None:
         """Store the compiled MongoDB query attributes.
 
@@ -79,6 +81,7 @@ class MongoCompiledQuery:
         self.limit = limit
         self.pipeline = pipeline
         self.meta = meta
+        self.joined = joined
 
 class MongoCompiler:
 
@@ -186,6 +189,7 @@ class MongoCompiler:
                 })
 
         filter_doc = self._combine_filter_parts(filter_parts)
+        joined_stages, joined_names = self._joined_lookups_recursive(ast)
 
         if ast.aggregates:
             pipeline: list[dict[str, Any]] = [*relation_any_stages]
@@ -265,8 +269,8 @@ class MongoCompiler:
             )
 
         projection_doc: dict[str, Any] | None = None
-        if relation_any_stages:
-            pipeline: list[dict[str, Any]] = [*relation_any_stages]
+        if relation_any_stages or joined_stages:
+            pipeline: list[dict[str, Any]] = [*relation_any_stages, *joined_stages]
             if filter_doc:
                 pipeline.append({"$match": filter_doc})
             if ast.ordering:
@@ -288,6 +292,7 @@ class MongoCompiler:
                 filter_doc={},
                 pipeline=pipeline,
                 meta=meta,
+                joined=tuple(joined_names),
             )
 
         if ast.projection:
@@ -364,7 +369,265 @@ class MongoCompiler:
             skip=ast.offset,
             limit=ast.limit,
             meta=meta,
+            joined=tuple(joined_names),
         )
+
+    def _joined_lookups(self, ast: QueryAST) -> tuple[list[dict[str, Any]], list[str]]:
+        """Compile automatic and explicit relationship includes into one pipeline."""
+        if ast.projection or ast.aggregates:
+            return [], []
+        root_meta = getattr(ast.source, "__db_metadata__", None)
+        if root_meta is None:
+            return [], []
+
+        requested: dict[tuple[str, ...], Any] = {
+            item.path.parts: item for item in ast.includes
+        }
+        expanded: dict[tuple[str, ...], Any] = dict(requested)
+        for item in ast.includes:
+            for nested in item.nested:
+                expanded[(*item.path.parts, *nested.path.parts)] = nested
+        requested = expanded
+        for name, rel in root_meta.relationships.items():
+            loading = getattr(rel.loading, "value", rel.loading)
+            if loading == "joined" or (rel.is_embedded and rel.target in (dict, list)):
+                requested.setdefault((name,), None)
+
+        stages: list[dict[str, Any]] = []
+        names: list[str] = []
+
+        def mongo_field(model_meta: Any, field_name: str) -> str:
+            return "_id" if field_name == model_meta.primary_key_field else field_name
+
+        for path, include in requested.items():
+            if not path:
+                continue
+            name = path[0]
+            rel = root_meta.relationships.get(name)
+            if rel is None or rel.is_embedded:
+                continue
+            target = rel.target if isinstance(rel.target, type) else None
+            target_meta = getattr(target, "__db_metadata__", None)
+            if len(path) > 1:
+                continue
+            if target_meta is None:
+                continue
+            kind = getattr(rel.kind, "value", rel.kind)
+            include_filter = getattr(include, "filter", None)
+            link_name = ""
+            nested_items = [
+                (item_path, item)
+                for item_path, item in requested.items()
+                if len(item_path) > 1 and item_path[0] == name
+            ]
+            if kind == "many_to_many":
+                if not rel.through:
+                    continue
+                local_col = rel.local_key or f"{to_plural_lower(root_meta.table)}_id"
+                foreign_col = rel.foreign_key or f"{to_plural_lower(target_meta.table)}_id"
+                link_name = f"__renus_joined_links_{name}"
+                stages.append({"$lookup": {
+                    "from": str(rel.through),
+                    "localField": mongo_field(root_meta, root_meta.primary_key_field),
+                    "foreignField": local_col,
+                    "as": link_name,
+                }})
+                stages.append({"$lookup": {
+                    "from": target_meta.table,
+                    "let": {"ids": f"${link_name}.{foreign_col}"},
+                    "pipeline": [
+                        {"$match": {"$expr": {"$in": [
+                            f"${mongo_field(target_meta, target_meta.primary_key_field)}",
+                            "$$ids",
+                        ]}}},
+                        *([{"$match": self._compile_condition(include_filter)}] if include_filter is not None else []),
+                    ],
+                    "as": name,
+                }})
+            else:
+                if kind == "many_to_one":
+                    local_field = rel.foreign_key or f"{name}_id"
+                    foreign_field = mongo_field(target_meta, target_meta.primary_key_field)
+                else:
+                    local_field = rel.local_key or root_meta.primary_key_field
+                    foreign_field = rel.foreign_key or f"{to_plural_lower(root_meta.table)}_id"
+
+                if nested_items:
+                    nested_pipeline: list[dict[str, Any]] = [
+                        {"$match": {"$expr": {"$eq": [
+                            f"${foreign_field}", "$$local"
+                        ]}}}
+                    ]
+                    if include_filter is not None:
+                        nested_pipeline.append({"$match": self._compile_condition(include_filter)})
+                    for nested_path, nested_item in nested_items:
+                        nested_name = nested_path[1]
+                        nested_rel = target_meta.relationships.get(nested_name)
+                        nested_target = getattr(nested_rel, "target", None) if nested_rel else None
+                        nested_meta = getattr(nested_target, "__db_metadata__", None)
+                        if nested_rel is None or nested_meta is None or nested_rel.is_embedded:
+                            continue
+
+                        nested_local = nested_rel.foreign_key or f"{nested_name}_id"
+                        nested_foreign = mongo_field(nested_meta, nested_meta.primary_key_field)
+                        nested_pipeline.append({"$lookup": {
+                            "from": nested_meta.table,
+                            "localField": nested_local,
+                            "foreignField": nested_foreign,
+                            "as": nested_name,
+                        }})
+                    stages.append({"$lookup": {
+                        "from": target_meta.table,
+                        "let": {"local": f"${mongo_field(root_meta, local_field)}"},
+                        "pipeline": nested_pipeline,
+                        "as": name,
+                    }})
+                elif include_filter is None:
+                    stages.append({"$lookup": {
+                        "from": target_meta.table,
+                        "localField": mongo_field(root_meta, local_field),
+                        "foreignField": foreign_field,
+                        "as": name,
+                    }})
+                else:
+                    stages.append({"$lookup": {
+                        "from": target_meta.table,
+                        "let": {"local": f"${mongo_field(root_meta, local_field)}"},
+                        "pipeline": [
+                            {"$match": {"$expr": {"$eq": [
+                                f"${foreign_field}", "$$local"
+                            ]}}},
+                            {"$match": self._compile_condition(include_filter)},
+                        ],
+                        "as": name,
+                    }})
+            if kind == "many_to_many" and link_name:
+                stages.append({"$unset": link_name})
+            names.append(name)
+
+        return stages, names
+
+    def _joined_lookups_recursive(
+        self,
+        ast: QueryAST,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Build recursive relationship lookups in one aggregation pipeline."""
+        if ast.projection or ast.aggregates:
+            return [], []
+        root_meta = getattr(ast.source, "__db_metadata__", None)
+        if root_meta is None:
+            return [], []
+
+        requested: dict[tuple[str, ...], Any] = {}
+
+        def collect(item: Any, prefix: tuple[str, ...] = ()) -> None:
+            path = (*prefix, *item.path.parts)
+            requested[path] = item
+            for nested in item.nested:
+                collect(nested, path)
+
+        for item in ast.includes:
+            collect(item)
+
+        def mongo_field(model_meta: Any, field_name: str) -> str:
+            return "_id" if field_name == model_meta.primary_key_field else field_name
+
+        def build(owner_meta: Any, prefix: tuple[str, ...]) -> list[dict[str, Any]]:
+            direct: dict[str, Any] = {}
+            for path, include in requested.items():
+                if len(path) <= len(prefix) or path[: len(prefix)] != prefix:
+                    continue
+                remainder = path[len(prefix) :]
+                if remainder:
+                    direct.setdefault(remainder[0], include)
+            for name, rel in owner_meta.relationships.items():
+                loading = getattr(rel.loading, "value", rel.loading)
+                if loading == "joined" or (rel.is_embedded and rel.target in (dict, list)):
+                    direct.setdefault(name, None)
+
+            stages: list[dict[str, Any]] = []
+            for name, include in direct.items():
+                rel = owner_meta.relationships.get(name)
+                if rel is None or rel.is_embedded:
+                    continue
+                target = rel.target if isinstance(rel.target, type) else None
+                target_meta = getattr(target, "__db_metadata__", None)
+                if target_meta is None:
+                    continue
+                child_prefix = (*prefix, name)
+                child_stages = build(target_meta, child_prefix)
+                include_filter = getattr(include, "filter", None)
+                kind = getattr(rel.kind, "value", rel.kind)
+
+                if kind == "many_to_many":
+                    if not rel.through:
+                        continue
+                    local_col = rel.local_key or f"{to_plural_lower(owner_meta.table)}_id"
+                    foreign_col = rel.foreign_key or f"{to_plural_lower(target_meta.table)}_id"
+                    link_name = f"__renus_lookup_links_{'_'.join(child_prefix)}"
+                    stages.append({"$lookup": {
+                        "from": str(rel.through),
+                        "localField": mongo_field(owner_meta, owner_meta.primary_key_field),
+                        "foreignField": local_col,
+                        "as": link_name,
+                    }})
+                    target_pipeline: list[dict[str, Any]] = [{"$match": {"$expr": {"$in": [
+                        f"${mongo_field(target_meta, target_meta.primary_key_field)}",
+                        f"${link_name}.{foreign_col}",
+                    ]}}}]
+                    if include_filter is not None:
+                        target_pipeline.append({"$match": self._compile_condition(include_filter)})
+                    target_pipeline.extend(child_stages)
+                    stages.append({"$lookup": {
+                        "from": target_meta.table,
+                        "let": {"ids": f"${link_name}.{foreign_col}"},
+                        "pipeline": [
+                            {"$match": {"$expr": {"$in": [
+                                f"${mongo_field(target_meta, target_meta.primary_key_field)}",
+                                "$$ids",
+                            ]}}},
+                            *([{"$match": self._compile_condition(include_filter)}] if include_filter is not None else []),
+                            *child_stages,
+                        ],
+                        "as": name,
+                    }})
+                    stages.append({"$unset": link_name})
+                    continue
+
+                if kind == "many_to_one":
+                    local_field = rel.foreign_key or f"{name}_id"
+                    foreign_field = mongo_field(target_meta, target_meta.primary_key_field)
+                else:
+                    local_field = rel.local_key or owner_meta.primary_key_field
+                    foreign_field = rel.foreign_key or f"{to_plural_lower(owner_meta.table)}_id"
+
+                if include_filter is None and not child_stages:
+                    stages.append({"$lookup": {
+                        "from": target_meta.table,
+                        "localField": mongo_field(owner_meta, local_field),
+                        "foreignField": foreign_field,
+                        "as": name,
+                    }})
+                else:
+                    pipeline: list[dict[str, Any]] = [{"$match": {"$expr": {"$eq": [
+                        f"${foreign_field}", "$$local"
+                    ]}}}]
+                    if include_filter is not None:
+                        pipeline.append({"$match": self._compile_condition(include_filter)})
+                    pipeline.extend(child_stages)
+                    stages.append({"$lookup": {
+                        "from": target_meta.table,
+                        "let": {"local": f"${mongo_field(owner_meta, local_field)}"},
+                        "pipeline": pipeline,
+                        "as": name,
+                    }})
+            return stages
+
+        return build(root_meta, ()), [
+            name for name, rel in root_meta.relationships.items()
+            if getattr(rel.loading, "value", rel.loading) == "joined"
+            or any(path == (name,) for path in requested)
+        ]
 
     def _path_str(self, p: Path) -> str:
         parts = list(p.parts)

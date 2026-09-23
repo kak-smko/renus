@@ -263,6 +263,8 @@ class MySQLAdapter(SQLAdapter):
             async with conn.cursor(**cursor_kwargs) as cur:
                 await cur.execute(sql_compiled.sql, sql_compiled.params)
                 rows = await cur.fetchall()
+            if getattr(sql_compiled, "joined", ()):
+                return self._decode_joined_rows(list(rows), sql_compiled)
             meta = getattr(sql_compiled, "meta", None)
             if meta:
                 return [self.dialect.decode_row(dict(r), meta) for r in rows]

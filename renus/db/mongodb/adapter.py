@@ -228,6 +228,45 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         await self.disconnect()
         await self.connect()
 
+    def _normalize_joined_documents(
+        self,
+        docs: list[dict[str, Any]],
+        mongo_query: MongoCompiledQuery,
+    ) -> list[dict[str, Any]]:
+        """Normalize lookup arrays recursively to relationship cardinality."""
+        if not mongo_query.joined or not mongo_query.meta:
+            return docs
+
+        def normalize(value: dict[str, Any], meta: Any) -> dict[str, Any]:
+            data = dict(value)
+            for name, rel in getattr(meta, "relationships", {}).items():
+                if name not in data:
+                    continue
+                target_meta = getattr(rel.target, "__db_metadata__", None)
+                raw = data[name]
+                if target_meta is None:
+                    continue
+                if rel.is_collection:
+                    items = raw if isinstance(raw, list) else []
+                    data[name] = [
+                        normalize(dict(item), target_meta)
+                        for item in items
+                        if isinstance(item, dict)
+                    ]
+                else:
+                    item = raw[0] if isinstance(raw, list) and raw else raw
+                    data[name] = (
+                        normalize(dict(item), target_meta)
+                        if isinstance(item, dict)
+                        else None
+                    )
+            if "_id" in data:
+                data.setdefault("id", data.pop("_id"))
+            return self.dialect.decode_value(data, meta)
+
+        root_meta = mongo_query.meta
+        return [normalize(doc, root_meta) for doc in docs]
+
     async def _run_query(self, mongo_query: MongoCompiledQuery) -> QueryResult[Any]:
         assert self._mongo_db is not None
         coll = self._mongo_db[mongo_query.collection]
@@ -254,7 +293,10 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
 
             results: list[dict[str, Any]] = []
             meta = getattr(mongo_query, "meta", None)
-            for d in docs:
+            normalized_docs = self._normalize_joined_documents(
+                [dict(d) for d in docs], mongo_query
+            )
+            for d in normalized_docs:
                 doc = dict(d)
                 if "_id" in doc:
                     if "id" not in doc:

@@ -8,6 +8,7 @@ from renus.db.core.adapter import AsyncDatabaseAdapter
 from renus.db.core.backup import DEFAULT_PAGE_SIZE, BackupFileWriter, load_rows_pages
 from renus.db.mutation.ast import MutationAST
 from renus.db.query.ast import QueryAST
+
 from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
 from renus.db.sql.dialect.base import SQLDialect
 from renus.db.sql.mutation import SQLMutationCompiler
@@ -37,6 +38,183 @@ class SQLAdapter(AsyncDatabaseAdapter):
 
     def decode_row(self, row: dict[str, Any], meta: Any = None) -> dict[str, Any]:
         return self.dialect.decode_row(row, meta)
+
+    def _decode_joined_rows(
+        self,
+        rows: list[Any],
+        compiled: SQLCompiled,
+    ) -> list[dict[str, Any]]:
+        """Turn flattened SQL join rows into nested, repository-ready mappings."""
+        if not compiled.joined or not compiled.meta:
+            return [self.decode_row(dict(row), compiled.meta) for row in rows]
+
+        root_meta = compiled.meta
+        root_pk = root_meta.get_field(root_meta.primary_key_field)
+        root_column = root_pk.column_name if root_pk else root_meta.primary_key_field
+        grouped: dict[Any, dict[str, Any]] = {}
+        child_keys: dict[tuple[Any, tuple[str, ...]], set[Any]] = {}
+
+        for raw in rows:
+            row = dict(raw)
+            root_data = {
+                key: value
+                for key, value in row.items()
+                if not key.startswith("__renus_joined__")
+            }
+            root = self.decode_row(root_data, root_meta)
+            root_id = root.get(root_meta.primary_key_field, root.get(root_column))
+            if root_id not in grouped:
+                grouped[root_id] = root
+            root = grouped[root_id]
+
+            for spec in compiled.joined:
+                target_meta = spec["meta"]
+                prefix = spec["prefix"]
+                if target_meta is None:
+                    child_data = {
+                        key.removeprefix(f"__renus_joined__{prefix}__"): value
+                        for key, value in row.items()
+                        if key.startswith(f"__renus_joined__{prefix}__")
+                        and "__" not in key.removeprefix(f"__renus_joined__{prefix}__")
+                    }
+                    if not any(value is not None for value in child_data.values()):
+                        continue
+                    value: Any
+                    if spec.get("raw_kind") == "dict":
+                        value = {str(child_data["key"]): child_data.get("value")}
+                    else:
+                        value = child_data.get("value")
+                    parent = root
+                    if len(spec["path"]) > 1:
+                        parent = self._joined_parent(
+                            root,
+                            spec["path"][:-1],
+                            row,
+                            compiled.joined,
+                        )
+                        if parent is None:
+                            continue
+                    self._put_joined_value(
+                        parent,
+                        (spec["path"][-1],),
+                        value,
+                        spec["collection"],
+                        raw_kind=spec.get("raw_kind"),
+                    )
+                    continue
+
+                child_data = {
+                    key.removeprefix(f"__renus_joined__{prefix}__"): value
+                    for key, value in row.items()
+                    if key.startswith(f"__renus_joined__{prefix}__")
+                    and "__" not in key.removeprefix(f"__renus_joined__{prefix}__")
+                }
+                if not child_data or not any(value is not None for value in child_data.values()):
+                    continue
+                child = self.decode_row(child_data, target_meta)
+                if (
+                    child.get(target_meta.primary_key_field) is None
+                    and not spec.get("embedded")
+                ):
+                    continue
+                child_id = child.get(target_meta.primary_key_field)
+                parent = root
+                if len(spec["path"]) > 1:
+                    parent = self._joined_parent(
+                        root,
+                        spec["path"][:-1],
+                        row,
+                        compiled.joined,
+                    )
+                    if parent is None:
+                        continue
+                dedupe_key = (root_id, spec["path"])
+                seen = child_keys.setdefault(dedupe_key, set())
+                child_key = child_id if child_id is not None else repr(sorted(child.items(), key=lambda item: item[0]))
+                if spec["collection"] and child_key in seen:
+                    continue
+                seen.add(child_key)
+                if len(spec["path"]) == 1:
+                    self._put_joined_value(
+                        parent,
+                        (spec["path"][-1],),
+                        child,
+                        spec["collection"],
+                    )
+                else:
+                    self._put_joined_value(
+                        parent,
+                        (spec["path"][-1],),
+                        child,
+                        spec["collection"],
+                    )
+
+        result = list(grouped.values())
+        start = compiled.root_offset or 0
+        end = start + compiled.root_limit if compiled.root_limit is not None else None
+        return result[start:end]
+
+    @staticmethod
+    def _joined_parent(
+        root: dict[str, Any],
+        path: tuple[str, ...],
+        row: dict[str, Any],
+        specs: tuple[dict[str, Any], ...],
+    ) -> dict[str, Any] | None:
+        """Find a joined child mapping that owns a nested joined relation."""
+        parent = root
+        for depth, name in enumerate(path):
+            spec = next((item for item in specs if item["path"] == path[: depth + 1]), None)
+            if spec is None:
+                return None
+            values = parent.get(name, [])
+            if not isinstance(values, list):
+                values = [values] if isinstance(values, dict) else []
+            target_meta = spec.get("meta")
+            if target_meta is None:
+                return None
+            prefix = spec["prefix"]
+            key_name = target_meta.primary_key_field
+            raw_key = row.get(f"__renus_joined__{prefix}__{key_name}")
+            candidate = next(
+                (item for item in values if isinstance(item, dict) and item.get(key_name) == raw_key),
+                None,
+            )
+            if candidate is None:
+                return None
+            parent = candidate
+        return parent
+
+    @staticmethod
+    def _put_joined_value(
+        root: dict[str, Any],
+        path: tuple[str, ...],
+        value: Any,
+        collection: bool,
+        *,
+        raw_kind: str | None = None,
+    ) -> None:
+        parent = root
+        for part in path[:-1]:
+            nested = parent.get(part)
+            if not isinstance(nested, dict):
+                nested = {}
+                parent[part] = nested
+            parent = nested
+        name = path[-1]
+        if raw_kind == "dict":
+            current = parent.setdefault(name, {})
+            current.update(value)
+        elif raw_kind == "list":
+            current = parent.setdefault(name, [])
+            if value not in current:
+                current.append(value)
+        elif collection:
+            current = parent.setdefault(name, [])
+            if not any(item == value for item in current):
+                current.append(value)
+        else:
+            parent.setdefault(name, value)
 
     _raw_embedded_key_type: ClassVar[str] = "TEXT"
 

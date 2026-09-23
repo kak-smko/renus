@@ -7,6 +7,7 @@ from renus.db.query.ast import (
     HavingCondition,
     Logical,
     Operator,
+    Include,
     Path,
     QueryAST,
     RelationAny,
@@ -17,13 +18,16 @@ from renus.util import to_plural_lower
 
 class SQLCompiled:
 
-    __slots__ = ("meta", "params", "sql")
+    __slots__ = ("joined", "meta", "params", "root_limit", "root_offset", "sql")
 
     def __init__(
         self,
         sql: str,
         params: tuple[Any, ...] = (),
         meta: Any = None,
+        joined: tuple[dict[str, Any], ...] = (),
+        root_limit: int | None = None,
+        root_offset: int | None = None,
     ) -> None:
         """Hold a compiled SQL statement and its binding parameters.
 
@@ -39,6 +43,9 @@ class SQLCompiled:
         self.sql = sql
         self.params = tuple(params)
         self.meta = meta
+        self.joined = joined
+        self.root_limit = root_limit
+        self.root_offset = root_offset
 
     def __repr__(self) -> str:
         return f"SQLCompiled(sql={self.sql!r}, params={self.params!r})"
@@ -71,6 +78,12 @@ class SQLCompiler:
 
         params: list[Any] = []
         distinct_clause = "DISTINCT " if ast.distinct else ""
+        self._root_model = source
+        self._root_ref = "r0"
+        joined = self._joined_relationships(ast)
+        params.extend(param for spec in joined for param in spec.get("params", ()))
+        if not joined:
+            self._root_ref = None
 
         if ast.aggregates:
             select_items: list[str] = [self._path(p) for p in ast.group_by]
@@ -87,21 +100,55 @@ class SQLCompiler:
                 for p in ast.projection.paths
             )
         else:
-            select_clause = "*"
+            if joined:
+                select_parts = [f'{self.dialect.quote("r0")}.*']
+                for spec in joined:
+                    target_meta = spec["meta"]
+                    target_ref = self.dialect.quote(spec["alias"])
+                    prefix = spec["prefix"]
+                    if target_meta is None:
+                        fields = (
+                            ("parent_id", "key", "value")
+                            if spec.get("raw_kind") == "dict"
+                            else ("parent_id", "pos", "value")
+                        )
+                    else:
+                        fields = tuple(
+                        name
+                        for name, field_meta in target_meta.fields.items()
+                        if not (field_meta.primary_key and field_meta.generated)
+                    )
+                    for field_name in fields:
+                        if target_meta is not None:
+                            column = self._field_name(target_meta.model, field_name)
+                        else:
+                            column = field_name
+                        alias = self.dialect.quote(f"__renus_joined__{prefix}__{field_name}")
+                        select_parts.append(
+                            f"{target_ref}.{self.dialect.quote(column)} AS {alias}"
+                        )
+                select_clause = ", ".join(select_parts)
+            else:
+                select_clause = "*"
 
-        sql = f"SELECT {distinct_clause}{select_clause} FROM {quoted_table}"
+        from_clause = f"{quoted_table} AS {self.dialect.quote('r0')}" if joined else quoted_table
+        sql = f"SELECT {distinct_clause}{select_clause} FROM {from_clause}"
+        if joined:
+            sql += " " + " ".join(spec["join"] for spec in joined)
 
         clauses: list[str] = []
 
         if meta and meta.soft_delete:
             del_field = self.dialect.quote(meta.deleted_at_field or "deleted_at")
+            if self._root_ref:
+                del_field = f"{self.dialect.quote(self._root_ref)}.{del_field}"
             if ast.only_deleted:
                 clauses.append(f"{del_field} IS NOT NULL")
             elif not ast.with_deleted:
                 clauses.append(f"{del_field} IS NULL")
 
         for cond in ast.filters:
-            s, p = self._condition(cond)
+            s, p = self._condition(cond, table_ref=self._root_ref, model=source)
             clauses.append(s)
             params.extend(p)
 
@@ -110,14 +157,14 @@ class SQLCompiler:
             if cursor_path is None and meta and meta.primary_key_field:
                 cursor_path = Path(source, (meta.primary_key_field,))
             if cursor_path is not None:
-                clauses.append(f"{self._path(cursor_path)} > {self.dialect.placeholder}")
+                clauses.append(f"{self._column(cursor_path, self._root_ref)} > {self.dialect.placeholder}")
                 params.append(ast.cursor)
 
         if clauses:
             sql += f" WHERE {' AND '.join(clauses)}"
 
         if ast.group_by:
-            group_cols = ", ".join(self._path(p) for p in ast.group_by)
+            group_cols = ", ".join(self._column(p, self._root_ref) for p in ast.group_by)
             sql += f" GROUP BY {group_cols}"
 
         if ast.having:
@@ -131,14 +178,180 @@ class SQLCompiler:
         if ast.ordering:
             order_items: list[str] = []
             for ord_spec in ast.ordering:
-                col = self._path(ord_spec.path)
+                col = self._column(ord_spec.path, self._root_ref)
                 direction = " DESC" if ord_spec.descending else " ASC"
                 order_items.append(f"{col}{direction}")
             sql += f" ORDER BY {', '.join(order_items)}"
+        elif joined:
+            child_order = []
+            for spec in joined:
+                if not spec.get("collection"):
+                    continue
+                column = "pos" if spec.get("raw_kind") == "list" else "rowid"
+                child_order.append(
+                    f"{self.dialect.quote(spec['alias'])}.{self.dialect.quote(column)} ASC"
+                )
+            if child_order and "sqlite" in type(self.dialect).__name__.lower():
+                sql += f" ORDER BY {', '.join(child_order)}"
 
-        sql = self.dialect.limit_offset(sql, ast.limit, ast.offset)
+        if not joined:
+            sql = self.dialect.limit_offset(sql, ast.limit, ast.offset)
 
-        return SQLCompiled(sql, tuple(params), meta=meta)
+        return SQLCompiled(
+            sql,
+            tuple(params),
+            meta=meta,
+            joined=tuple(joined),
+            root_limit=ast.limit if joined else None,
+            root_offset=ast.offset if joined else None,
+        )
+
+    def _joined_relationships(self, ast: QueryAST) -> list[dict[str, Any]]:
+        """Build adapter row metadata and SQL joins for eager relationships."""
+        if ast.projection or ast.aggregates:
+            return []
+        meta = getattr(ast.source, "__db_metadata__", None)
+        if meta is None:
+            return []
+
+        result: list[dict[str, Any]] = []
+        alias_number = 0
+        requested: dict[tuple[str, ...], Include] = {
+            include.path.parts: include for include in ast.includes
+        }
+        for name, rel in meta.relationships.items():
+            loading = getattr(rel.loading, "value", rel.loading)
+            if loading == "joined" or (rel.is_embedded and rel.target in (dict, list)):
+                requested.setdefault((name,), Include(Path(ast.source, (name,))))
+
+        def add(
+            model: type,
+            owner_ref: str,
+            path: tuple[str, ...],
+            prefix: str,
+            owner_key: str,
+        ) -> None:
+            nonlocal alias_number
+            model_meta = getattr(model, "__db_metadata__", None)
+            if model_meta is None:
+                return
+            for name, rel in model_meta.relationships.items():
+                include = requested.get(child_path := (*path, name))
+                if include is None and not (
+                    getattr(rel.loading, "value", rel.loading) == "joined"
+                    or (rel.is_embedded and rel.target in (dict, list))
+                ):
+                    continue
+                alias_number += 1
+                alias = f"r{alias_number}"
+                child_prefix = "__".join(child_path)
+                target = rel.target if isinstance(rel.target, type) and rel.target not in (dict, list) else None
+                target_meta = getattr(target, "__db_metadata__", None)
+                owner_column = (
+                    owner_key
+                    if owner_key == "parent_id"
+                    else self._field_name(model, owner_key)
+                )
+                owner_pk_ref = f"{owner_ref}.{self.dialect.quote(owner_column)}"
+
+                if rel.is_embedded:
+                    embedded_table = self.dialect.quote(
+                        f"{meta.table}_{'_'.join(child_path)}"
+                    )
+                    join = (
+                        f"LEFT JOIN {embedded_table} AS {self.dialect.quote(alias)} "
+                        f"ON {self.dialect.quote(alias)}.{self.dialect.quote('parent_id')} = {owner_pk_ref}"
+                    )
+                else:
+                    if target_meta is None:
+                        continue
+                    target_table = self.dialect.quote(target_meta.table)
+                    target_pk = self.dialect.quote(
+                        self._field_name(target, target_meta.primary_key_field)
+                    )
+                    kind = getattr(rel.kind, "value", rel.kind)
+                    if kind == "many_to_one":
+                        local = self.dialect.quote(
+                            self._field_name(model, rel.foreign_key or f"{name}_id")
+                        )
+                        join = (
+                            f"LEFT JOIN {target_table} AS {self.dialect.quote(alias)} "
+                            f"ON {self.dialect.quote(alias)}.{target_pk} = {owner_ref}.{local}"
+                        )
+                    elif kind == "many_to_many":
+                        through_alias = f"j{alias_number}"
+                        local_col = self.dialect.quote(
+                            rel.local_key or f"{to_plural_lower(model_meta.table)}_id"
+                        )
+                        foreign_col = self.dialect.quote(
+                            rel.foreign_key or f"{to_plural_lower(target_meta.table)}_id"
+                        )
+                        through = self.dialect.quote(str(rel.through))
+                        join = (
+                            f"LEFT JOIN {through} AS {self.dialect.quote(through_alias)} "
+                            f"ON {self.dialect.quote(through_alias)}.{local_col} = {owner_pk_ref} "
+                            f"LEFT JOIN {target_table} AS {self.dialect.quote(alias)} "
+                            f"ON {self.dialect.quote(alias)}.{target_pk} = "
+                            f"{self.dialect.quote(through_alias)}.{foreign_col}"
+                        )
+                    else:
+                        local = self.dialect.quote(
+                            self._field_name(model, rel.local_key or model_meta.primary_key_field)
+                        )
+                        foreign = self.dialect.quote(
+                            self._field_name(target, rel.foreign_key or f"{to_plural_lower(model_meta.table)}_id")
+                        )
+                        join = (
+                            f"LEFT JOIN {target_table} AS {self.dialect.quote(alias)} "
+                            f"ON {self.dialect.quote(alias)}.{foreign} = {owner_ref}.{local}"
+                        )
+
+                join_params: list[Any] = []
+                if include is not None and include.filter is not None and target is not None:
+                    filter_sql, filter_params = self._condition(
+                        include.filter,
+                        table_ref=self.dialect.quote(alias),
+                        model=target,
+                    )
+                    join += f" AND {filter_sql}"
+                    join_params.extend(filter_params)
+                spec = {
+                    "alias": alias,
+                    "collection": bool(rel.is_collection),
+                    "join": join,
+                    "params": tuple(join_params),
+                    "join_parent_path": path,
+                    "parent_path": path,
+                    "parent_meta": model_meta,
+                    "parent_alias": owner_ref,
+                    "child_order": (
+                        self._field_name(target, target_meta.primary_key_field)
+                        if target_meta is not None
+                        else "rowid"
+                    ),
+                    "meta": target_meta,
+                    "path": child_path,
+                    "raw_kind": (
+                        "dict" if rel.target is dict else "list" if rel.target is list else None
+                    ),
+                    "embedded": bool(rel.is_embedded),
+                    "prefix": child_prefix,
+                }
+                result.append(spec)
+                if target is not None and include is not None:
+                    nested = include.nested
+                    if nested:
+                        requested.update({(*child_path, item.path.parts[0]): item for item in nested})
+                    add(
+                        target,
+                        self.dialect.quote(alias),
+                        child_path,
+                        child_prefix,
+                        "parent_id" if rel.is_embedded else target_meta.primary_key_field,
+                    )
+
+        add(ast.source, self.dialect.quote("r0"), (), "", meta.primary_key_field)
+        return result
 
     def _path(self, p: Path) -> str:
         if len(p.parts) == 1:
@@ -148,7 +361,10 @@ class SQLCompiler:
                 fmeta = meta.fields.get(col)
                 if fmeta:
                     col = fmeta.column_name
-            return self.dialect.quote(col)
+            quoted = self.dialect.quote(col)
+            if self._root_ref and p.model is self._root_model:
+                return f"{self.dialect.quote(self._root_ref)}.{quoted}"
+            return quoted
 
         meta = getattr(p.model, "__db_metadata__", None)
         if meta:

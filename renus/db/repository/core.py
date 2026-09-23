@@ -19,7 +19,6 @@ from renus.db.mutation.ast import (
 )
 from renus.db.query.ast import (
     Condition,
-    Include,
     Path,
     QueryAST,
 )
@@ -524,6 +523,7 @@ class Repository(Generic[T]):
                             and getattr(self.adapter, "nested_documents", False)
                         ):
                             data.pop(rname, None)
+                            #todo handle this by select in adapter
                     for rname in rel_names:
                         if rname not in data:
                             rel = meta.relationships[rname]
@@ -540,49 +540,24 @@ class Repository(Generic[T]):
                 getattr(obj, "_mark_persisted")()
             objects.append(obj)
 
-        includes = list(ast.includes)
-        for include in self._includes_for_joined_relationships():
-            if include.path.parts not in included_paths:
-                includes.append(include)
-                included_paths.add(include.path.parts)
-
-        if includes:
-            await self._rel_coordinator.load_includes(objects, tuple(includes))
+        for obj in objects:
+            self._mark_joined_persisted(obj)
         return objects
 
-    def _includes_for_joined_relationships(self) -> list[Include]:
-        """Return relationships configured for automatic eager loading.
-
-        ``joined`` is represented by the same relationship coordinator used for
-        explicit includes. This keeps loading consistent across SQL and document
-        adapters while making the relationship part of every normal model result.
-        """
-        meta = getattr(self.model, "__db_metadata__", None)
+    def _mark_joined_persisted(self, obj: Any) -> None:
+        """Mark models materialized by an adapter join as persisted recursively."""
+        if hasattr(obj, "_mark_persisted"):
+            getattr(obj, "_mark_persisted")()
+        meta = getattr(type(obj), "__db_metadata__", None)
         if not meta:
-            return []
-
-        return [
-            Include(Path(self.model, (name,)))
-            for name, relationship in meta.relationships.items()
-            if getattr(relationship.loading, "value", relationship.loading) == "joined"
-            or (
-                getattr(relationship, "is_embedded", False)
-                and getattr(relationship, "target", None) in (dict, list)
-            )
-        ]
-
-    def _include_path(self, model: type, parts: tuple[str, ...]):
-        relationships = model.__db_metadata__.relationships
-        if not parts or parts[0] not in relationships:
-            return None
-        rel_path = Path(model, (parts[0],))
-        if len(parts) == 1:
-            return Include(rel_path)
-        target = relationships[parts[0]].target
-        if not isinstance(target, type):
-            return Include(rel_path)
-        nested = self._include_path(target, parts[1:])
-        return Include(rel_path) if nested is None else Include(rel_path, nested=(nested,))
+            return
+        for name in meta.relationships:
+            value = getattr(obj, name, None)
+            if isinstance(value, list):
+                for child in value:
+                    self._mark_joined_persisted(child)
+            elif value is not None and not isinstance(value, (dict, list)):
+                self._mark_joined_persisted(value)
 
 
     async def _count(self, ast: QueryAST) -> int:

@@ -246,6 +246,8 @@ class SQLiteAdapter(SQLAdapter):
                     params,
                 )
                 rows = await asyncio.to_thread(cursor.fetchall)
+            if getattr(sql_compiled, "joined", ()):
+                return self._decode_joined_rows(rows, sql_compiled)
             meta = getattr(sql_compiled, "meta", None)
             if meta:
                 return [self.dialect.decode_row(dict(r), meta) for r in rows]
