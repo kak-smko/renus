@@ -486,9 +486,7 @@ class Repository(Generic[T]):
 
     async def _query(self, ast: QueryAST) -> list[Any]:
         """Execute the complete AST in the adapter."""
-        compile_fn = getattr(self.adapter, "compile_query", None)
-        compiled = compile_fn(ast) if compile_fn is not None else ast
-        rows = await self.adapter.execute_query(compiled)
+        rows = await self.adapter.execute_query(ast)
 
         if ast.projection or ast.aggregates:
             result_dicts: list[dict[str, Any]] = []
@@ -616,9 +614,7 @@ class Repository(Generic[T]):
         if plugins is not None:
             await plugins.dispatch_before_mutation(ast, context)
 
-        compile_fn = getattr(self.adapter, "compile_mutation", None)
-        compiled = compile_fn(ast) if compile_fn is not None else ast
-        result = await self.adapter.execute_mutation(compiled)
+        result = await self.adapter.execute_mutation(ast)
 
         if plugins is not None:
             await plugins.dispatch_after_mutation(ast, result, context)

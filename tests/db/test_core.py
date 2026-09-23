@@ -20,8 +20,6 @@ from renus.db.core import (
     LifecycleEvent,
     MutationResult,
     NotFoundError,
-    Portability,
-    PortabilityKind,
     QueryError,
     QueryResult,
     TransactionError,
@@ -50,19 +48,6 @@ def test_connection_error_is_not_builtin():
 
     assert issubclass(ConnectionError, DBError)
 
-def test_portability_kind_values():
-    assert PortabilityKind.PORTABLE.value == "portable"
-    assert PortabilityKind.CAPABILITY_DEPENDENT.value == "capability_dependent"
-    assert PortabilityKind.BACKEND_SPECIFIC.value == "backend_specific"
-
-def test_portability_flags():
-    portable = Portability(PortabilityKind.PORTABLE)
-    assert portable.is_portable
-    assert not portable.is_capability_dependent
-    assert not portable.is_backend_specific
-
-    backend = Portability(PortabilityKind.BACKEND_SPECIFIC)
-    assert backend.is_backend_specific
 
 def test_lifecycle_states():
     assert {s.value for s in Lifecycle} == {

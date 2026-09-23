@@ -15,7 +15,6 @@ from renus.db import (
     Max,
     Min,
     MutationResult,
-    PortabilityKind,
     Model,
     Repository,
     SQLiteAdapter,

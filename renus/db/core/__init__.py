@@ -29,7 +29,6 @@ from renus.db.core.exceptions import (
     UnsupportedOperationError,
     ValidationError,
 )
-from renus.db.core.portability import Portability, PortabilityKind
 from renus.db.core.state import IdentityKind, Lifecycle
 
 __all__ = [
@@ -50,8 +49,6 @@ __all__ = [
     "MutationEvent",
     "MutationResult",
     "NotFoundError",
-    "Portability",
-    "PortabilityKind",
     "QueryError",
     "QueryEvent",
     "QueryResult",
