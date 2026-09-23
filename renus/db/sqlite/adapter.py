@@ -246,6 +246,9 @@ class SQLiteAdapter(SQLAdapter):
                     params,
                 )
                 rows = await asyncio.to_thread(cursor.fetchall)
+            meta = getattr(sql_compiled, "meta", None)
+            if meta:
+                return [self.dialect.decode_row(dict(r), meta) for r in rows]
             return [dict(r) for r in rows]
         except sqlite3.DatabaseError as e:
             raise DatabaseError(f"SQLite query execution error: {e}") from e
@@ -274,6 +277,26 @@ class SQLiteAdapter(SQLAdapter):
 
             rows_affected = cursor.rowcount if cursor.rowcount >= 0 else 1
             last_id = cursor.lastrowid if cursor.lastrowid else None
+            meta = getattr(sql_compiled, "meta", None)
+            if meta and last_id is not None:
+                pk_meta = meta.fields.get(meta.primary_key_field) if meta.fields else None
+                if pk_meta is not None:
+                    insert_many = (
+                        sql_compiled.sql.lstrip().upper().startswith("INSERT")
+                        and "), (" in sql_compiled.sql
+                    )
+                    if getattr(pk_meta.database, "auto_inc", False):
+                        if insert_many:
+                            first_id = last_id - rows_affected + 1
+                            generated_ids = [
+                                self.dialect.decode_value(first_id + idx, pk_meta)
+                                for idx in range(rows_affected)
+                            ]
+                            return MutationResult(
+                                rows_affected=rows_affected,
+                                generated={"ids": generated_ids},
+                            )
+                        last_id = self.dialect.decode_value(last_id, pk_meta)
             return MutationResult(rows_affected=rows_affected, last_id=last_id)
         except sqlite3.IntegrityError as e:
             err_msg = str(e)

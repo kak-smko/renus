@@ -13,11 +13,13 @@ from renus.db import (
     MutationAST,
     Operator,
     Model,
+    Repository,
+    SQLiteAdapter,
     Update,
     UpdateMany,
     ValidationError,
 )
-from renus.db.mutation.ast import normalize_values
+from renus.db.repository.normalize import normalize_values
 
 
 class Member(Model):
@@ -48,11 +50,12 @@ def test_insert_with_path_keys():
         Member,
         values={Member.username: "bob", Member.points: 50},
     )
-    assert ast.values == {"username": "bob", "points": 50}
+    assert normalize_values(ast.values) == {"username": "bob", "points": 50}
 
 def test_insert_from_model():
+    repo = Repository(None, Member)
     member = Member(username="carol", email="carol@example.com", points=250)
-    ast = Insert.from_model(member)
+    ast = repo.build_insert_ast(member)
 
     assert ast.source is Member
     assert ast.values["username"] == "carol"
@@ -74,18 +77,20 @@ def test_insert_many_basic():
     assert ast.records[1] == {"username": "user2", "email": "u2@x.com"}
 
 def test_insert_many_from_models():
+    repo = Repository(None, Member)
     m1 = Member(username="m1", email="m1@x.com")
     m2 = Member(username="m2", email="m2@x.com")
 
-    ast = InsertMany.from_models([m1, m2])
+    ast = repo.build_insert_many_ast([m1, m2])
     assert ast.source is Member
     assert len(ast.records) == 2
     assert ast.records[0]["username"] == "m1"
     assert ast.records[1]["username"] == "m2"
 
 def test_insert_many_empty_raises():
+    repo = Repository(None, Member)
     with pytest.raises(ValueError, match="at least one model instance"):
-        InsertMany.from_models([])
+        repo.build_insert_many_ast([])
 
 def test_update_basic():
     cond = Member.id == 42
@@ -106,13 +111,14 @@ def test_update_where_chaining():
     assert ast2.filters[1] == (Member.role == "user")
 
 def test_update_from_model_with_dirty_tracking():
+    repo = Repository(None, Member)
     member = Member(id=10, username="eve", email="eve@x.com", points=0)
     member._mark_persisted()
 
     member.points = 100
     member.role = "admin"
 
-    ast = Update.from_model(member)
+    ast = repo.build_update_ast(member)
     assert ast.source is Member
 
     assert ast.values == {"points": 100, "role": "admin"}
@@ -137,21 +143,30 @@ def test_update_many():
     chained = ast.where(Member.points == 0)
     assert len(chained.filters) == 2
 
-
-def test_update_validates_supplied_fields():
-    ast = Update(Member, values={Member.points: 25})
-    assert ast.values == {"points": 25}
+@pytest.mark.asyncio
+async def test_update_validates_supplied_fields():
+    adapter = SQLiteAdapter({"database": ":memory:"})
+    await adapter.connect()
+    await adapter.create_schema([Member])
+    repo=Repository(adapter,Member)
+    ast = await repo.update({Member.points: 25})
+    assert ast==0
 
     with pytest.raises(ValidationError, match="'points' must be of type int"):
-        Update(Member, values={"points": "twenty-five"})
+        await repo.update({"points": "twenty-five"})
 
 
-def test_update_many_validates_supplied_fields_and_rejects_unknown_fields():
+@pytest.mark.asyncio
+async def test_update_many_validates_supplied_fields_and_rejects_unknown_fields():
+    adapter = SQLiteAdapter({"database": ":memory:"})
+    await adapter.connect()
+    await adapter.create_schema([Member])
+    repo=Repository(adapter,Member)
     with pytest.raises(ValidationError, match="'is_active' must be of type bool"):
-        UpdateMany(Member, values={"is_active": 1})
+        await repo.update_many({"is_active": 1})
 
     with pytest.raises(ValidationError, match="Unknown field 'missing'"):
-        UpdateMany(Member, values={"missing": True})
+        await repo.update_many({"missing": True})
 
 def test_delete_basic():
     cond = Member.id == 99
@@ -160,10 +175,11 @@ def test_delete_basic():
     assert ast.filters == (cond,)
 
 def test_delete_from_model():
+    repo = Repository(None, Member)
     member = Member(id=15, username="frank", email="frank@x.com")
     member._mark_persisted()
 
-    ast = Delete.from_model(member)
+    ast = repo.build_delete_ast(member)
     assert ast.source is Member
     assert len(ast.filters) == 1
     assert ast.filters[0].operator == Operator.EQ
@@ -182,19 +198,4 @@ def test_delete_many():
 
     chained = ast.where(Member.points == 0)
     assert len(chained.filters) == 2
-
-
-def test_normalize_values():
-    raw = {
-        Member.username: "alice",
-        "email": "a@x.com",
-        "member.role": "admin",
-    }
-    norm = normalize_values(raw)
-    assert norm == {
-        "username": "alice",
-        "email": "a@x.com",
-        "role": "admin",
-    }
-
 

@@ -263,6 +263,9 @@ class MySQLAdapter(SQLAdapter):
             async with conn.cursor(**cursor_kwargs) as cur:
                 await cur.execute(sql_compiled.sql, sql_compiled.params)
                 rows = await cur.fetchall()
+            meta = getattr(sql_compiled, "meta", None)
+            if meta:
+                return [self.dialect.decode_row(dict(r), meta) for r in rows]
             return [dict(r) if not isinstance(r, dict) else r for r in rows]
         except Exception as e:
             raise errors.translate_driver_error("MySQL", "mysql", e, "query") from e
@@ -301,6 +304,11 @@ class MySQLAdapter(SQLAdapter):
                     await conn.commit()
                 rows_affected = cur.rowcount if cur.rowcount >= 0 else 1
                 last_id = cur.lastrowid if cur.lastrowid else None
+                meta = getattr(sql_compiled, "meta", None)
+                if meta and last_id is not None:
+                    pk_meta = meta.fields.get(meta.primary_key_field) if meta.fields else None
+                    if pk_meta is not None:
+                        last_id = self.dialect.decode_value(last_id, pk_meta)
                 return MutationResult(rows_affected=rows_affected, last_id=last_id)
         except Exception as e:
             raise errors.translate_driver_error("MySQL", "mysql", e, "mutation") from e

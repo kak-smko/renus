@@ -273,3 +273,19 @@ class SQLDialect(ABC):
         ):
             return ID(value)
         return convert.decode_value(value, field_meta)
+
+    def decode_row(self, row: dict[str, Any], meta: Any = None) -> dict[str, Any]:
+        """Decode a database row into a dictionary with correct types according to model meta."""
+        data = dict(row)
+        if meta is None or not hasattr(meta, "fields"):
+            return data
+        for fname, fmeta in meta.fields.items():
+            col = getattr(fmeta, "column_name", fname)
+            if col in data:
+                val = data[col]
+            elif fname in data:
+                val = data[fname]
+            else:
+                continue
+            data[fname] = self.decode_value(val, fmeta)
+        return data

@@ -34,6 +34,7 @@ class MongoCompiledQuery:
         "collection",
         "filter",
         "limit",
+        "meta",
         "pipeline",
         "projection",
         "skip",
@@ -49,6 +50,7 @@ class MongoCompiledQuery:
         skip: int | None = None,
         limit: int | None = None,
         pipeline: list[dict[str, Any]] | None = None,
+        meta: Any = None,
     ) -> None:
         """Store the compiled MongoDB query attributes.
 
@@ -76,6 +78,7 @@ class MongoCompiledQuery:
         self.skip = skip
         self.limit = limit
         self.pipeline = pipeline
+        self.meta = meta
 
 class MongoCompiler:
 
@@ -258,6 +261,7 @@ class MongoCompiler:
                 collection=collection_name,
                 filter_doc={},
                 pipeline=pipeline,
+                meta=meta,
             )
 
         projection_doc: dict[str, Any] | None = None
@@ -283,6 +287,7 @@ class MongoCompiler:
                 collection=collection_name,
                 filter_doc={},
                 pipeline=pipeline,
+                meta=meta,
             )
 
         if ast.projection:
@@ -316,6 +321,7 @@ class MongoCompiler:
                 collection=collection_name,
                 filter_doc={},
                 pipeline=pipeline,
+                meta=meta,
             )
 
         if ast.distinct and ast.projection:
@@ -347,6 +353,7 @@ class MongoCompiler:
                 collection=collection_name,
                 filter_doc={},
                 pipeline=pipeline,
+                meta=meta,
             )
 
         return MongoCompiledQuery(
@@ -356,6 +363,7 @@ class MongoCompiler:
             sort=sort_spec,
             skip=ast.offset,
             limit=ast.limit,
+            meta=meta,
         )
 
     def _path_str(self, p: Path) -> str:
@@ -581,6 +589,7 @@ class MongoCompiler:
             self._needs_auto_int_id(meta, m.values)
             return collection, "insert_one", doc, {
                 "auto_inc_field": auto_inc_field,
+                "meta": meta,
             }
 
         if isinstance(m, InsertMany):
@@ -589,6 +598,7 @@ class MongoCompiler:
                 self._needs_auto_int_id(meta, record)
             return collection, "insert_many", {"docs": docs}, {
                 "auto_inc_field": auto_inc_field,
+                "meta": meta,
             }
 
         if isinstance(m, Update):

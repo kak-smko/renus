@@ -17,9 +17,14 @@ from renus.util import to_plural_lower
 
 class SQLCompiled:
 
-    __slots__ = ("params", "sql")
+    __slots__ = ("meta", "params", "sql")
 
-    def __init__(self, sql: str, params: tuple[Any, ...] = ()) -> None:
+    def __init__(
+        self,
+        sql: str,
+        params: tuple[Any, ...] = (),
+        meta: Any = None,
+    ) -> None:
         """Hold a compiled SQL statement and its binding parameters.
 
         Parameters
@@ -28,9 +33,12 @@ class SQLCompiled:
             The generated SQL string.
         params:
             Bound parameters to execute the statement. Defaults to empty.
+        meta:
+            Optional model metadata.
         """
         self.sql = sql
         self.params = tuple(params)
+        self.meta = meta
 
     def __repr__(self) -> str:
         return f"SQLCompiled(sql={self.sql!r}, params={self.params!r})"
@@ -130,7 +138,7 @@ class SQLCompiler:
 
         sql = self.dialect.limit_offset(sql, ast.limit, ast.offset)
 
-        return SQLCompiled(sql, tuple(params))
+        return SQLCompiled(sql, tuple(params), meta=meta)
 
     def _path(self, p: Path) -> str:
         if len(p.parts) == 1:

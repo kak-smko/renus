@@ -243,34 +243,5 @@ class AsyncDatabaseAdapter(ABC):
         """Restore the database from a backup at the given path."""
         pass
 
-    def encode_value(self, value: Any, field_meta: Any = None) -> Any:
-
-        dialect = getattr(self, "dialect", None)
-        if dialect is not None and hasattr(dialect, "encode_value"):
-            return dialect.encode_value(value, field_meta)
-        return convert.encode_value(value, field_meta)
-
-    def decode_value(self, value: Any, field_meta: Any = None) -> Any:
-
-        dialect = getattr(self, "dialect", None)
-        if dialect is not None and hasattr(dialect, "decode_value"):
-            return dialect.decode_value(value, field_meta)
-        return convert.decode_value(value, field_meta)
-
-    def decode_row(self, row: dict[str, Any], meta: Any = None) -> dict[str, Any]:
-        data = dict(row)
-        if meta is None:
-            return data
-        for fname, fmeta in meta.fields.items():
-            col = fmeta.column_name
-            if col in data:
-                val = data[col]
-            elif fname in data:
-                val = data[fname]
-            else:
-                continue
-            data[fname] = self.decode_value(val, fmeta)
-        return data
-
     def __repr__(self) -> str:
         return f"<{type(self).__name__} name={getattr(self, 'name', '?')!r}>"

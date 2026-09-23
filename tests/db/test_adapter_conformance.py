@@ -125,7 +125,7 @@ class NestedEmployee(Model):
     department: NestedDepartment = ManyToOne(
         NestedDepartment,
         foreign_key="department_id",
-        loading=LoadingStrategy.SELECTIN,
+        loading=LoadingStrategy.LAZY,
     )
 
 
@@ -135,14 +135,14 @@ class NestedCompany(Model):
     employees: list[NestedEmployee] = OneToMany(
         NestedEmployee,
         foreign_key="company_id",
-        loading=LoadingStrategy.SELECTIN,
+        loading=LoadingStrategy.LAZY,
     )
 
 
 class StrategyChild(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     joined_parent_id: str = ""
-    selectin_parent_id: str = ""
+    lazy_parent_id: str = ""
     label: str
 
 
@@ -156,13 +156,13 @@ class JoinedParent(Model):
     )
 
 
-class SelectinParent(Model):
+class LazyParent(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
     children: list[StrategyChild] = OneToMany(
         StrategyChild,
-        foreign_key="selectin_parent_id",
-        loading=LoadingStrategy.SELECTIN,
+        foreign_key="lazy_parent_id",
+        loading=LoadingStrategy.LAZY,
     )
 
 
@@ -1340,7 +1340,14 @@ async def test_relation_any_and_nested_logical_filters(kind):
                 _u("any-1", "any-1", age=10),
                 _u("any-2", "any-2", age=20),
                 _u("any-3", "any-3", age=30),
-                *[_u(f"any-{i:03d}", f"any-{i:03d}", age=40 + i) for i in range(4, 101)],
+                *[
+                    _u(
+                        f"any-{i:03d}",
+                        f"any-{i:03d}",
+                        age=min(40 + i, 120),
+                    )
+                    for i in range(4, 101)
+                ],
             ]
         )
         await db.repository(Post).create_many(
@@ -1435,15 +1442,15 @@ async def test_nested_and_filtered_includes(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_joined_and_selectin_loading_strategies(kind):
-    db = await database_for(kind, [JoinedParent, SelectinParent, StrategyChild])
+async def test_joined_and_lazy_loading_strategies(kind):
+    db = await database_for(kind, [JoinedParent, LazyParent, StrategyChild])
     try:
         joined_repo = db.repository(JoinedParent)
-        selectin_repo = db.repository(SelectinParent)
+        lazy_repo = db.repository(LazyParent)
         child_repo = db.repository(StrategyChild)
 
         await joined_repo.create(JoinedParent(id="joined-1", name="joined"))
-        await selectin_repo.create(SelectinParent(id="selectin-1", name="selectin"))
+        await lazy_repo.create(LazyParent(id="lazy-1", name="lazy"))
         await child_repo.create_many(
             [
                 StrategyChild(
@@ -1453,14 +1460,14 @@ async def test_joined_and_selectin_loading_strategies(kind):
                 ),
                 StrategyChild(
                     id="strategy-s1",
-                    selectin_parent_id="selectin-1",
-                    label="selectin-child",
+                    lazy_parent_id="lazy-1",
+                    label="lazy-child",
                 ),
                 *[
                     StrategyChild(
                         id=f"strategy-{i:03d}",
                         joined_parent_id="joined-1" if i < 51 else "",
-                        selectin_parent_id="selectin-1" if i >= 51 else "",
+                        lazy_parent_id="lazy-1" if i >= 51 else "",
                         label=f"child-{i:03d}",
                     )
                     for i in range(2, 100)
@@ -1474,15 +1481,15 @@ async def test_joined_and_selectin_loading_strategies(kind):
         assert len(joined.children) == 50
         assert joined.children[0].label == "joined-child"
 
-        # SELECTIN relationships require an explicit include and are loaded in
+        # lazy relationships require an explicit include and are loaded in
         # the same result shape when requested.
-        selectin = await selectin_repo.query().first()
-        assert selectin is not None
-        assert selectin.children == []
-        selectin = await selectin_repo.query().include(SelectinParent.children).first()
-        assert selectin is not None
-        assert len(selectin.children) == 50
-        assert selectin.children[0].label == "selectin-child"
+        lazy = await lazy_repo.query().first()
+        assert lazy is not None
+        assert lazy.children == []
+        lazy = await lazy_repo.query().include(LazyParent.children).first()
+        assert lazy is not None
+        assert len(lazy.children) == 50
+        assert lazy.children[0].label == "lazy-child"
     finally:
         await cleanup(db)
 

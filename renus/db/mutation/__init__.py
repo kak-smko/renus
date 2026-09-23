@@ -8,18 +8,15 @@ from renus.db.mutation.ast import (
     InsertMany,
     MutationAST,
     Update,
-    UpdateMany,
-    normalize_values,
+    UpdateMany
 )
 
 __all__ = [
     "Delete",
     "DeleteMany",
-    "FilterableMutation",
     "Insert",
     "InsertMany",
     "MutationAST",
     "Update",
     "UpdateMany",
-    "normalize_values",
 ]

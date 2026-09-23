@@ -29,6 +29,15 @@ class SQLAdapter(AsyncDatabaseAdapter):
         """Compile a mutation AST into SQL."""
         return self.mutation_compiler.compile(ast)
 
+    def encode_value(self, value: Any, field_meta: Any = None) -> Any:
+        return self.dialect.encode_value(value, field_meta)
+
+    def decode_value(self, value: Any, field_meta: Any = None) -> Any:
+        return self.dialect.decode_value(value, field_meta)
+
+    def decode_row(self, row: dict[str, Any], meta: Any = None) -> dict[str, Any]:
+        return self.dialect.decode_row(row, meta)
+
     _raw_embedded_key_type: ClassVar[str] = "TEXT"
 
     _raw_embedded_pos_type: ClassVar[str] = "INTEGER"

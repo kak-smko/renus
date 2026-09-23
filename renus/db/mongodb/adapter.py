@@ -28,6 +28,7 @@ from renus.db.mongodb.compiler import MongoCompiledQuery, MongoCompiler
 from renus.db.mongodb.dialect import MongoDialect
 from renus.db.mutation.ast import MutationAST
 from renus.db.query.ast import QueryAST
+from renus.datastructures.id import ID, is_identity
 
 try:
     from pymongo import AsyncMongoClient, ReturnDocument
@@ -252,13 +253,19 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
                 docs = await cursor.to_list(length=mongo_query.limit or 5000)
 
             results: list[dict[str, Any]] = []
+            meta = getattr(mongo_query, "meta", None)
             for d in docs:
                 doc = dict(d)
                 if "_id" in doc:
                     if "id" not in doc:
                         doc["id"] = doc["_id"]
                     doc.pop("_id", None)
-                results.append(doc)
+                
+                if meta and getattr(meta, "fields", None):
+                    decoded = self.dialect.decode_value(doc, meta)
+                else:
+                    decoded = self.dialect._decode_native(doc)
+                results.append(decoded)
 
             return results
         except Exception as e:
@@ -310,12 +317,17 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
                         doc[auto_inc_field] = generated_value
 
                 res = await coll.insert_one(doc, session=session)
-                generated = None
+                generated: dict[str, Any] | None = None
                 if generated_field is not None and generated_field != "id":
                     generated = {generated_field: generated_value}
+
+                meta = extra.get("meta") if isinstance(extra, dict) else None
+                pk_meta = meta.fields.get(meta.primary_key_field) if meta and meta.fields else None
+                last_id = self.dialect.decode_value(res.inserted_id, pk_meta)
+
                 return MutationResult(
                     rows_affected=1,
-                    last_id=res.inserted_id,
+                    last_id=last_id,
                     generated=generated,
                 )
 
@@ -336,7 +348,10 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
                     new_docs.append(dd)
 
                 res = await coll.insert_many(new_docs, session=session)
-                generated: dict[str, Any] = {"ids": list(res.inserted_ids)}
+                meta = extra.get("meta") if isinstance(extra, dict) else None
+                pk_meta = meta.fields.get(meta.primary_key_field) if meta and meta.fields else None
+                ids = [self.dialect.decode_value(i, pk_meta) for i in res.inserted_ids]
+                generated: dict[str, Any] = {"ids": ids}
                 if auto_inc_field is not None and auto_inc_field != "id":
                     generated[auto_inc_field] = generated_values
                 return MutationResult(

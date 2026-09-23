@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from datetime import date, datetime, timezone
-from decimal import Decimal
+from datetime import datetime, timezone
 from typing import Any, Generic, TypeVar
-from uuid import UUID
 
 from renus.db.core.adapter import AsyncDatabaseAdapter, MutationResult
+from renus.db.core.exceptions import ValidationError
 from renus.db.mutation.ast import (
     Delete,
     DeleteMany,
@@ -26,9 +24,8 @@ from renus.db.query.ast import (
     QueryAST,
 )
 from renus.db.query.builder import Count, Query
+from renus.db.repository.normalize import normalize_values, validate_update_values
 from renus.db.repository.relationships import RelationshipCoordinator
-from renus.db.serialization.core import from_dict
-from renus.datastructures.id import ID
 from renus.db.transaction.core import Transaction
 
 
@@ -100,30 +97,100 @@ class Repository(Generic[T]):
         """
         return self.query(*conditions)
 
+    @classmethod
+    def _build_insert_ast_for_model(cls, model_cls: type, obj: Any) -> Insert:
+        meta = getattr(model_cls, "__db_metadata__", None)
+        values: dict[str, Any] = {}
+
+        if meta:
+            for fname, fmeta in meta.fields.items():
+                if fmeta.generated and getattr(obj, fname, None) is None:
+                    continue
+                if hasattr(obj, fname):
+                    val = (
+                        obj.get_sensitive(fname)
+                        if hasattr(obj, "get_sensitive")
+                        else getattr(obj, fname)
+                    )
+                    if val is not None or fmeta.nullable:
+                        values[fname] = val
+        else:
+            values = {
+                k: v for k, v in obj.__dict__.items() if not k.startswith("_")
+            }
+        return Insert(source=model_cls, values=normalize_values(values))
+
+    @classmethod
+    def _build_update_ast_for_model(cls, model_cls: type, obj: Any) -> Update:
+        changes: dict[str, Any] = {}
+        meta = getattr(model_cls, "__db_metadata__", None)
+        if hasattr(obj, "dirty_fields"):
+            for fname in obj.dirty_fields():
+                fmeta = meta.fields.get(fname) if meta else None
+                changes[fname] = (
+                    obj.get_sensitive(fname)
+                    if hasattr(obj, "get_sensitive")
+                    else getattr(obj, fname)
+                )
+        else:
+            changes = {
+                k: v for k, v in obj.__dict__.items() if not k.startswith("_")
+            }
+
+        filters: list[Condition] = []
+        if hasattr(obj, "identity_dict"):
+            for pk_name, pk_val in obj.identity_dict().items():
+                filters.append(Path(model_cls, (pk_name,)) == pk_val)
+
+        return Update(source=model_cls, 
+            values=validate_update_values(model_cls,changes),
+            filters=tuple(filters))
+
+    @classmethod
+    def _build_delete_ast_for_model(cls, model_cls: type, obj: Any) -> Delete:
+        filters: list[Condition] = []
+        if hasattr(obj, "identity_dict"):
+            for pk_name, pk_val in obj.identity_dict().items():
+                filters.append(Path(model_cls, (pk_name,)) == pk_val)
+
+        return Delete(source=model_cls, filters=tuple(filters))
+
+    def build_insert_ast(self, obj: T) -> Insert:
+        """Build an insert AST from a model instance's values."""
+        return self._build_insert_ast_for_model(self.model, obj)
+
+    def build_insert_many_ast(self, objs: Iterable[T]) -> InsertMany:
+        """Build a multi-row insert AST from model instances."""
+        inst_list = list(objs)
+        if not inst_list:
+            raise ValueError("build_insert_many_ast requires at least one model instance")
+        records = [self._build_insert_ast_for_model(self.model, m).values for m in inst_list]
+        return InsertMany(source=self.model, records=records)
+
+    def build_update_ast(self, obj: T) -> Update:
+        """Build an update AST from a model instance's dirty fields."""
+        return self._build_update_ast_for_model(self.model, obj)
+
+    def build_delete_ast(self, obj: T) -> Delete:
+        """Build a delete AST from a model instance's identity."""
+        return self._build_delete_ast_for_model(self.model, obj)
+
     async def create(self, obj: T) -> T:
         """Insert a single model and return it with generated keys."""
         async with self._atomic(self._rel_coordinator.requires_transaction(obj)):
-            insert_ast = Insert.from_model(obj)
+            insert_ast = self.build_insert_ast(obj)
             result = await self._execute_mutation(insert_ast)
 
             meta = getattr(self.model, "__db_metadata__", None)
             if meta and result.last_id is not None:
                 pk_field = meta.primary_key_field
                 if getattr(obj, pk_field, None) is None:
-                    pk_meta = meta.fields.get(pk_field)
-                    generated_id = result.last_id
-                    if pk_meta is not None and pk_meta.inferred_type is ID:
-                        generated_id = self.adapter.decode_value(result.last_id, pk_meta)
-                    object.__setattr__(obj, pk_field, generated_id)
+                    object.__setattr__(obj, pk_field, result.last_id)
 
             if result.generated:
                 for k, v in result.generated.items():
                     if getattr(obj, k, None) is None:
-                        field_meta = meta.fields.get(k) if meta else None
-                        generated_value = v
-                        if field_meta is not None and field_meta.inferred_type is ID:
-                            generated_value = self.adapter.decode_value(v, field_meta)
-                        object.__setattr__(obj, k, generated_value)
+                        object.__setattr__(obj, k, v)
 
             if hasattr(obj, "_mark_persisted"):
                 getattr(obj, "_mark_persisted")()
@@ -141,19 +208,15 @@ class Repository(Generic[T]):
             self._rel_coordinator.requires_transaction(obj) for obj in obj_list
         )
         async with self._atomic(needs_transaction):
-            insert_many_ast = InsertMany.from_models(obj_list)
+            insert_many_ast = self.build_insert_many_ast(obj_list)
             res = await self._execute_mutation(insert_many_ast)
             meta = getattr(self.model, "__db_metadata__", None)
             if meta:
                 pk_field = meta.primary_key_field
                 if res.generated and "ids" in res.generated:
-                    pk_meta = meta.fields.get(pk_field)
                     for obj, gen_id in zip(obj_list, res.generated["ids"]):
                         if getattr(obj, pk_field, None) is None:
-                            generated_id = gen_id
-                            if pk_meta is not None and pk_meta.inferred_type is ID:
-                                generated_id = self.adapter.decode_value(gen_id, pk_meta)
-                            object.__setattr__(obj, pk_field, generated_id)
+                            object.__setattr__(obj, pk_field, gen_id)
                 elif res.last_id is not None and len(obj_list) > 0:
                     first_id = res.last_id - len(obj_list) + 1
                     for idx, obj in enumerate(obj_list):
@@ -164,13 +227,8 @@ class Repository(Generic[T]):
                 for field_name, generated_values in res.generated.items():
                     if field_name == "ids" or not isinstance(generated_values, list):
                         continue
-                    field_meta = meta.fields.get(field_name) if meta else None
                     for obj, generated_value in zip(obj_list, generated_values):
                         if getattr(obj, field_name, None) is None:
-                            if field_meta is not None and field_meta.inferred_type is ID:
-                                generated_value = self.adapter.decode_value(
-                                    generated_value, field_meta
-                                )
                             object.__setattr__(obj, field_name, generated_value)
 
             for obj in obj_list:
@@ -191,7 +249,7 @@ class Repository(Generic[T]):
 
         async with self._atomic(self._rel_coordinator.requires_transaction(obj)):
             await self._rel_coordinator.cascade_on_update(obj)
-            update_ast = Update.from_model(obj)
+            update_ast = self.build_update_ast(obj)
             if update_ast.values:
                 if (
                     getattr(self.model, "__db_metadata__", None)
@@ -222,7 +280,7 @@ class Repository(Generic[T]):
 
         update_ast = Update(
             source=self.model,
-            values=values,
+            values=validate_update_values(self.model, values),
             filters=conditions,
         )
         result = await self._execute_mutation(update_ast)
@@ -243,7 +301,7 @@ class Repository(Generic[T]):
 
         update_many_ast = UpdateMany(
             source=self.model,
-            values=values,
+            values=validate_update_values(self.model, values),
             filters=conditions,
         )
         result = await self._execute_mutation(update_many_ast)
@@ -279,7 +337,7 @@ class Repository(Generic[T]):
                     res = await self._execute_mutation(update_ast)
                     return res.rows_affected
 
-                del_ast = Delete.from_model(obj)
+                del_ast = self.build_delete_ast(obj)
                 res = await self._execute_mutation(del_ast)
                 if hasattr(obj, "_mark_deleted"):
                     obj._mark_deleted()
@@ -387,7 +445,7 @@ class Repository(Generic[T]):
             obj: Any = target_or_condition
             async with self._atomic():
                 await self._rel_coordinator.cascade_delete(obj, hard=True)
-                del_ast = Delete.from_model(obj)
+                del_ast = self.build_delete_ast(obj)
                 res = await self._execute_mutation(del_ast)
                 if hasattr(obj, "_mark_deleted"):
                     obj._mark_deleted()
@@ -427,23 +485,64 @@ class Repository(Generic[T]):
         return await self.query(*conditions).exists()
 
     async def _query(self, ast: QueryAST) -> list[Any]:
-        """Execute the complete AST in the adapter.
-
-        Relationship predicates are compiled by the backend (for example,
-        SQL ``EXISTS`` or MongoDB ``$lookup``). Hydration is intentionally
-        limited to shaping rows after the database has selected them.
-        """
+        """Execute the complete AST in the adapter."""
         compile_fn = getattr(self.adapter, "compile_query", None)
         compiled = compile_fn(ast) if compile_fn is not None else ast
         rows = await self.adapter.execute_query(compiled)
 
         if ast.projection or ast.aggregates:
-            return [dict(r) if not isinstance(r, dict) else r for r in rows]
+            result_dicts: list[dict[str, Any]] = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    raise ValidationError(f"Adapter response must be in dict format, got {type(r).__name__}")
+                result_dicts.append(dict(r))
+            return result_dicts
+
+        meta = getattr(self.model, "__db_metadata__", None)
+        rel_names = set(meta.relationships.keys()) if meta else set()
+        included_paths = {include.path.parts for include in ast.includes}
+        objects: list[T] = []
+        for r in rows:
+            if isinstance(r, self.model):
+                obj = r
+            else:
+                if not isinstance(r, dict):
+                    raise ValidationError(
+                        f"Adapter response must be in dict format, got {type(r).__name__}"
+                    )
+
+                data = dict(r)
+                if rel_names:
+                    included_relationships = {
+                        path[0] for path in included_paths if path
+                    }
+                    for rname, relationship in meta.relationships.items():
+                        if (
+                            getattr(relationship, "is_embedded", False)
+                            and getattr(relationship, "target", None) not in (dict, list)
+                            and getattr(relationship.loading, "value", relationship.loading)
+                            == "lazy"
+                            and rname not in included_relationships
+                            and getattr(self.adapter, "nested_documents", False)
+                        ):
+                            data.pop(rname, None)
+                    for rname in rel_names:
+                        if rname not in data:
+                            rel = meta.relationships[rname]
+                            if getattr(rel, "target", None) is dict:
+                                data[rname] = {}
+                            elif getattr(rel, "is_collection", False):
+                                data[rname] = []
+                            else:
+                                data[rname] = None
+                model_cls: Any = self.model
+                obj = model_cls(data)
+
+            if hasattr(obj, "_mark_persisted"):
+                getattr(obj, "_mark_persisted")()
+            objects.append(obj)
 
         includes = list(ast.includes)
-        included_paths = {include.path.parts for include in includes}
-        objects = [self._hydrate(r, included_paths=included_paths) for r in rows]
-
         for include in self._includes_for_joined_relationships():
             if include.path.parts not in included_paths:
                 includes.append(include)
@@ -468,6 +567,10 @@ class Repository(Generic[T]):
             Include(Path(self.model, (name,)))
             for name, relationship in meta.relationships.items()
             if getattr(relationship.loading, "value", relationship.loading) == "joined"
+            or (
+                getattr(relationship, "is_embedded", False)
+                and getattr(relationship, "target", None) in (dict, list)
+            )
         ]
 
     def _include_path(self, model: type, parts: tuple[str, ...]):
@@ -520,63 +623,3 @@ class Repository(Generic[T]):
         if plugins is not None:
             await plugins.dispatch_after_mutation(ast, result, context)
         return result
-
-    def _coerce_row_for_model(
-        self,
-        row: dict[str, Any],
-        *,
-        included_paths: set[tuple[str, ...]] | None = None,
-    ) -> dict[str, Any]:
-        meta = getattr(self.model, "__db_metadata__", None)
-        if not meta:
-            return row
-
-        data = self.adapter.decode_row(dict(row), meta)
-
-        rel_meta = getattr(meta, "relationships", None)
-        if rel_meta:
-            for rname, rmeta in rel_meta.items():
-                if not rmeta.is_embedded or rname not in data:
-                    continue
-                if (
-                    self.adapter.nested_documents
-                    and getattr(rmeta.loading, "value", rmeta.loading) == "selectin"
-                    and (rname,) not in (included_paths or set())
-                ):
-                    data.pop(rname, None)
-                    continue
-                rval = data[rname]
-                target = rmeta.target if isinstance(rmeta.target, type) else None
-                if target is None or rval is None:
-                    continue
-                if rmeta.is_collection:
-                    if isinstance(rval, list):
-                        data[rname] = [
-                            from_dict(target, item, validate=False) if isinstance(item, dict) else item
-                            for item in rval
-                        ]
-                elif isinstance(rval, dict):
-                    data[rname] = from_dict(target, rval, validate=False)
-
-        return data
-
-    def _hydrate(
-        self,
-        row: Any,
-        *,
-        included_paths: set[tuple[str, ...]] | None = None,
-    ) -> T:
-        if isinstance(row, self.model):
-            obj: Any = row
-        else:
-            coerced = self._coerce_row_for_model(
-                dict(row),
-                included_paths=included_paths,
-            )
-            model_cls: Any = self.model
-            obj = model_cls(coerced)
-
-        if hasattr(obj, "_mark_persisted"):
-            getattr(obj, "_mark_persisted")()
-
-        return obj

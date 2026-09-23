@@ -36,31 +36,31 @@ class SQLMutationCompiler:
         quoted_table = self.dialect.quote(table_name)
 
         if isinstance(m, Insert):
-            return self._compile_insert(quoted_table, m)
+            return self._compile_insert(quoted_table, m, meta)
 
         if isinstance(m, InsertMany):
-            return self._compile_insert_many(quoted_table, m)
+            return self._compile_insert_many(quoted_table, m, meta)
 
         if isinstance(m, (Update, UpdateMany)):
-            return self._compile_update(quoted_table, m)
+            return self._compile_update(quoted_table, m, meta)
 
         if isinstance(m, (Delete, DeleteMany)):
-            return self._compile_delete(quoted_table, m)
+            return self._compile_delete(quoted_table, m, meta)
 
 
         raise NotImplementedError(f"Unsupported mutation type: {type(m).__name__}")
 
-    def _compile_insert(self, table: str, m: Insert) -> SQLCompiled:
+    def _compile_insert(self, table: str, m: Insert, meta: Any = None) -> SQLCompiled:
         cols = list(m.values.keys())
         col_names = ", ".join(self.dialect.quote(c) for c in cols)
         val_placeholders = self.dialect.placeholders(len(cols))
         sql = f"INSERT INTO {table} ({col_names}) VALUES ({val_placeholders})"
         params = [m.values[c] for c in cols]
-        return SQLCompiled(sql, tuple(params))
+        return SQLCompiled(sql, tuple(params), meta=meta)
 
-    def _compile_insert_many(self, table: str, m: InsertMany) -> SQLCompiled:
+    def _compile_insert_many(self, table: str, m: InsertMany, meta: Any = None) -> SQLCompiled:
         if not m.records:
-            return SQLCompiled("", ())
+            return SQLCompiled("", (), meta=meta)
 
         cols = list(m.records[0].keys())
         col_names = ", ".join(self.dialect.quote(c) for c in cols)
@@ -74,9 +74,9 @@ class SQLMutationCompiler:
             for c in cols:
                 params.append(rec.get(c))
 
-        return SQLCompiled(sql, tuple(params))
+        return SQLCompiled(sql, tuple(params), meta=meta)
 
-    def _compile_update(self, table: str, m: Update | UpdateMany) -> SQLCompiled:
+    def _compile_update(self, table: str, m: Update | UpdateMany, meta: Any = None) -> SQLCompiled:
         set_clauses = [
             f"{self.dialect.quote(k)} = {self.dialect.placeholder}" for k in m.values
         ]
@@ -95,9 +95,9 @@ class SQLMutationCompiler:
         if isinstance(m, Update):
             sql += " LIMIT 1"
 
-        return SQLCompiled(sql, tuple(params))
+        return SQLCompiled(sql, tuple(params), meta=meta)
 
-    def _compile_delete(self, table: str, m: Delete | DeleteMany) -> SQLCompiled:
+    def _compile_delete(self, table: str, m: Delete | DeleteMany, meta: Any = None) -> SQLCompiled:
         where_clauses: list[str] = []
         params: list[Any] = []
 
@@ -113,5 +113,5 @@ class SQLMutationCompiler:
         if isinstance(m, Delete):
             sql += " LIMIT 1"
 
-        return SQLCompiled(sql, tuple(params))
+        return SQLCompiled(sql, tuple(params), meta=meta)
 

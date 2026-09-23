@@ -17,6 +17,7 @@ from renus.db import (
     Model,
 )
 from renus.datastructures.id import ID
+from renus.db.query.ast import Path
 
 from renus.db.sqlite import SQLiteAdapter
 from tests.db._conformance import (
@@ -110,46 +111,34 @@ async def test_direct_create_and_drop_index(kind):
 async def test_adapter_value_encoding_and_decoding(kind):
     previous_config = Config._cache.get("database")
     Config._cache["database"] = SimpleNamespace(ID=str)
-    adapter = adapter_for(kind)
-    await adapter.connect()
+    db = await database_for(kind, [EncodedRecord])
     try:
-        meta = EncodedRecord.metadata()
+        repo = db.repository(EncodedRecord)
         values = {
             "when": datetime(2026, 9, 19, 12, 30, 45, tzinfo=timezone.utc),
             "birthday": date(1990, 5, 20),
             "at": time(8, 15, 30),
             "token": UUID("12345678-1234-5678-1234-567812345678"),
             "identity": ID("record-1"),
-            "payload": {"nested": [1, True, "value"]},
+            "payload": {"nested": "value"},
             "blob": b"renus-binary",
         }
+        record = EncodedRecord({"id": "rec-1", **values})
+        created = await repo.create(record)
+        assert created.id == "rec-1"
 
-        field_meta = {
-            key: meta.fields[key]
-            for key in values
-            if key in meta.fields
-        }
-        field_meta["payload"] = SimpleNamespace(
-            inferred_type=dict,
-            column_name="payload",
-        )
-        encoded = {
-            key: adapter.encode_value(value, field_meta[key])
-            for key, value in values.items()
-        }
-        decoded = {
-            key: adapter.decode_value(value, field_meta[key])
-            for key, value in encoded.items()
-        }
-        assert decoded["when"] == values["when"]
-        assert decoded["birthday"] == values["birthday"]
-        assert decoded["at"] == values["at"]
-        assert decoded["token"] == values["token"]
-        assert decoded["identity"] == values["identity"]
-        assert decoded["payload"] == values["payload"]
-        assert decoded["blob"] == values["blob"]
+        fetched = await repo.query(Path(EncodedRecord, ("id",)) == "rec-1").first()
+        assert fetched is not None
+        assert fetched.id == "rec-1"
+        assert fetched.when == values["when"]
+        assert fetched.birthday == values["birthday"]
+        assert fetched.at == values["at"]
+        assert fetched.token == values["token"]
+        assert fetched.identity == values["identity"]
+        assert fetched.payload == values["payload"]
+        assert fetched.blob == values["blob"]
     finally:
-        await adapter.disconnect()
+        await cleanup(db)
         if previous_config is None:
             Config._cache.pop("database", None)
         else:

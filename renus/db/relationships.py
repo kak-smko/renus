@@ -32,7 +32,7 @@ class ReferentialAction(str, Enum):
 
 class LoadingStrategy(str, Enum):
 
-    SELECTIN = "selectin"
+    LAZY = "lazy"
     JOINED = "joined"
 
 _SAVE_ALIASES: dict[str, SaveAction] = {
@@ -55,8 +55,7 @@ _REFERENTIAL_ALIASES: dict[str, ReferentialAction] = {
 }
 
 _LOADING_ALIASES: dict[str, LoadingStrategy] = {
-    "selectin": LoadingStrategy.SELECTIN,
-    "select in": LoadingStrategy.SELECTIN,
+    "lazy": LoadingStrategy.LAZY,
     "joined": LoadingStrategy.JOINED,
     "join": LoadingStrategy.JOINED,
 }
@@ -98,7 +97,7 @@ def _resolve_loading(value: Any) -> str:
     strategy = _LOADING_ALIASES.get(_normalize_option(value))
     if strategy is None:
         raise ValueError(
-            f"invalid loading strategy {value!r}; must be one of: selectin, joined"
+            f"invalid loading strategy {value!r}; must be one of: lazy, joined"
         )
     return strategy.value
 
@@ -112,7 +111,7 @@ class Relationship:
         on_save: SaveAction | str = "no action",
         on_delete: str | ReferentialAction = "restrict",
         on_update: str | ReferentialAction = "cascade",
-        loading: str | LoadingStrategy = "selectin",
+        loading: str | LoadingStrategy = "lazy",
         local_key: str | None = None,
         foreign_key: str | None = None,
         through: type | str | None = None,
@@ -139,8 +138,8 @@ class Relationship:
             ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
             or ``"no action"``. Defaults to ``"cascade"``.
         loading:
-            Strategy used to load the related records. One of ``"selectin"``
-            or ``"joined"``. Defaults to ``"selectin"``.
+            Strategy used to load the related records. One of ``"lazy"``
+            or ``"joined"``. Defaults to ``"lazy"``.
         local_key:
             The local column used to join the relationship. Defaults to the
             owner's primary key.
@@ -224,7 +223,7 @@ class EmbeddedOne(Relationship):
         self,
         target: type,
         *,
-        loading: str | LoadingStrategy = "selectin",
+        loading: str | LoadingStrategy = "lazy",
     ) -> None:
         """Declare an embedded single relationship.
 
@@ -234,8 +233,8 @@ class EmbeddedOne(Relationship):
             The embedded model class or a reference to it.
 
         loading:
-            Strategy used to load the embedded record. One of ``"selectin"``
-            or ``"joined"``. Defaults to ``"selectin"``.
+            Strategy used to load the embedded record. One of ``"lazy"``
+            or ``"joined"``. Defaults to ``"lazy"``.
         """
         super().__init__(
             kind=RelationshipKind.EMBEDDED_ONE,
@@ -257,7 +256,7 @@ class EmbeddedMany(Relationship):
         target: type,
         *,
 
-        loading: str | LoadingStrategy = "selectin",
+        loading: str | LoadingStrategy = "lazy",
     ) -> None:
         """Declare an embedded collection relationship.
 
@@ -267,8 +266,8 @@ class EmbeddedMany(Relationship):
             The embedded model class or a reference to it.
 
         loading:
-            Strategy used to load the embedded records. One of ``"selectin"``
-            or ``"joined"``. Defaults to ``"selectin"``.
+            Strategy used to load the embedded records. One of ``"lazy"``
+            or ``"joined"``. Defaults to ``"lazy"``.
         """
         super().__init__(
             kind=RelationshipKind.EMBEDDED_MANY,
@@ -292,7 +291,7 @@ class Reference(Relationship):
         on_save: SaveAction | str = "no action",
         on_delete: str | ReferentialAction = "restrict",
         on_update: str | ReferentialAction = "cascade",
-        loading: str | LoadingStrategy = "selectin",
+        loading: str | LoadingStrategy = "lazy",
         kind: RelationshipKind | str = RelationshipKind.REFERENCE,
         is_collection: bool = False,
     ) -> None:
@@ -319,8 +318,8 @@ class Reference(Relationship):
             ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
             or ``"no action"``. Defaults to ``"cascade"``.
         loading:
-            Strategy used to load the related records. One of ``"selectin"``
-            or ``"joined"``. Defaults to ``"selectin"``.
+            Strategy used to load the related records. One of ``"lazy"``
+            or ``"joined"``. Defaults to ``"lazy"``.
         kind:
             The cardinality of the relationship. Defaults to ``"reference"``.
         is_collection:
@@ -350,7 +349,7 @@ class OneToOne(Reference):
         on_save: SaveAction | str = "no action",
         on_delete: str | ReferentialAction = "restrict",
         on_update: str | ReferentialAction = "cascade",
-        loading: str | LoadingStrategy = "selectin",
+        loading: str | LoadingStrategy = "lazy",
     ) -> None:
         """Declare a one-to-one relationship.
 
@@ -375,8 +374,8 @@ class OneToOne(Reference):
             ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
             or ``"no action"``. Defaults to ``"cascade"``.
         loading:
-            Strategy used to load the related record. One of ``"selectin"``
-            or ``"joined"``. Defaults to ``"selectin"``.
+            Strategy used to load the related record. One of ``"lazy"``
+            or ``"joined"``. Defaults to ``"lazy"``.
         """
         super().__init__(
             target=target,
@@ -401,7 +400,7 @@ class OneToMany(Reference):
         on_save: SaveAction | str = "no action",
         on_delete: str | ReferentialAction = "restrict",
         on_update: str | ReferentialAction = "cascade",
-        loading: str | LoadingStrategy = "selectin",
+        loading: str | LoadingStrategy = "lazy",
     ) -> None:
         """Declare a one-to-many relationship.
 
@@ -426,8 +425,8 @@ class OneToMany(Reference):
             ``"cascade"``, ``"restrict"``, ``"set null"``, ``"set default"``,
             or ``"no action"``. Defaults to ``"cascade"``.
         loading:
-            Strategy used to load the related records. One of ``"selectin"``
-            or ``"joined"``. Defaults to ``"selectin"``.
+            Strategy used to load the related records. One of ``"lazy"``
+            or ``"joined"``. Defaults to ``"lazy"``.
         """
         super().__init__(
             target=target,
@@ -450,7 +449,7 @@ class ManyToOne(Reference):
         local_key: str | None = None,
         foreign_key: str | None = None,
         on_save: SaveAction | str = "no action",
-        loading: str | LoadingStrategy = "selectin",
+        loading: str | LoadingStrategy = "lazy",
     ) -> None:
         """Declare a many-to-one relationship.
 
@@ -467,8 +466,8 @@ class ManyToOne(Reference):
             Whether the related record is cascaded when the owner is saved. One
             of ``"cascade"`` or ``"no action"``. Defaults to ``"no action"``.
         loading:
-            Strategy used to load the related record. One of ``"selectin"``
-            or ``"joined"``. Defaults to ``"selectin"``.
+            Strategy used to load the related record. One of ``"lazy"``
+            or ``"joined"``. Defaults to ``"lazy"``.
         """
         super().__init__(
             target=target,
@@ -492,7 +491,7 @@ class ManyToMany(Reference):
         local_key: str | None = None,
         foreign_key: str | None = None,
         on_save: SaveAction | str = "no action",
-        loading: str | LoadingStrategy = "selectin",
+        loading: str | LoadingStrategy = "lazy",
     ) -> None:
         """Declare a many-to-many relationship.
 
@@ -511,8 +510,8 @@ class ManyToMany(Reference):
             Whether the related records are cascaded when the owner is saved.
             One of ``"cascade"`` or ``"no action"``. Defaults to ``"no action"``.
         loading:
-            Strategy used to load the related records. One of ``"selectin"``
-            or ``"joined"``. Defaults to ``"selectin"``.
+            Strategy used to load the related records. One of ``"lazy"``
+            or ``"joined"``. Defaults to ``"lazy"``.
         """
         super().__init__(
             target=target,

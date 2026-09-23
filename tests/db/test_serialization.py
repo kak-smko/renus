@@ -20,6 +20,7 @@ from renus.db import (
 )
 
 from renus.datastructures.id import ID
+from renus.db.repository.normalize import normalize_values
 
 class RoleEnum(Enum):
     ADMIN = "admin"
@@ -246,3 +247,17 @@ def test_sensitive_fields_validate_and_roundtrip():
 
     rt = from_dict(SensitiveUser, to_dict(direct, include_sensitive=True))
     assert rt.get_sensitive("password") == "$2b$12$explicit"
+
+
+def test_normalize_values():
+    raw = {
+        SensitiveUser.username: "alice",
+        "email": "a@x.com",
+        "member.role": "admin",
+    }
+    norm = normalize_values(raw)
+    assert norm == {
+        "username": "alice",
+        "email": "a@x.com",
+        "role": "admin",
+    }

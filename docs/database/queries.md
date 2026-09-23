@@ -220,7 +220,7 @@ posts = await (
 )
 ```
 
-The included relationship is populated on each returned model according to its relationship configuration. Relationship loading strategies are `selectin` and `joined`; configure them on the relationship declaration. See [`/docs/database/models.md`](models.md) for relationship types and options.
+The included relationship is populated on each returned model according to its relationship configuration. Relationship loading strategies are `lazy` and `joined`; configure them on the relationship declaration. See [`/docs/database/models.md`](models.md) for relationship types and options.
 
 ## 9. Soft-delete scopes
 

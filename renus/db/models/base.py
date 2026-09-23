@@ -125,8 +125,6 @@ class ModelMeta(type):
             if rel_kind is None:
                 continue
 
-            raw_field = ns.get(fname)
-
             rel = (
                 EmbeddedOne(dict)
                 if rel_kind == "Embedded"

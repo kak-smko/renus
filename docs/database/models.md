@@ -454,7 +454,7 @@ Reference relationships support:
 - `on_save`: `"cascade"` or `"no action"`;
 - `on_delete`: `"cascade"`, `"restrict"`, `"set null"`, `"set default"`, or `"no action"`;
 - `on_update`: the same referential actions;
-- `loading`: `"selectin"` or `"joined"`;
+- `loading`: `"lazy"` or `"joined"`;
 - `local_key` and `foreign_key`;
 - `through` for `ManyToMany`.
 
@@ -470,7 +470,7 @@ posts: list[Post] = OneToMany(
 )
 ```
 
-The default loading strategy is `"selectin"`. The default save action is `"no action"` for reference relationships. Embedded relationships use cascading behavior by default.
+The default loading strategy is `"lazy"`. The default save action is `"no action"` for reference relationships. Embedded relationships use cascading behavior by default.
 
 ## 8. Primary keys and identities
 

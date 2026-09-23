@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -194,7 +193,7 @@ def test_mongo_compiler_mutations():
     _, op, _, updates = compiler.compile_mutation(embedded_update)
     assert op == "update_one"
     assert updates["$set"]["items"] == [
-        {"id": None, "name": "book", "price": 12.5, "qty": 2}
+        { "name": "book", "price": 12.5, "qty": 2}
     ]
 
     del_ast = Delete(AccountDoc, filters=(AccountDoc.id == 1,))

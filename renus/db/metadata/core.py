@@ -76,7 +76,7 @@ class RelationshipMetadata:
     on_save: str = "no action"
     on_delete: str = "restrict"
     on_update: str = "cascade"
-    loading: str = "selectin"
+    loading: str = "lazy"
     is_embedded: bool = False
     is_collection: bool = False
 

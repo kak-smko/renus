@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from renus.db.core import convert
 from renus.db.models.base import Model
@@ -72,44 +73,178 @@ class MongoDialect:
         return isinstance(value, self.native_types)
 
     def encode_value(self, value: Any, field_meta: Any = None) -> Any:
-        """Recursively convert a value into something BSON can store.
+        """Convert a value into something BSON can store using metadata if provided.
 
         ``dict``/``list``/``tuple``/``set`` are traversed so nested values are
         encoded too. Types BSON cannot represent (``UUID``, ``Decimal``,
-        ``date``, ``time``) are converted to the string/number form the
-        framework uses elsewhere. Any type outside the canonical catalogue is
-        stored as its string form.
+        ``date``, ``time``) are converted according to field metadata or standard
+        BSON forms.
         """
         if value is None:
             return None
+
+        if hasattr(field_meta, "fields") and isinstance(value, dict):
+            encoded_doc: dict[str, Any] = {}
+            for k, v in value.items():
+                fmeta = field_meta.fields.get(k)
+                encoded_doc[k] = self.encode_value(v, fmeta)
+            return encoded_doc
+
         if isinstance(value, Model):
-            return self.encode_value(dict(value))
+            return self.encode_value(dict(value), getattr(value, "__db_metadata__", field_meta))
+
         if isinstance(value, dict):
+            target_model = getattr(field_meta, "target", None)
+            nested_meta = getattr(target_model, "__db_metadata__", None) if target_model else None
+            if nested_meta:
+                return {k: self.encode_value(v, nested_meta.fields.get(k)) for k, v in value.items()}
             return {k: self.encode_value(v) for k, v in value.items()}
+
         if isinstance(value, (list, tuple, set)):
-            return [self.encode_value(v) for v in value]
+            target_model = getattr(field_meta, "target", None)
+            nested_meta = getattr(target_model, "__db_metadata__", None) if target_model else None
+            return [self.encode_value(v, nested_meta) for v in value]
+
+        target_type = getattr(field_meta, "inferred_type", None)
+
+        if is_identity(target_type) or target_type is ID or isinstance(value, ID):
+            if isinstance(value, ID):
+                raw = value.value
+                if raw is None:
+                    return None
+                if isinstance(raw, _ID_NATIVE_TYPES):
+                    return raw
+                return str(value)
+            if value is not None and not isinstance(value, _ID_NATIVE_TYPES):
+                return str(value)
+            return value
+
+        if target_type is UUID or isinstance(value, UUID):
+            return str(value)
+
+        if target_type is date or (isinstance(value, date) and not isinstance(value, datetime)):
+            return value.isoformat()
+
+        if target_type is time or isinstance(value, time):
+            return value.isoformat()
+
+        if target_type is Decimal or isinstance(value, Decimal):
+            if isinstance(value, (Decimal, int, float, str)):
+                return float(value)
+            return value
+
+        if target_type is bytes and isinstance(value, (bytes, bytearray)):
+            return bytes(value)
+
         if self.supports(value):
             return value
-        if isinstance(value, (date, time)):
-            return value.isoformat()
-        if isinstance(value, Decimal):
-            return float(value)
-        if isinstance(value, ID):
-            raw = value.value
-            #raise RuntimeError(type(raw))
-            if raw is None:
-                return None
-            if isinstance(raw, _ID_NATIVE_TYPES):
-                return raw
-            return str(value)
+
         return str(value)
 
     def decode_value(self, value: Any, field_meta: Any = None) -> Any:
         native = self._decode_native(value)
-        if field_meta is None:
+        if native is None or field_meta is None:
             return native
-        if is_identity(field_meta.inferred_type):
-            return ID(native) if native is not None else native
+
+        if hasattr(field_meta, "fields") and isinstance(native, dict):
+            data = dict(native)
+            for fname, fmeta in field_meta.fields.items():
+                col = getattr(fmeta, "column_name", fname)
+                if col in data:
+                    val = data[col]
+                    data[fname] = self.decode_value(val, fmeta)
+                elif fname in data:
+                    val = data[fname]
+                    data[fname] = self.decode_value(val, fmeta)
+            rels = getattr(field_meta, "relationships", {})
+            for rname, rmeta in rels.items():
+                if rname in data and getattr(rmeta, "is_embedded", False) and getattr(rmeta, "target", None):
+                    target_meta = getattr(rmeta.target, "__db_metadata__", None)
+                    if target_meta:
+                        rval = data[rname]
+                        if getattr(rmeta, "is_collection", False) and isinstance(rval, list):
+                            data[rname] = [
+                                self.decode_value(item, target_meta) if isinstance(item, dict) else item
+                                for item in rval
+                            ]
+                        elif isinstance(rval, dict):
+                            data[rname] = self.decode_value(rval, target_meta)
+            return data
+
+        target_type = getattr(field_meta, "inferred_type", field_meta)
+        type_str = str(target_type).lower()
+
+        if is_identity(target_type) or target_type is ID or "id" == type_str.rsplit(".", 1)[-1]:
+            if isinstance(native, ID):
+                return native
+            return ID(native)
+
+        if (target_type is bool or type_str in ("bool", "boolean")) and isinstance(native, int):
+            return bool(native)
+
+        if target_type is UUID or "uuid" in type_str:
+            if isinstance(native, UUID):
+                return native
+            if isinstance(native, str):
+                try:
+                    return UUID(native)
+                except Exception:
+                    return native
+
+        if target_type is date or type_str.rsplit(".", 1)[-1] == "date":
+            if isinstance(native, date) and not isinstance(native, datetime):
+                return native
+            if isinstance(native, datetime):
+                return native.date()
+            if isinstance(native, str):
+                try:
+                    return date.fromisoformat(native)
+                except Exception:
+                    return native
+
+        if target_type is time or type_str.rsplit(".", 1)[-1] == "time":
+            if isinstance(native, time):
+                return native
+            if isinstance(native, str):
+                try:
+                    return time.fromisoformat(native)
+                except Exception:
+                    return native
+
+        if target_type is datetime or type_str.rsplit(".", 1)[-1] == "datetime":
+            if isinstance(native, datetime):
+                if native.tzinfo is None:
+                    return native.replace(tzinfo=timezone.utc)
+                return native
+            if isinstance(native, str):
+                try:
+                    dt = datetime.fromisoformat(native.rstrip("Z"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt
+                except Exception:
+                    return native
+
+        if target_type is Decimal or "decimal" in type_str:
+            if isinstance(native, Decimal):
+                return native
+            if isinstance(native, (int, float, str)):
+                try:
+                    return Decimal(str(native))
+                except Exception:
+                    return native
+
+        if target_type is bytes and isinstance(native, (bytes, bytearray)):
+            return bytes(native)
+
+        target_model = getattr(field_meta, "target", None)
+        if target_model and hasattr(target_model, "__db_metadata__"):
+            target_meta = getattr(target_model, "__db_metadata__")
+            if isinstance(native, dict):
+                return self.decode_value(native, target_meta)
+            if isinstance(native, list):
+                return [self.decode_value(item, target_meta) if isinstance(item, dict) else item for item in native]
+
         return convert.decode_value(native, field_meta)
 
     def _decode_native(self, value: Any) -> Any:

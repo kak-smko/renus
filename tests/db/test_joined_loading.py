@@ -114,11 +114,11 @@ class SelectinEmbeddedOwner(Model):
     name: str
     address: SelectinAddress = Embedded(
         SelectinAddress,
-        loading=LoadingStrategy.SELECTIN,
+        loading=LoadingStrategy.LAZY,
     )
     tags: list[SelectinTag] = EmbeddedMany(
         SelectinTag,
-        loading=LoadingStrategy.SELECTIN,
+        loading=LoadingStrategy.LAZY,
     )
 
 
