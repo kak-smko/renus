@@ -28,11 +28,12 @@ from renus.db.sql import (
     SQLMutationCompiler,
 )
 from renus.db.mysql.dialect import MySQLDialect
+from renus.db.validation import MaxLen
 
 
 class Customer(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True, auto_inc=True))
-    username: str = Field(database=DatabaseField(unique=True))
+    username: str = Field(MaxLen(255),database=DatabaseField(unique=True))
     balance: float = 0.0
     active: bool = True
 

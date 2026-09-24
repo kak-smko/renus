@@ -10,6 +10,7 @@ Run with::
     venv/bin/python -m pytest tests/db/test_adapter_conformance.py
 """
 
+from decimal import Decimal
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,6 +54,7 @@ from renus.db import (
 )
 from renus.datastructures import ID
 from renus.db.query.ast import Path, QueryAST
+from renus.db.validation import MaxLen
 from tests.db.deep_relation_models import DEEP_RELATION_FAMILIES
 from tests.db.deep_embedded_models import (
     DeepEmbedded1,
@@ -4701,5 +4703,56 @@ async def test_relationship_create_starts_transaction_only_for_multiple_tables(k
         )
         expected_calls = 0 if adapter.nested_documents else 1
         assert len(transaction_calls) == expected_calls
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_scalar_type_roundtrips_and_sql_text_length(kind):
+    """Exercise long text, bounded text, decimals, and custom values everywhere."""
+
+    class CustomValue:
+        def __init__(self, value: str):
+            self.value = value
+
+        def __str__(self) -> str:
+            return self.value
+
+        def __eq__(self, other: object) -> bool:
+            return isinstance(other, CustomValue) and self.value == other.value
+
+    class ScalarTypes(Model):
+        id: str = Field(database=DatabaseField(primary_key=True))
+        short_text: str = Field(MaxLen(80))
+        long_text: str = Field(MaxLen(1000))
+        amount: Decimal
+        custom: CustomValue
+
+    db = await database_for(kind, [ScalarTypes])
+    try:
+        meta = ScalarTypes.metadata()
+        dialect = getattr(db.adapter("primary"), "dialect", None)
+        if dialect is not None and hasattr(dialect, "type_to_sql"):
+            assert dialect.type_to_sql(meta.fields["short_text"]) == "VARCHAR(80)"
+            assert dialect.type_to_sql(meta.fields["long_text"]) == (
+                "LONGTEXT" if kind == "mysql" else "TEXT"
+            )
+
+        value = ScalarTypes(
+            id="scalar-1",
+            short_text="bounded",
+            long_text="x" * 512,
+            amount=Decimal("1234567890.1234"),
+            custom=CustomValue("custom-value"),
+        )
+        await db.repository(ScalarTypes).create(value)
+        fetched = await db.repository(ScalarTypes).where(ScalarTypes.id == "scalar-1").first()
+
+        assert fetched is not None
+        assert fetched.short_text == "bounded"
+        assert fetched.long_text == "x" * 512
+        assert fetched.amount == Decimal("1234567890.1234")
+        assert fetched.custom == CustomValue("custom-value")
     finally:
         await cleanup(db)

@@ -12,7 +12,7 @@ from renus.datastructures.id import ID
 def encode_value(value: Any, field_meta: Any = None) -> Any:
     if value is None:
         return None
-    if isinstance(value, bool):
+    if isinstance(value, (bool, int, float, str, bytes, bytearray)):
         return value
     if isinstance(value, datetime):
         return value.isoformat()
@@ -26,9 +26,19 @@ def encode_value(value: Any, field_meta: Any = None) -> Any:
         return str(value)
     if isinstance(value, (dict, list)):
         return json.dumps(value)
-    return value
+    return str(value)
 
 
+def _resolve_custom_type(field_meta: Any) -> type | None:
+    target_type = getattr(field_meta, "python_type", None)
+    if not isinstance(target_type, type):
+        target_type = getattr(field_meta, "inferred_type", None)
+    if isinstance(target_type, type) and target_type not in (
+        bool, int, float, str, bytes, bytearray, date, datetime, time, Decimal, UUID,
+    ):
+        return target_type
+    return None
+    
 def decode_value(value: Any, field_meta: Any = None) -> Any:
     if value is None or field_meta is None:
         return value
@@ -37,6 +47,13 @@ def decode_value(value: Any, field_meta: Any = None) -> Any:
     target_type = field_meta.inferred_type
     type_str = str(target_type).lower()
 
+    custom_type = _resolve_custom_type(field_meta)
+    if custom_type is not None and isinstance(value, str):
+        try:
+            return custom_type(value)
+        except Exception:
+                pass
+                
     if target_type is ID or "id" == type_str.rsplit(".", 1)[-1]:
         return ID(value)
 

@@ -129,8 +129,12 @@ class MongoDialect:
             return value.isoformat()
 
         if target_type is Decimal or isinstance(value, Decimal):
-            if isinstance(value, (Decimal, int, float, str)):
-                return float(value)
+            if isinstance(value, Decimal):
+                if "Decimal128" in globals():
+                    return Decimal128(value)
+                return value
+            if isinstance(value, (int, float, str)):
+                return Decimal128(str(value)) if "Decimal128" in globals() else float(value)
             return value
 
         if target_type is bytes and isinstance(value, (bytes, bytearray)):

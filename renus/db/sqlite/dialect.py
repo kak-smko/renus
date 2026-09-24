@@ -25,6 +25,10 @@ class SQLiteDialect(SQLDialect):
             return "INTEGER PRIMARY KEY AUTOINCREMENT"
 
         st = field_meta.storage_type
+        if st is str:
+            max_length = self._max_text_length(field_meta)
+            if max_length is not None and max_length <= 255:
+                return f"VARCHAR({max_length})"
         if isinstance(st, type):
             if issubclass(st, bool):
                 return "INTEGER"

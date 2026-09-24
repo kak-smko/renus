@@ -25,6 +25,10 @@ class MySQLDialect(SQLDialect):
             return "INT AUTO_INCREMENT PRIMARY KEY"
 
         st = field_meta.storage_type
+        if st is str:
+            max_length = self._max_text_length(field_meta)
+            if max_length is not None and max_length <= 255:
+                return f"VARCHAR({max_length})"
         if isinstance(st, type):
             if issubclass(st, bool):
                 return "TINYINT(1)"
@@ -49,5 +53,5 @@ class MySQLDialect(SQLDialect):
         if "dict" in type_name or "list" in type_name:
             return "JSON"
 
-        return "VARCHAR(255)"
+        return "LONGTEXT"
 

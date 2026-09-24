@@ -48,6 +48,17 @@ class SQLDialect(ABC):
         """Return the SQL column type for a field's metadata."""
         pass
 
+    @staticmethod
+    def _max_text_length(field_meta: FieldMetadata) -> int | None:
+        """Return a declared ``MaxLen`` value for a field, if present."""
+        validation = getattr(field_meta, "validation", None)
+        for rule in getattr(validation, "rules", ()):
+            if rule.__class__.__name__ != "MaxLen":
+                continue
+            length = getattr(rule, "l", None)
+            if isinstance(length, int):
+                return length
+        return None
 
     def _resolve_sql_type(self, col: Column) -> str:
         dialect_name = type(self).__name__.lower()
