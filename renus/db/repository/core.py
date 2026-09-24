@@ -35,7 +35,7 @@ class Repository(Generic[T]):
     def __init__(
         self,
         adapter_or_database: AsyncDatabaseAdapter | Any,
-        model: type[T],
+        model: type[Model],
         connection_name: str = "primary",
     ) -> None:
         """Resolve the backend adapter and prepare the repository.
@@ -386,11 +386,7 @@ class Repository(Generic[T]):
             res = await self._execute_mutation(del_many_ast)
             return res.rows_affected
 
-    async def restore(
-        self,
-        target_or_condition: T | Condition,
-        *conditions: Condition,
-    ) -> int:
+    async def restore(self,target_or_condition: T | Condition,*conditions: Condition,) -> int:
         """Restore matching soft-deleted rows and return rows affected."""
         meta = getattr(self.model, "__db_metadata__", None)
         if not meta or not meta.soft_delete:
@@ -483,67 +479,6 @@ class Repository(Generic[T]):
         """Return whether any row matches the given conditions."""
         return await self.query(*conditions).exists()
 
-    async def _query(self, ast: QueryAST) -> list[Any]:
-        """Execute the complete AST in the adapter."""
-        rows = await self.adapter.execute_query(ast)
-
-        if ast.projection or ast.aggregates:
-            result_dicts: list[dict[str, Any]] = []
-            for r in rows:
-                if not isinstance(r, dict):
-                    raise ValidationError(f"Adapter response must be in dict format, got {type(r).__name__}")
-                result_dicts.append(dict(r))
-            return result_dicts
-
-        meta = getattr(self.model, "__db_metadata__", None)
-        rel_names = set(meta.relationships.keys()) if meta else set()
-        included_paths = {include.path.parts for include in ast.includes}
-        objects: list[T] = []
-        for r in rows:
-            if isinstance(r, self.model):
-                obj = r
-            else:
-                if not isinstance(r, dict):
-                    raise ValidationError(
-                        f"Adapter response must be in dict format, got {type(r).__name__}"
-                    )
-
-                data = dict(r)
-                if rel_names:
-                    included_relationships = {
-                        path[0] for path in included_paths if path
-                    }
-                    for rname, relationship in meta.relationships.items():
-                        if (
-                            getattr(relationship, "is_embedded", False)
-                            and getattr(relationship, "target", None) not in (dict, list)
-                            and getattr(relationship.loading, "value", relationship.loading)
-                            == "lazy"
-                            and rname not in included_relationships
-                            and getattr(self.adapter, "nested_documents", False)
-                        ):
-                            data.pop(rname, None)
-                            #todo handle this by select in adapter
-                    for rname in rel_names:
-                        if rname not in data:
-                            rel = meta.relationships[rname]
-                            if getattr(rel, "target", None) is dict:
-                                data[rname] = {}
-                            elif getattr(rel, "is_collection", False):
-                                data[rname] = []
-                            else:
-                                data[rname] = None
-                model_cls: Any = self.model
-                obj = model_cls(data)
-
-            if hasattr(obj, "_mark_persisted"):
-                getattr(obj, "_mark_persisted")()
-            objects.append(obj)
-
-        for obj in objects:
-            self._mark_joined_persisted(obj)
-        return objects
-
     def _mark_joined_persisted(self, obj: Any) -> None:
         """Mark models materialized by an adapter join as persisted recursively."""
         if hasattr(obj, "_mark_persisted"):
@@ -558,7 +493,6 @@ class Repository(Generic[T]):
                     self._mark_joined_persisted(child)
             elif value is not None and not isinstance(value, (dict, list)):
                 self._mark_joined_persisted(value)
-
 
     async def _count(self, ast: QueryAST) -> int:
         count_ast = replace(
@@ -583,14 +517,79 @@ class Repository(Generic[T]):
         rows = await self._query(exists_ast)
         return len(rows) > 0
 
+    async def _query(self, ast: QueryAST) -> list[Any]:
+        """Execute the complete AST in the adapter."""
+        plugins = self._db.plugins if self._db is not None else None
+        context: dict[str, Any] = {}
+        try:
+            if plugins is not None:
+                await plugins.dispatch_before_query(ast, context)
+            rows = await self.adapter.execute_query(ast)
+
+            if ast.projection or ast.aggregates:
+                result_dicts: list[dict[str, Any]] = []
+                for r in rows:
+                    if not isinstance(r, dict):
+                        raise ValidationError(
+                            f"Adapter response must be in dict format, got {type(r).__name__}"
+                        )
+                    result_dicts.append(dict(r))
+                return result_dicts
+
+            meta = getattr(self.model, "__db_metadata__", None)
+            rel_names = set(meta.relationships.keys()) if meta else set()
+            objects: list[T] = []
+            for r in rows:
+                if isinstance(r, self.model):
+                    obj = r
+                else:
+                    if not isinstance(r, dict):
+                        raise ValidationError(
+                            f"Adapter response must be in dict format, got {type(r).__name__}"
+                        )
+
+                    data = dict(r)
+                    if rel_names:
+                        for rname in rel_names:
+                            if rname not in data:
+                                rel = meta.relationships[rname]
+                                if getattr(rel, "target", None) is dict:
+                                    data[rname] = {}
+                                elif getattr(rel, "is_collection", False):
+                                    data[rname] = []
+                                else:
+                                    data[rname] = None
+                    model_cls: Any = self.model
+                    obj = model_cls(data)
+
+                if hasattr(obj, "_mark_persisted"):
+                    getattr(obj, "_mark_persisted")()
+                objects.append(obj)
+
+            for obj in objects:
+                self._mark_joined_persisted(obj)
+
+            if plugins is not None:
+                await plugins.dispatch_after_query(ast, objects, context)
+            return objects
+        except Exception as error:
+            if plugins is not None:
+                await plugins.dispatch_error(error, context)
+            raise
+
     async def _execute_mutation(self, ast: MutationAST) -> MutationResult:
         plugins = self._db.plugins if self._db is not None else None
         context: dict[str, Any] = {}
-        if plugins is not None:
-            await plugins.dispatch_before_mutation(ast, context)
+        try:
+            if plugins is not None:
+                await plugins.dispatch_before_mutation(ast, context)
 
-        result = await self.adapter.execute_mutation(ast)
+            result = await self.adapter.execute_mutation(ast)
 
-        if plugins is not None:
-            await plugins.dispatch_after_mutation(ast, result, context)
-        return result
+            if plugins is not None:
+                await plugins.dispatch_after_mutation(ast, result, context)
+            return result
+        except Exception as error:
+            if plugins is not None:
+                await plugins.dispatch_error(error, context)
+            raise

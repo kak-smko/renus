@@ -93,6 +93,19 @@ def test_mongo_compiler_logical_combinations():
     compiled_not = compiler.compile_query(q_not)
     assert "$nor" in compiled_not.filter
 
+def test_mongo_compiler_excludes_unloaded_embedded_models():
+    compiler = MongoCompiler()
+    repo = Repository(MongoDBAdapter(), AccountDoc)
+
+    compiled = compiler.compile_query(repo.query().ast)
+    assert compiled.projection == {"profile": 0, "items": 0}
+
+    included = compiler.compile_query(
+        repo.query().include(AccountDoc.profile).ast
+    )
+    assert included.projection == {"items": 0}
+
+
 def test_mongo_compiler_nested_paths_and_elemmatch():
     compiler = MongoCompiler()
     repo = Repository(MongoDBAdapter(), AccountDoc)

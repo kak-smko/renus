@@ -71,8 +71,8 @@ class RelationshipCoordinator:
 
 
     @asynccontextmanager
-    async def _atomic(self) -> AsyncIterator[None]:
-        if self.adapter._in_active_transaction():
+    async def _atomic(self,required: bool = True) -> AsyncIterator[None]:
+        if not required or self.adapter._in_active_transaction():
             yield
             return
         async with Transaction(self.adapter):
@@ -434,14 +434,15 @@ class RelationshipCoordinator:
             d["parent_id"] = parent_id
             records.append(d)
 
-        async with self._atomic():
+        required=len(records)>0
+        async with self._atomic(required):
             del_ast = DeleteMany(
                 source=embedded_source,
                 filters=(Path(embedded_source, ("parent_id",)) == parent_id,),
             )
             await self.adapter.execute_mutation(del_ast)
 
-            if records:
+            if required:
                 ins_many = InsertMany(source=embedded_source, records=records)
                 await self.adapter.execute_mutation(ins_many)
 
@@ -487,22 +488,21 @@ class RelationshipCoordinator:
             else f"{parent_meta.table}_{rel_name}"
         )
         embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
-
-        async with self._atomic():
+        required= data is not None and len(data.items())>0
+        async with self._atomic(required):
             del_ast = DeleteMany(
                 source=embedded_source,
                 filters=(Path(embedded_source, ("parent_id",)) == parent_id,),
             )
             await self.adapter.execute_mutation(del_ast)
 
-            if not data:
-                return
-            records = [
-                {"parent_id": parent_id, "key": _string_value(k), "value": _string_value(v)}
-                for k, v in data.items()
-            ]
-            ins = InsertMany(source=embedded_source, records=records)
-            await self.adapter.execute_mutation(ins)
+            if required:
+                records = [
+                    {"parent_id": parent_id, "key": _string_value(k), "value": _string_value(v)}
+                    for k, v in data.items()
+                ]
+                ins = InsertMany(source=embedded_source, records=records)
+                await self.adapter.execute_mutation(ins)
 
     async def _persist_raw_embedded_many(
         self,
@@ -525,14 +525,14 @@ class RelationshipCoordinator:
             for idx, item in enumerate(items)
         ]
 
-        async with self._atomic():
+        async with self._atomic(len(records)>0):
             del_ast = DeleteMany(
                 source=embedded_source,
                 filters=(Path(embedded_source, ("parent_id",)) == parent_id,),
             )
             await self.adapter.execute_mutation(del_ast)
 
-            if records:
+            if len(records)>0:
                 ins = InsertMany(source=embedded_source, records=records)
                 await self.adapter.execute_mutation(ins)
 
@@ -748,370 +748,3 @@ class RelationshipCoordinator:
             return row.get(pk)
         return getattr(row, pk, None)
 
-    async def load_includes(self, objects: list[Any], includes: tuple[Include, ...]) -> None:
-        """Eagerly load the requested relationships onto the given objects."""
-        if not objects or not includes:
-            return
-
-        meta = getattr(self.model, "__db_metadata__", None)
-        if not meta:
-            return
-
-        parent_pk = meta.primary_key_field
-        parent_ids = [getattr(o, parent_pk) for o in objects if getattr(o, parent_pk, None) is not None]
-        if not parent_ids:
-            return
-
-        for inc in includes:
-            rel_name = inc.path.parts[0]
-            rel = meta.relationships.get(rel_name)
-            if not rel:
-                continue
-
-            if rel.kind == RelationshipKind.EMBEDDED_ONE:
-                if not self.adapter.nested_documents:
-                    await self._load_embedded_one_batch(meta, rel_name, rel, parent_ids, objects)
-                if not self.adapter.nested_documents and inc.nested:
-                    await self._load_nested_embedded(
-                        objects,
-                        rel_name,
-                        inc.nested,
-                        parent_ids,
-                        f"{meta.table}_{rel_name}",
-                    )
-
-            elif rel.kind == RelationshipKind.EMBEDDED_MANY:
-                if not self.adapter.nested_documents:
-                    await self._load_embedded_many_batch(meta, rel_name, rel, parent_ids, objects)
-                if not self.adapter.nested_documents and inc.nested:
-                    await self._load_nested_embedded(
-                        objects,
-                        rel_name,
-                        inc.nested,
-                        parent_ids,
-                        f"{meta.table}_{rel_name}",
-                    )
-
-            elif rel.kind == RelationshipKind.ONE_TO_MANY:
-                await self._load_one_to_many_batch(meta, rel_name, rel, parent_ids, objects, inc)
-
-            elif rel.kind == RelationshipKind.MANY_TO_ONE:
-                await self._load_many_to_one_batch(meta, rel_name, rel, objects, inc)
-
-            elif rel.kind == RelationshipKind.ONE_TO_ONE:
-                await self._load_one_to_one_batch(meta, rel_name, rel, parent_ids, objects, inc)
-
-            elif rel.kind == RelationshipKind.MANY_TO_MANY:
-                await self._load_many_to_many_batch(meta, rel_name, rel, parent_ids, objects, inc)
-
-    async def _load_many_to_many_batch(
-        self,
-        meta: Any,
-        rel_name: str,
-        rel: Any,
-        parent_ids: list[Any],
-        objects: list[Any],
-        inc: Include,
-    ) -> None:
-        """Eagerly load many-to-many targets onto the given objects.
-        """
-        through_table = rel.through
-        if not through_table:
-            return
-
-        target_meta = self._mtm_target_meta(rel)
-        if target_meta is None:
-            return
-        target_cls = target_meta.model
-
-        target_pk = target_meta.primary_key_field
-        local_col, foreign_col = _junction_columns(meta, rel, target_meta)
-        junction_source = _junction_source(through_table)
-
-        q_ast = QueryAST(
-            source=junction_source,
-            filters=(Path(junction_source, (local_col,)).in_(parent_ids),),
-        )
-        rows = await self.adapter.execute_query(q_ast)
-
-        links: dict[Any, list[Any]] = {pid: [] for pid in parent_ids}
-        for r in rows:
-            row_dict = dict(r)
-            pid = row_dict.get(local_col)
-            fk_val = row_dict.get(foreign_col)
-            if pid in links and fk_val is not None:
-                links[pid].append(fk_val)
-
-        all_target_ids = list({fk for fks in links.values() for fk in fks})
-        target_map: dict[Any, Any] = {}
-        if all_target_ids:
-            target_repo = self.repo.__class__(
-                self.adapter, target_cls, self.repo.connection_name
-            )
-            filter_cond: Condition = Path(target_cls, (target_pk,)).in_(all_target_ids)
-            if inc.filter is not None:
-                filter_cond = filter_cond & inc.filter
-            q = target_repo.query(filter_cond)
-            if inc.nested:
-                q = q.include(*inc.nested)
-            targets = await q.all()
-            target_map = {getattr(t, target_pk): t for t in targets}
-
-        for obj in objects:
-            pid = getattr(obj, meta.primary_key_field, None)
-            fks = links.get(pid, [])
-            object.__setattr__(
-                obj,
-                rel_name,
-                [target_map[fk] for fk in fks if fk in target_map],
-            )
-
-    async def _load_nested_embedded(
-        self,
-        objects: list[Any],
-        rel_name: str,
-        includes: tuple[Include, ...],
-        parent_ids: list[Any],
-        table_prefix: str,
-    ) -> None:
-        children: list[Any] = []
-        for obj in objects:
-            value = getattr(obj, rel_name, None)
-            if isinstance(value, list):
-                children.extend(value)
-            elif value is not None:
-                children.append(value)
-        if not children:
-            return
-
-        child_meta = getattr(children[0], "__db_metadata__", None)
-        if child_meta is None:
-            return
-        for inc in includes:
-            nested_name = inc.path.parts[0]
-            nested_rel = child_meta.relationships.get(nested_name)
-            if nested_rel is None:
-                continue
-            if nested_rel.kind == RelationshipKind.EMBEDDED_ONE:
-                await self._load_embedded_one_batch(
-                    child_meta,
-                    nested_name,
-                    nested_rel,
-                    parent_ids,
-                    children,
-                    table_prefix=table_prefix,
-                )
-            elif nested_rel.kind == RelationshipKind.EMBEDDED_MANY:
-                await self._load_embedded_many_batch(
-                    child_meta,
-                    nested_name,
-                    nested_rel,
-                    parent_ids,
-                    children,
-                    table_prefix=table_prefix,
-                )
-            if inc.nested:
-                await self._load_nested_embedded(
-                    children,
-                    nested_name,
-                    inc.nested,
-                    parent_ids,
-                    f"{table_prefix}_{nested_name}",
-                )
-
-    def _hydrate_embedded_target(self, target_cls: type, row: dict[str, Any]) -> Any:
-        """Hydrate an embedded model row and initialize unloaded relationships.
-        """
-        target_meta = getattr(target_cls, "__db_metadata__", None)
-        data = self.adapter.decode_row(dict(row), target_meta)
-        if target_meta is not None:
-            for nested_name, nested_rel in target_meta.relationships.items():
-                if nested_name in data:
-                    continue
-                if nested_rel.target is dict:
-                    data[nested_name] = {}
-                elif nested_rel.target is list:
-                    data[nested_name] = []
-        return target_cls(data)
-
-    async def _load_embedded_one_batch(
-        self,
-        meta: Any,
-        rel_name: str,
-        rel: Any,
-        parent_ids: list[Any],
-        objects: list[Any],
-        *,
-        table_prefix: str | None = None,
-    ) -> None:
-        table_name = f"{table_prefix}_{rel_name}" if table_prefix else f"{meta.table}_{rel_name}"
-        embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
-
-        q_ast = QueryAST(
-            source=embedded_source,
-            filters=(Path(embedded_source, ("parent_id",)).in_(parent_ids),),
-        )
-        rows = await self.adapter.execute_query(q_ast)
-
-        if rel.target is dict:
-            maps: dict[Any, dict[str, Any]] = {pid: {} for pid in parent_ids}
-            for r in rows:
-                row_dict = dict(r)
-                pid = row_dict.pop("parent_id", None)
-                if pid in maps:
-                    maps[pid][str(row_dict.get("key"))] = _string_parse(row_dict.get("value"))
-            for obj in objects:
-                pid = getattr(obj, meta.primary_key_field, None)
-                object.__setattr__(obj, rel_name, maps.get(pid, {}))
-            return
-
-        target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
-        child_map: dict[Any, Any] = {}
-        for r in rows:
-            row_dict = dict(r)
-            pid = row_dict.pop("parent_id", None)
-            if pid is not None:
-                child_map[pid] = self._hydrate_embedded_target(target_cls, row_dict)
-
-        if table_prefix and len(parent_ids) == 1 and child_map:
-            child = next(iter(child_map.values()))
-            for obj in objects:
-                object.__setattr__(obj, rel_name, child)
-        else:
-            for obj in objects:
-                pid = getattr(obj, meta.primary_key_field, None)
-                if pid in child_map:
-                    object.__setattr__(obj, rel_name, child_map[pid])
-
-    async def _load_embedded_many_batch(
-        self,
-        meta: Any,
-        rel_name: str,
-        rel: Any,
-        parent_ids: list[Any],
-        objects: list[Any],
-        *,
-        table_prefix: str | None = None,
-    ) -> None:
-        table_name = f"{table_prefix}_{rel_name}" if table_prefix else f"{meta.table}_{rel_name}"
-        embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
-
-        q_ast = QueryAST(
-            source=embedded_source,
-            filters=(Path(embedded_source, ("parent_id",)).in_(parent_ids),),
-        )
-        rows = await self.adapter.execute_query(q_ast)
-
-        if rel.target is list:
-            ordered: dict[Any, list[Any]] = {pid: [] for pid in parent_ids}
-            for r in rows:
-                row_dict = dict(r)
-                pid = row_dict.pop("parent_id", None)
-                if pid in ordered:
-                    ordered[pid].append((row_dict.get("pos", 0), _string_parse(row_dict.get("value"))))
-            for pid, items in ordered.items():
-                items.sort(key=lambda t: t[0])
-                ordered[pid] = [v for _, v in items]
-            for obj in objects:
-                pid = getattr(obj, meta.primary_key_field, None)
-                object.__setattr__(obj, rel_name, ordered.get(pid, []))
-            return
-
-        target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
-        items_map: dict[Any, list[Any]] = {pid: [] for pid in parent_ids}
-        for r in rows:
-            row_dict = dict(r)
-            pid = row_dict.pop("parent_id", None)
-            if pid in items_map:
-                items_map[pid].append(
-                    self._hydrate_embedded_target(target_cls, row_dict)
-                )
-
-        for obj in objects:
-            pid = getattr(obj, meta.primary_key_field, None)
-            object.__setattr__(obj, rel_name, list(items_map.get(pid, [])))
-
-    async def _load_one_to_many_batch(
-        self,
-        meta: Any,
-        rel_name: str,
-        rel: Any,
-        parent_ids: list[Any],
-        objects: list[Any],
-        inc: Include,
-    ) -> None:
-        target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
-        fk_name = rel.foreign_key or f"{to_plural_lower(meta.table)}_id"
-        child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
-
-        filter_cond = Path(target_cls, (fk_name,)).in_(parent_ids)
-        if inc.filter is not None:
-            filter_cond = filter_cond & inc.filter
-
-        q = child_repo.query(filter_cond)
-        if inc.nested:
-            q = q.include(*inc.nested)
-        children = await q.all()
-
-        grouped: dict[Any, list[Any]] = {pid: [] for pid in parent_ids}
-        for child in children:
-            child_fk_val = getattr(child, fk_name, None)
-            if child_fk_val in grouped:
-                grouped[child_fk_val].append(child)
-
-        for obj in objects:
-            pid = getattr(obj, meta.primary_key_field, None)
-            object.__setattr__(obj, rel_name, grouped.get(pid, []))
-
-    async def _load_many_to_one_batch(
-        self,
-        meta: Any,
-        rel_name: str,
-        rel: Any,
-        objects: list[Any],
-        inc: Include,
-    ) -> None:
-        target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
-        target_meta = getattr(target_cls, "__db_metadata__", None)
-        target_pk = target_meta.primary_key_field if target_meta else "id"
-
-        local_fk = rel.foreign_key or f"{rel_name}_id"
-        target_ids = list({getattr(o, local_fk) for o in objects if getattr(o, local_fk, None) is not None})
-        if not target_ids:
-            return
-
-        target_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
-        q = target_repo.query(Path(target_cls, (target_pk,)).in_(target_ids))
-        if inc.nested:
-            q = q.include(*inc.nested)
-        targets = await q.all()
-
-        target_map = {getattr(t, target_pk): t for t in targets}
-        for obj in objects:
-            fk_val = getattr(obj, local_fk, None)
-            if fk_val in target_map:
-                object.__setattr__(obj, rel_name, target_map[fk_val])
-
-    async def _load_one_to_one_batch(
-        self,
-        meta: Any,
-        rel_name: str,
-        rel: Any,
-        parent_ids: list[Any],
-        objects: list[Any],
-        inc: Include,
-    ) -> None:
-        target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
-        fk_name = rel.foreign_key or f"{to_plural_lower(meta.table)}_id"
-        child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
-
-        q = child_repo.query(Path(target_cls, (fk_name,)).in_(parent_ids))
-        if inc.nested:
-            q = q.include(*inc.nested)
-        children = await q.all()
-        child_map = {getattr(c, fk_name): c for c in children}
-
-        for obj in objects:
-            pid = getattr(obj, meta.primary_key_field, None)
-            if pid in child_map:
-                object.__setattr__(obj, rel_name, child_map[pid])

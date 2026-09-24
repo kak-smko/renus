@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-from importlib.metadata import entry_points
+
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -135,26 +134,6 @@ class PluginManager:
         """Remove all registered plugins."""
         self._plugins.clear()
 
-    def discover_entry_points(
-        self,
-        groups: Iterable[str] = ("db.plugins", "renus.db.plugins"),
-    ) -> int:
-        """Discover and register plugins from the given entry-point groups.
-
-        Returns the number of plugins registered.
-        """
-        discovered = 0
-        for grp in groups:
-            for ep in entry_points(group=grp):
-                try:
-                    obj = ep.load()
-                    inst = obj() if isinstance(obj, type) else obj
-                    if isinstance(inst, Plugin):
-                        self.register(inst)
-                        discovered += 1
-                except Exception:
-                    pass
-        return discovered
 
     async def dispatch_connect(self, connection: str) -> None:
         """Call the on_connect hook on every registered plugin."""

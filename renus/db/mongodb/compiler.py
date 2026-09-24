@@ -190,6 +190,7 @@ class MongoCompiler:
 
         filter_doc = self._combine_filter_parts(filter_parts)
         joined_stages, joined_names = self._joined_lookups_recursive(ast)
+        lazy_embedded_paths = self._lazy_embedded_paths(ast)
 
         if ast.aggregates:
             pipeline: list[dict[str, Any]] = [*relation_any_stages]
@@ -282,6 +283,8 @@ class MongoCompiler:
                 pipeline.append({"$skip": ast.offset})
             if ast.limit is not None:
                 pipeline.append({"$limit": ast.limit})
+            if lazy_embedded_paths:
+                pipeline.append({"$unset": list(lazy_embedded_paths)})
             if ast.projection:
                 pipeline.append({"$project": {
                     "_id": 0,
@@ -299,6 +302,8 @@ class MongoCompiler:
             projection_doc = {self._path_str(p): 1 for p in ast.projection.paths}
             if "_id" not in projection_doc:
                 projection_doc["_id"] = 0
+        elif lazy_embedded_paths:
+            projection_doc = {path: 0 for path in lazy_embedded_paths}
 
         sort_spec: list[tuple[str, int]] = []
         for o in ast.ordering:
@@ -371,6 +376,40 @@ class MongoCompiler:
             meta=meta,
             joined=tuple(joined_names),
         )
+
+    def _lazy_embedded_paths(self, ast: QueryAST) -> tuple[str, ...]:
+        """Return embedded model fields that should stay unloaded.
+
+        MongoDB stores embedded relationships in the owner document, so a lazy
+        relationship must be excluded at the database boundary rather than
+        fetched and discarded while hydrating the model. Explicit includes take
+        precedence over the relationship's loading strategy.
+        """
+        if ast.projection:
+            return ()
+
+        meta = getattr(ast.source, "__db_metadata__", None)
+        if meta is None:
+            return ()
+
+        included = {
+            include.path.parts[0]
+            for include in ast.includes
+            if include.path.parts
+        }
+        paths: list[str] = []
+        for name, relationship in meta.relationships.items():
+            loading_value = getattr(relationship, "loading", "lazy")
+            loading = getattr(loading_value, "value", loading_value)
+            target = getattr(relationship, "target", None)
+            if (
+                getattr(relationship, "is_embedded", False)
+                and target not in (dict, list)
+                and loading == "lazy"
+                and name not in included
+            ):
+                paths.append(name)
+        return tuple(paths)
 
     def _joined_lookups(self, ast: QueryAST) -> tuple[list[dict[str, Any]], list[str]]:
         """Compile automatic and explicit relationship includes into one pipeline."""

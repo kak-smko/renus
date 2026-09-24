@@ -61,6 +61,16 @@ class MockCustomAdapter(DDLFakeMixin, AsyncDatabaseAdapter):
         self.executed_mutations.append(compiled)
         return MutationResult(rows_affected=1, last_id=1)
 
+
+class FailingAdapter(MockCustomAdapter):
+    name: ClassVar[str] = "failing_test_backend"
+
+    async def execute_query(self, compiled: CompiledQuery[Any]) -> QueryResult[Any]:
+        raise RuntimeError("query execution failed")
+
+    async def execute_mutation(self, compiled: CompiledMutation) -> MutationResult:
+        raise RuntimeError("mutation execution failed")
+
 def test_adapter_registry_lifecycle():
 
     clear_adapters()
@@ -195,6 +205,22 @@ async def test_third_party_adapter_without_core_modification():
     assert len(custom_adapter.executed_queries) == 1
 
     await db.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_plugin_error_hook_receives_query_and_mutation_errors():
+    db = Database(FailingAdapter())
+    plugin = AuditLogPlugin()
+    db.use(plugin)
+    repo = db.repository(Article)
+
+    with pytest.raises(RuntimeError, match="query execution failed") as query_error:
+        await repo.query(Article.id == 1).all()
+
+    with pytest.raises(RuntimeError, match="mutation execution failed") as mutation_error:
+        await repo.update(Article.id == 1, {"title": "Updated"})
+
+    assert plugin.errors_intercepted == [query_error.value, mutation_error.value]
 
 class MutationEventPlugin(Plugin):
 
