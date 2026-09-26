@@ -139,6 +139,19 @@ class TestResponse:
         assert "Response" in repr(Response("x"))
         assert "200" in repr(Response("x"))
 
+    @pytest.mark.asyncio
+    async def test_send_does_not_mutate_transport_headers_or_body(self):
+        response = TextResponse("a" * 1000)
+        original_body = response.body
+        original_headers = list(response.raw_headers)
+        first = await _send(response, {"accept-encoding": "gzip"})
+        second = await _send(response, {"accept-encoding": "gzip"})
+
+        assert response.body == original_body
+        assert response.raw_headers == original_headers
+        assert first[0]["headers"] == second[0]["headers"]
+        assert _concat_bodies(first) == _concat_bodies(second)
+
 class TestGzipOnWire:
 
     @pytest.mark.asyncio

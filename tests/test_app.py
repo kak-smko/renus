@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from renus.app import App
-from renus.app.dispatch import serve_result
+from renus.app.dispatch0 import serve_result
 from renus.app.handlers import run_direct
 from renus.app.lifespan import run_shutdown, run_startup
 from renus.cache import Cache

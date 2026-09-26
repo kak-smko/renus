@@ -48,6 +48,8 @@ class RouteRegistry:
             if method not in self._routes[sub]:
                 self._routes[sub][method] = []
             self._routes[sub][method].append(route_entry)
+            if sub != "_":
+                self._has_subdomains = True
             self._subdomains_cache = None
             self._matcher_cache = None
 
@@ -78,9 +80,51 @@ class RouteRegistry:
                     self._matcher_cache = matcher
         return matcher
 
+    @property
+    def has_subdomains(self) -> bool:
+        """Whether any registered route requires request host inspection."""
+        return self._has_subdomains
+        
+    def resolve_fast(self, scope) -> tuple[RouteEntry, dict[str, object]] | None:
+        """Resolve a common HTTP request without constructing a ``Request``.
+
+        This internal path is limited to the default subdomain and returns the
+        registered route entry directly. The normal ``resolve`` method remains
+        the compatibility path for callers that need subdomain handling or a
+        route-result mapping.
+        """
+        method = scope.get("method")
+        if method not in _SUPPORTED_METHODS:
+            return None
+        path = scope.get("path", "/")
+        if path != "/":
+            path = path.rstrip("/")
+        if not is_safe_path(path):
+            raise RuntimeError("Invalid path: path traversal detected")
+
+        buckets = self._matcher().get("_")
+        if buckets is None:
+            return None
+        static, regexes = buckets.get(method, (None, None))
+        if static is not None:
+            entry = static.get(path)
+            if entry is not None:
+                return entry, {}
+        for regex, params, entry in regexes or ():
+            match = regex.fullmatch(path)
+            if match:
+                return entry, {
+                    name: convertor.convert(match.group(name))
+                    for name, convertor in params.items()
+                }
+        return None
+
     def resolve(self, request, scope) -> RouteResult | None:
         """Resolve a request to a matching route result, or ``None``."""
-        method = request.method
+
+        method = scope.get("method")
+        if method is None:
+            method = request.method
         if method not in _SUPPORTED_METHODS:
             return None
 
@@ -92,27 +136,30 @@ class RouteRegistry:
             raise RuntimeError("Invalid path: path traversal detected")
 
         routes = self._matcher()
-
-        subs = (getattr(request, "subdomain", "_"), "_") if self._has_subdomains else ("_",)
-        for sub in subs:
-            buckets = routes.get(sub)
+        if self._has_subdomains:
+            buckets = routes.get(getattr(request, "subdomain", "_"))
             if buckets is None:
-                continue
-            spec = buckets.get(method)
-            if spec is None:
-                continue
-            static, regexes = spec
-            entry = static.get(path)
-            if entry is not None:
-                return _build_result(entry, {})
-            for regex, params, route in regexes:
-                match = regex.fullmatch(path)
-                if match:
-                    args = {
-                        name: convertor.convert(match.group(name))
-                        for name, convertor in params.items()
-                    }
-                    return _build_result(route, args)
+                buckets = routes.get("_")
+        else:
+            buckets = routes.get("_")
+
+        if buckets is None:
+            return None
+        spec = buckets.get(method)
+        if spec is None:
+            return None
+        static, regexes = spec
+        entry = static.get(path)
+        if entry is not None:
+            return _build_result(entry, {})
+        for regex, params, route in regexes:
+            match = regex.fullmatch(path)
+            if match:
+                args = {
+                    name: convertor.convert(match.group(name))
+                    for name, convertor in params.items()
+                }
+                return _build_result(route, args)
 
         return None
 

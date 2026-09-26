@@ -90,20 +90,31 @@ class Response:
         headers:
             Optional user-supplied headers merged with the computed ones.
         """
+        content_type = self.media_type
+
+        if headers is None and not self.encrypt:
+            self.raw_headers = (
+                []
+                if content_type is None
+                else [(b"content-type", _encode_content_type(content_type, self.charset))]
+            )
+            return
+
         populate_content_type = True
         raw_headers: list[tuple[bytes, bytes]] = []
 
         if headers is not None:
             for key, value in headers.items():
-                if key.lower() not in ("content-length", "cache-control"):
-                    if self.encrypt and key.lower() == "content-type":
-                        raw_headers.append((b"real-type", value.encode("utf-8")))
+                lower_key = key.lower()
+                if lower_key not in ("content-length", "cache-control"):
+                    encoded_value = value.encode("utf-8")
+                    if self.encrypt and lower_key == "content-type":
+                        raw_headers.append((b"real-type", encoded_value))
                     else:
-                        raw_headers.append((key.lower().encode("utf-8"), value.encode("utf-8")))
-                if key.lower() == "content-type":
+                        raw_headers.append((lower_key.encode("utf-8"), encoded_value))
+                if lower_key == "content-type":
                     populate_content_type = False
 
-        content_type = self.media_type
         if content_type is not None and populate_content_type:
             ct_bytes = _encode_content_type(content_type, self.charset)
             if self.encrypt:
@@ -160,28 +171,47 @@ class Response:
 
     async def __call__(self, request, scope, receive, send) -> None:
         """Encode and send the response over the ASGI interface."""
-        headers = request.headers
+        body = self.body
+        raw_headers = self.raw_headers
+
+        accepts_gzip = False
+        if len(body) > GZIP_MIN_LENGTH:
+            request_headers = scope.get("headers") if scope else None
+            if request_headers is not None:
+                for name, value in request_headers:
+                    if name.lower() == b"accept-encoding":
+                        accepts_gzip = b"gzip" in value
+                        break
+            else:
+                accepts_gzip = "gzip" in request.headers.get("accept-encoding", "")
+
         if self.encrypt:
             try:
-                self.body = self.cryptor(request=request).encrypt(self.body)
+                body = self.cryptor(request=request).encrypt(body)
             except Exception:
                 self.encrypt = False
                 self.init_headers()
-        if "gzip" in headers.get("accept-encoding", "") and len(self.body) > GZIP_MIN_LENGTH:
+                raw_headers = self.raw_headers
+        if accepts_gzip and len(body) > GZIP_MIN_LENGTH:
             gzip_streamer = GzipStreamer()
-            self.body = gzip_streamer.write(self.body) + gzip_streamer.finish()
-            self.raw_headers.append((b"content-encoding", _CONTENT_ENCODING_GZIP))
+            body = gzip_streamer.write(body) + gzip_streamer.finish()
+            content_encoding = _CONTENT_ENCODING_GZIP
         else:
-            self.raw_headers.append((b"content-encoding", _CONTENT_ENCODING_NONE))
-        self.raw_headers.append((b"content-length", str(len(self.body)).encode("utf-8")))
+            content_encoding = _CONTENT_ENCODING_NONE
+
+        response_headers = [
+            *raw_headers,
+            (b"content-encoding", content_encoding),
+            (b"content-length", str(len(body)).encode("utf-8")),
+        ]
         await send(
             {
                 "type": "http.response.start",
                 "status": self.status_code,
-                "headers": self.raw_headers,
+                "headers": response_headers,
             }
         )
-        await send({"type": "http.response.body", "body": self.body})
+        await send({"type": "http.response.body", "body": body})
 
         if self.background is not None:
             await self.background()

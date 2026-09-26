@@ -8,9 +8,9 @@ except ImportError:
 from renus.config import Config
 from renus.router import Router
 
-from .dispatch import serve_http, serve_result, serve_view, serve_websocket
-from .handlers import build_endpoint, resolve_handler, resolve_routes, run_direct
-from .lifespan import build_default_lifespan, run_shutdown, run_startup, serve_lifespan
+from .dispatch import serve_http, serve_websocket
+from .handlers import build_endpoint, resolve_handler
+from .lifespan import build_default_lifespan, serve_lifespan
 
 class App:
 

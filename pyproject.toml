@@ -63,9 +63,7 @@ dev = [
     "litestar",
     "blacksheep",
     "sanic",
-    "robyn",
-    "flask",
-    "waitress",
+    "robyn"
 ]
 
 [project.scripts]
