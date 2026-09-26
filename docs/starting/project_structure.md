@@ -42,9 +42,9 @@ codenus/
 ### Backend (`app/`, `routes/`, `commands/`, `job/`)
 
 The Python backend is built on Renus and serves the API. Handler code lives under
-`app/`, HTTP routes are registered in `routes/` (e.g. `routes/index.py` and
-`routes/web.py`), custom `renus` CLI commands live in `commands/`, and scheduled or
-background work goes in `job/`.
+`app/`, route modules define `Router` instances and are explicitly mounted on the
+`App` (often from `routes/index.py`), custom `renus` CLI commands live in
+`commands/`, and scheduled or background work goes in `job/`.
 
 ### Configuration (`config/`)
 

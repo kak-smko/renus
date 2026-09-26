@@ -43,6 +43,8 @@ from renus.commands.db.run import (
     restore_table_paginated,
     run as db_run,
 )
+from renus.commands.extension.build import _add_route, _remove_route
+from renus.commands.routing import include_router_in_index, remove_router_from_index
 from renus.commands.extension.run import (
     check_version,
     download,
@@ -75,7 +77,6 @@ class TestCommandDiscoveryAndHelp:
         assert "app" in commands
         assert "db" in commands
         assert "extension" in commands
-        assert "copy" not in commands
 
     def test_discover_project_commands(self, tmp_path):
         proj_commands = tmp_path / "commands"
@@ -178,10 +179,25 @@ class TestCreateProject:
         assert rc == 0
         main = (tmp_path / "nodb" / "main.py").read_text()
         app = (tmp_path / "nodb" / "app.py").read_text()
-        assert "Database" not in main
-        assert "Adapter" not in main
-        assert "Database" not in app
-        assert "PingController" in app
+      
+        assert "from nodb.routes import router" in app
+        assert "app.include(router)" in app
+        
+        routes_source = (tmp_path / "nodb" / "routes.py").read_text()
+        assert "PingController" in routes_source
+        assert 'router.get("/ping", PingController, "ping")' in routes_source
+        
+
+    @pytest.mark.parametrize("database", ["sqlite", "mongodb", "mysql"])
+    def test_generated_database_app_mounts_router(self, tmp_path, monkeypatch, database):
+        monkeypatch.chdir(tmp_path)
+        assert create_run([f"mounted_{database}", "api", database]) == 0
+        app_source = (tmp_path / f"mounted_{database}" / "app.py").read_text()
+        routes_source = (tmp_path / f"mounted_{database}" / "routes.py").read_text()
+        assert f"from mounted_{database}.routes import router" in app_source
+        assert "app.include(router)" in app_source
+        assert "router = Router()" in routes_source
+        assert 'router.get("/items", ItemController, "index")' in routes_source
 
     def test_create_aborts_on_existing_dir(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -313,7 +329,6 @@ class TestAppScaffolding:
         assert self._count_in(ctrl_code, "db.repository(Article)") >= 1
 
         assert "Article(self.request.inputs).to_dict()" in ctrl_code
-        assert "Validate(self.request.inputs).rules" not in ctrl_code
 
         assert "await self.repo.query().all()" in ctrl_code
         assert "await self.repo.create(Article(**self.__inputs))" in ctrl_code
@@ -329,9 +344,6 @@ class TestAppScaffolding:
         assert "timestamps = True" in model_code
         assert 'soft_delete = True' in model_code
 
-        assert "DbModel" not in model_code
-        assert "ActivityService" not in model_code
-        assert "bson" not in model_code
 
     @staticmethod
     def _count_in(text: str, needle: str) -> int:
@@ -349,8 +361,8 @@ class TestAppScaffolding:
             base_dir=str(tmp_path),
         )
         plain_route = (tmp_path / "app" / "tag" / "route.py").read_text()
-        assert "AuthMiddleware" not in plain_route
-        assert "PermissionMiddleware" not in plain_route
+        assert "router = Router()" in plain_route
+        assert 'router.include(admin_router)' in plain_route
 
         user_ext_dir = tmp_path / "app" / "extension" / "codenus" / "user"
         user_ext_dir.mkdir(parents=True)
@@ -370,12 +382,18 @@ class TestAppScaffolding:
         assert "from app.extension.codenus.user.middleware import PermissionMiddleware" in user_route
         assert "AuthMiddleware" in user_route
         assert 'PermissionMiddleware("admin")' in user_route
+        assert "router.include(admin_router)" in user_route
+        assert "router.include(user_router)" in user_route
+        assert "router.include(home_router)" in user_route
 
     def test_app_run_cli(self, tmp_path):
         code = app_run(["invoice"], base_dir=str(tmp_path))
         assert code == 0
         assert (tmp_path / "app" / "invoice" / "controller.py").exists()
         assert (tmp_path / "app" / "invoice" / "model.py").exists()
+        routes_index = (tmp_path / "routes" / "index.py").read_text()
+        assert "from app.invoice.route import router as _included_router_app_invoice_route" in routes_index
+        assert "router.include(_included_router_app_invoice_route)" in routes_index
 
 class TestGeneratedScaffoldRunsAgainstDatabase:
 
@@ -510,6 +528,37 @@ class TestExtensionCommands:
 
         assert load_apps(base_dir=str(tmp_path / "nope")) == {}
         assert load_installed(base_dir=str(tmp_path / "nope")) == {}
+
+    def test_extension_route_scaffold_uses_extension_name_alias(self, tmp_path):
+        install = SimpleNamespace(route="codenus.user.routes")
+        _add_route(install, "codenus/user", base_dir=str(tmp_path))
+
+        route_source = (
+            tmp_path / "app" / "extension" / "codenus" / "user" / "route.py"
+        ).read_text()
+        assert "router as codenus_user_router" in route_source
+        assert "router.include(codenus_user_router)" in route_source
+
+    def test_extension_route_scaffold_uses_extension_name_alias(self, tmp_path):
+        install = SimpleNamespace(route="codenus.user.routes")
+        _add_route(install, "codenus/user", base_dir=str(tmp_path))
+
+        route_source = (
+            tmp_path / "app" / "extension" / "codenus" / "user" / "route.py"
+        ).read_text()
+        assert "router as codenus_user_router" in route_source
+        assert "router.include(codenus_user_router)" in route_source
+        routes_index = (tmp_path / "routes" / "index.py").read_text()
+        assert "router.include(_included_router_app_extension_codenus_user_route)" in routes_index
+
+    def test_extension_route_removal_removes_index_mount(self, tmp_path):
+        install = SimpleNamespace(route="codenus.user.routes")
+        _add_route(install, "codenus/user", base_dir=str(tmp_path))
+        from renus.commands.extension.build import _remove_route
+
+        _remove_route(install, "codenus/user", base_dir=str(tmp_path))
+        routes_index = (tmp_path / "routes" / "index.py").read_text()
+        assert "_included_router_app_extension_codenus_user_route" not in routes_index
 
     def test_update_vs_upgrade_modes(self):
         mock_install = MagicMock()

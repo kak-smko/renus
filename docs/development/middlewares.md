@@ -2,35 +2,21 @@
 
 Middlewares let you run code on every request, or on a specific route, before the route handler is invoked. They are useful for authentication, authorization, request logging, rate limiting, or rewriting request arguments.
 
-Renus has two independent middleware mechanisms:
-
-1. **Request middlewares** — functions registered on the `App`, a `Router`, or an individual route. These run as part of the route dispatch and can either pass the request on (by calling the next handler) or short-circuit it by returning a value of their own.
-2. **ASGI middlewares** — passed to `App(middlewares=[...])` as wrapper callables that wrap the whole ASGI app.
-
-This page focuses on request middlewares, which are the most common. The ASGI-middleware list passed to `App` also feeds the request-middleware chain (see below).
+Renus request middlewares are registered on a `Router`, when mounting a router, or on an individual route. They run as part of route dispatch and can either pass the request on (by calling the next handler) or short-circuit it by returning a value of their own.
 
 ## Registering middlewares
 
-Middlewares can be attached at three levels.
-
-### App-level (every request)
-
-Pass a list of middlewares to the `App` constructor. They apply to every request.
-
-```python
-from renus.app import App
-
-app = App(middlewares=[AuthMiddleware])
-```
+Middlewares can be attached at the router or route level.
 
 ### Router-level
 
-A `Router` can carry middlewares that apply to all routes registered on it (and on groups created from it):
+A `Router` can carry middlewares that apply to all of its routes and included child routers. The app can also add middleware when mounting a router:
 
 ```python
 from renus.router import Router
 
-v1 = Router(prefix='/api/v1', middlewares=[AuthMiddleware])
+v1 = Router(middlewares=[AuthMiddleware])
+app.include(v1, prefix='/api/v1', middlewares=[TimingMiddleware])
 ```
 
 ### Route-level
@@ -43,7 +29,7 @@ def profile():
     return JsonResponse({'ok': True})
 ```
 
-Middlewares are combined in order — app-level list, then router/route-level list — and the whole chain runs before the handler. See [Application](/docs/development/app.md) and [Routing](/docs/development/routing.md) for how these register on each API.
+Middlewares are combined in order — mounted/router/include-level lists, then route-level list — and the whole chain runs before the handler. See [Application](/docs/development/app.md) and [Routing](/docs/development/routing.md) for how these register on each API.
 
 ## Two middleware signatures
 

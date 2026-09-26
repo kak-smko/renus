@@ -32,18 +32,19 @@ def _create_mock_request(method="GET", subdomain="_"):
     request.subdomain = subdomain
     return request
 
-@pytest.fixture(autouse=True)
-def reset_registry():
-    RouteRegistry.reset()
-    yield
-    RouteRegistry.reset()
+
+def _router_registry(router):
+    registry = RouteRegistry()
+    for subdomain, method, route in router._iter_routes():
+        registry.register(subdomain, method, route)
+    return registry
 
 class TestRouteRegistry:
 
-    def test_singleton_returns_same_instance(self):
+    def test_registries_are_independent(self):
         registry1 = RouteRegistry()
         registry2 = RouteRegistry()
-        assert registry1 is registry2
+        assert registry1 is not registry2
 
     def test_register_route(self):
         registry = RouteRegistry()
@@ -272,14 +273,16 @@ class TestRouter:
         assert router._prefix == ""
         assert router._middlewares == []
         assert router._subdomain == "_"
-        assert router._registry is not None
+        assert router._routes == []
+        assert router._included == []
 
     def test_get_route(self):
         router = Router()
         controller = _create_mock_controller()
         router.get("/users", controller, "index")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
+        assert RouteRegistry().all == {}
         assert "GET" in registry.all["_"]
         assert len(registry.all["_"]["GET"]) == 1
 
@@ -288,7 +291,7 @@ class TestRouter:
         controller = _create_mock_controller()
         router.post("/users", controller, "store")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         assert "POST" in registry.all["_"]
         assert len(registry.all["_"]["POST"]) == 1
 
@@ -297,7 +300,7 @@ class TestRouter:
         controller = _create_mock_controller()
         router.put("/users/{id:int}", controller, "update")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         assert "PUT" in registry.all["_"]
         assert len(registry.all["_"]["PUT"]) == 1
 
@@ -306,7 +309,7 @@ class TestRouter:
         controller = _create_mock_controller()
         router.delete("/users/{id:int}", controller, "delete")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         assert "DELETE" in registry.all["_"]
         assert len(registry.all["_"]["DELETE"]) == 1
 
@@ -315,7 +318,7 @@ class TestRouter:
         controller = _create_mock_controller()
         router.head("/users", controller, "head")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         assert "HEAD" in registry.all["_"]
         assert len(registry.all["_"]["HEAD"]) == 1
 
@@ -324,7 +327,7 @@ class TestRouter:
         controller = _create_mock_controller()
         router.option("/users", controller, "options")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         assert "OPTIONS" in registry.all["_"]
         assert len(registry.all["_"]["OPTIONS"]) == 1
 
@@ -333,7 +336,7 @@ class TestRouter:
         controller = _create_mock_controller()
         router.ws("/chat", controller, "handle")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         assert "WS" in registry.all["_"]
         assert len(registry.all["_"]["WS"]) == 1
 
@@ -342,7 +345,7 @@ class TestRouter:
         controller = _create_mock_controller()
         router.crud("/users", controller)
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
 
         assert "GET" in registry.all["_"]
         get_routes = [r for r in registry.all["_"]["GET"] if r["path"] == "/users"]
@@ -373,7 +376,7 @@ class TestRouter:
         controller = _create_mock_controller()
         router.mcud("/users", controller)
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
 
         assert "POST" in registry.all["_"]
         post_routes = [r for r in registry.all["_"]["POST"] if r["path"] == "/users"]
@@ -397,7 +400,7 @@ class TestRouter:
         controller = _create_mock_controller()
         router.get("/users", controller, "index")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         routes = registry.all["_"]["GET"]
         assert routes[0]["path"] == "/api/v1/users"
 
@@ -408,7 +411,7 @@ class TestRouter:
         controller = _create_mock_controller()
         router.get("/users", controller, "index", middlewares=[middleware2])
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         routes = registry.all["_"]["GET"]
         assert middleware1 in routes[0]["middlewares"]
         assert middleware2 in routes[0]["middlewares"]
@@ -418,7 +421,7 @@ class TestRouter:
         controller = _create_mock_controller()
         router.get("/users", controller, "index")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         assert "api" in registry.all
         assert "GET" in registry.all["api"]
 
@@ -440,7 +443,7 @@ class TestRouterGroups:
         controller = _create_mock_controller()
         group.get("/users", controller, "index")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         routes = registry.all["_"]["GET"]
         assert routes[0]["path"] == "/api/v1/users"
 
@@ -454,7 +457,7 @@ class TestRouterGroups:
         controller = _create_mock_controller()
         group.get("/users", controller, "index")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         routes = registry.all["_"]["GET"]
         assert middleware1 in routes[0]["middlewares"]
         assert middleware2 in routes[0]["middlewares"]
@@ -467,7 +470,7 @@ class TestRouterGroups:
         controller = _create_mock_controller()
         admin_group.get("/users", controller, "index")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         routes = registry.all["_"]["GET"]
         assert routes[0]["path"] == "/api/v1/admin/users"
 
@@ -481,7 +484,7 @@ class TestRouterGroups:
         controller = _create_mock_controller()
         level4.get("/daily", controller, "index")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         routes = registry.all["_"]["GET"]
         assert routes[0]["path"] == "/api/v1/admin/reports/daily"
 
@@ -494,7 +497,7 @@ class TestRouterGroups:
         public_group.get("/posts", controller, "index")
         admin_group.get("/users", controller, "index")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         routes = registry.all["_"]["GET"]
         paths = [r["path"] for r in routes]
         assert "/api/public/posts" in paths
@@ -507,7 +510,7 @@ class TestRouterGroups:
         controller = _create_mock_controller()
         group.get("/users", controller, "index")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         assert "api" in registry.all
         assert "GET" in registry.all["api"]
 
@@ -551,7 +554,7 @@ class TestCacheConfiguration:
         controller = _create_mock_controller()
         router.get("/users", controller, "index", cache=300)
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         routes = registry.all["_"]["GET"]
         assert routes[0]["cache"] == 300
 
@@ -560,7 +563,7 @@ class TestCacheConfiguration:
         controller = _create_mock_controller()
         router.post("/users", controller, "store")
 
-        registry = RouteRegistry()
+        registry = _router_registry(router)
         routes = registry.all["_"]["POST"]
         assert "cache" not in routes[0] or routes[0].get("cache") is None
 
@@ -603,7 +606,14 @@ class TestAppRouteDecorator:
     def _app(self):
         return __import__("renus.app", fromlist=["App"]).App()
 
-    def test_route_registers_in_registry(self):
+    def test_apps_have_independent_route_registries(self):
+        first = self._app()
+        second = self._app()
+        first.route("/only-first")(lambda: "ok")
+        assert first.registry.all["_"]["GET"][0]["path"] == "/only-first"
+        assert second.registry.all == {}
+
+    def test_route_registers_in_app_registry(self):
         import renus.app as app_mod
 
         app = app_mod.App()
@@ -612,8 +622,7 @@ class TestAppRouteDecorator:
         async def read_root():
             return "root"
 
-        registry = RouteRegistry()
-        routes = registry.all["_"]["GET"]
+        routes = app.registry.all["_"]["GET"]
         assert len(routes) == 1
         assert routes[0]["path"] == "/"
         assert routes[0]["func"] is read_root
@@ -629,8 +638,7 @@ class TestAppRouteDecorator:
         async def h():
             return "ok"
 
-        registry = RouteRegistry()
-        assert "GET" in registry.all["_"]
+        assert "GET" in app.registry.all["_"]
 
     def test_route_lowercase_method_is_uppercased(self):
         import renus.app as app_mod
@@ -641,9 +649,8 @@ class TestAppRouteDecorator:
         async def h():
             return "ok"
 
-        registry = RouteRegistry()
-        assert "POST" in registry.all["_"]
-        assert "post" not in registry.all["_"]
+        assert "POST" in app.registry.all["_"]
+        assert "post" not in app.registry.all["_"]
 
     def test_route_resolves_through_registry(self):
         import renus.app as app_mod
@@ -655,7 +662,7 @@ class TestAppRouteDecorator:
             return "ok"
 
         request = _create_mock_request("GET", "_")
-        result = RouteRegistry().resolve(request, {"path": "/users/7"})
+        result = app.registry.resolve(request, {"path": "/users/7"})
         assert result is not None
         assert result["func"] is get_user
         assert result["args"] == {"uid": 7}

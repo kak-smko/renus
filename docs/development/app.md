@@ -63,7 +63,7 @@ async def websocket(ws):
     await ws.close()
 ```
 
-Dynamic path segments use `{name}` (optionally typed, e.g. `{id:id}`). Under the hood, `App` maps each method to the `Router`'s fluent API, so you can also compose routes directly on `app.router` if you prefer.
+Dynamic path segments use `{name}` (optionally typed, e.g. `{id:id}`). App decorators register directly in the app's route registry. For reusable route modules, define routes on `Router` and mount them explicitly with `app.include(router, prefix=..., middlewares=...)`.
 
 ## Request injection
 
@@ -77,7 +77,7 @@ def whoami(request):
 
 ## Middlewares and caching
 
-Middleware registered on the app apply to every request; middleware passed to an individual route applies only to that route. The two are combined in order (app-level first, then route-level) when a request is dispatched. For details on writing middleware, see [Middlewares](/docs/development/middlewares.md).
+Middleware can be registered on a router, when mounting a router, or on an individual route. The chain runs during route dispatch. For details on writing middleware, see [Middlewares](/docs/development/middlewares.md).
 
 The `cache` argument enables response caching for a route for the given TTL in seconds. Cached responses are keyed by the request path and served from the cache on later requests. See [Caching](/docs/development/caching.md) for more.
 

@@ -5,12 +5,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from renus.app import App
-from renus.app.dispatch0 import serve_result
+from renus.app.dispatch import serve_result
 from renus.app.handlers import run_direct
 from renus.app.lifespan import run_shutdown, run_startup
 from renus.cache import Cache
 from renus.response import JsonResponse, Response, Status, TextResponse
-from renus.router import RouteRegistry, Router
+from renus.router import Router
 from renus.websockets import WebSocket
 
 def http_scope(path="/", method="GET", headers=None, query_string=b""):
@@ -70,6 +70,13 @@ async def echo_inputs(request):
 def boom():
     raise RuntimeError("boom")
 
+
+def app_with_router(router, middlewares=None):
+    app = App()
+    app.include(router, middlewares=middlewares)
+    return app
+
+
 @pytest.fixture(autouse=True)
 def isolated_cache(tmp_path, monkeypatch):
     from renus.cache import file as file_module
@@ -88,28 +95,22 @@ def isolated_cache(tmp_path, monkeypatch):
     file_module._conn = None
     Cache.clear_instances()
 
-@pytest.fixture(autouse=True)
-def reset_registry():
-    RouteRegistry.reset()
-    yield
-    RouteRegistry.reset()
+
 
 class TestConstruction:
     def test_defaults(self):
         app = App()
+        assert app.registry is not App().registry
         assert app.debug is False
         assert app.env == "local"
         assert app.on_startup == []
         assert app.on_shutdown == []
-        assert app.middlewares == []
 
-    def test_accepts_hooks_and_middlewares(self):
+    def test_accepts_lifecycle_hooks(self):
         hooks = [lambda: None]
-        mw = [object()]
-        app = App(on_startup=hooks, on_shutdown=hooks, middlewares=mw)
+        app = App(on_startup=hooks, on_shutdown=hooks)
         assert app.on_startup == hooks
         assert app.on_shutdown == hooks
-        assert app.middlewares == mw
 
     def test_hooks_copied_not_reused(self):
         app = App(on_startup=[lambda: None])
@@ -259,10 +260,26 @@ class TestStartupShutdown:
 
 class TestHttp:
     @pytest.mark.asyncio
+    async def test_app_decorator_registers_in_app_registry(self):
+        app = App()
+
+        @app.get("/decorated")
+        async def decorated():
+            return "decorated"
+
+        result = app.registry.resolve(None, {"method": "GET", "path": "/decorated"})
+        assert result["func"] is decorated
+
+    @pytest.mark.asyncio
     async def test_returns_handler_response(self):
-        Router().get("/ping", func=async_ok)
+        app = app_with_router(Router().get("/ping", func=async_ok))
+        other_app = App()
+        acc_other = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
+        await other_app(http_scope("/ping"), acc_other.receive, acc_other.send)
+        assert acc_other.sent[0]["status"] == Status.HTTP_404_NOT_FOUND
+
         acc = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
-        await App()(http_scope("/ping"), acc.receive, acc.send)
+        await app(http_scope("/ping"), acc.receive, acc.send)
 
         start = acc.sent[0]
         body = acc.sent[1]
@@ -273,39 +290,40 @@ class TestHttp:
 
     @pytest.mark.asyncio
     async def test_uppercases_method_before_resolution(self):
-        Router().get("/ping", func=async_ok)
+        app = app_with_router(Router().get("/ping", func=async_ok))
         acc = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
-        await App()(http_scope("/ping", "get"), acc.receive, acc.send)
+        await app(http_scope("/ping", "get"), acc.receive, acc.send)
         assert acc.sent[0]["status"] == Status.HTTP_200_OK
 
     @pytest.mark.asyncio
     async def test_unknown_method_is_not_resolved(self):
 
-        Router().get("/ping", func=async_ok)
+        app = app_with_router(Router().get("/ping", func=async_ok))
         acc = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
-        await App()(http_scope("/ping", "POST"), acc.receive, acc.send)
+        await app(http_scope("/ping", "POST"), acc.receive, acc.send)
         assert acc.sent[0]["status"] == Status.HTTP_404_NOT_FOUND
 
     @pytest.mark.asyncio
     async def test_404_when_no_route_matches(self):
+        app = App()
         acc = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
-        await App()(http_scope("/missing"), acc.receive, acc.send)
+        await app(http_scope("/missing"), acc.receive, acc.send)
         assert acc.sent[0]["status"] == Status.HTTP_404_NOT_FOUND
         assert acc.sent[1]["body"] == b"Path not Found"
 
     @pytest.mark.asyncio
     async def test_request_injected_into_handler(self):
-        Router().get("/view", func=async_ok)
+        app = app_with_router(Router().get("/view", func=async_ok))
         acc = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
-        await App()(http_scope("/view"), acc.receive, acc.send)
+        await app(http_scope("/view"), acc.receive, acc.send)
         assert acc.sent[0]["status"] == Status.HTTP_200_OK
 
     @pytest.mark.asyncio
     async def test_post_runs_form_parser(self):
-        Router().post("/submit", func=echo_inputs)
+        app = app_with_router(Router().post("/submit", func=echo_inputs))
         body = b'{"name":"x","age":3}'
         acc = _MessageAccumulator([{"type": "http.request", "body": body, "more_body": False}])
-        await App()(
+        await app(
             http_scope("/submit", "POST", headers=[(b"content-type", b"application/json")]),
             acc.receive,
             acc.send,
@@ -319,18 +337,18 @@ class TestHttp:
         async def plain():
             return "hello"
 
-        Router().get("/plain", func=plain)
+        app = app_with_router(Router().get("/plain", func=plain))
         acc = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
-        await App()(http_scope("/plain"), acc.receive, acc.send)
+        await app(http_scope("/plain"), acc.receive, acc.send)
         assert acc.sent[1]["body"] == b"hello"
 
 class TestHttpErrors:
     @pytest.mark.asyncio
     async def test_handler_exception_returns_500_and_reraises_in_local(self):
-        Router().get("/boom", func=boom)
+        app = app_with_router(Router().get("/boom", func=boom))
         acc = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
         with pytest.raises(RuntimeError):
-            await App()(http_scope("/boom"), acc.receive, acc.send)
+            await app(http_scope("/boom"), acc.receive, acc.send)
         assert acc.sent[0]["type"] == "http.response.start"
         assert acc.sent[0]["status"] == Status.HTTP_500_INTERNAL_SERVER_ERROR
         assert b"Internal Server Error" in acc.sent[1]["body"]
@@ -338,24 +356,26 @@ class TestHttpErrors:
     @pytest.mark.asyncio
     async def test_route_loading_exception_is_surfaced(self):
 
+        app = App()
         acc = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
         with pytest.raises(RuntimeError, match="path traversal"):
-            await App()(http_scope("/../etc/passwd"), acc.receive, acc.send)
+            await app(http_scope("/../etc/passwd"), acc.receive, acc.send)
 
 class TestWebSocket:
     @pytest.mark.asyncio
     async def test_route_not_found_closes_1004(self):
+        app = App()
         acc = _MessageAccumulator([{"type": "websocket.connect"}])
-        await App()(ws_scope(), acc.receive, acc.send)
+        await app(ws_scope(), acc.receive, acc.send)
         assert acc.sent and acc.sent[0]["type"] == "websocket.close"
         assert acc.sent[0]["code"] == 1004
 
     @pytest.mark.asyncio
     async def test_unresolvable_func_closes_1004(self):
 
-        Router().ws("/ws", func="missing_method")
+        app = app_with_router(Router().ws("/ws", func="missing_method"))
         acc = _MessageAccumulator([{"type": "websocket.connect"}])
-        await App()(ws_scope(), acc.receive, acc.send)
+        await app(ws_scope(), acc.receive, acc.send)
         assert acc.sent and acc.sent[0]["type"] == "websocket.close"
         assert acc.sent[0]["code"] == 1004
 
@@ -368,9 +388,9 @@ class TestWebSocket:
             handled.append(ws)
             return True
 
-        Router().ws("/ws", func=ws_handler)
+        app = app_with_router(Router().ws("/ws", func=ws_handler))
         acc = _MessageAccumulator([{"type": "websocket.connect"}])
-        await App()(ws_scope(), acc.receive, acc.send)
+        await app(ws_scope(), acc.receive, acc.send)
         assert handled, "websocket handler should have been called"
         assert acc.sent == []
 
@@ -382,16 +402,38 @@ class TestWebSocket:
         async def ws_handler(ws):
             return True
 
-        Router().ws("/ws", func=ws_handler, middlewares=[gate])
+        app = app_with_router(Router().ws("/ws", func=ws_handler, middlewares=[gate]))
         acc = _MessageAccumulator([{"type": "websocket.connect"}])
-        await App()(ws_scope(), acc.receive, acc.send)
+        await app(ws_scope(), acc.receive, acc.send)
 
         assert acc.sent and acc.sent[0]["type"] == "websocket.close"
         assert acc.sent[0]["code"] == 1003
 
 class TestMiddleware:
     @pytest.mark.asyncio
-    async def test_app_level_onion_middleware(self):
+    async def test_mounted_router_prefix_and_middleware(self):
+        order = []
+
+        async def timing(request, method, res):
+            order.append("before")
+            result = await method(**res["args"])
+            order.append("after")
+            return result
+
+        users_router = Router()
+        users_router.get("/users", func=async_ok)
+        api_router = Router()
+        api_router.include(users_router)
+        app = App()
+        app.include(api_router, prefix="/api/v1", middlewares=[timing])
+
+        acc = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
+        await app(http_scope("/api/v1/users"), acc.receive, acc.send)
+        assert order == ["before", "after"]
+        assert acc.sent[0]["status"] == Status.HTTP_200_OK
+
+    @pytest.mark.asyncio
+    async def test_mounted_router_onion_middleware(self):
         order = []
 
         async def onion(request, method, res):
@@ -400,8 +442,7 @@ class TestMiddleware:
             order.append("after")
             return resp
 
-        app = App(middlewares=[onion])
-        Router().get("/mw", func=async_ok)
+        app = app_with_router(Router().get("/mw", func=async_ok), middlewares=[onion])
         acc = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
         await app(http_scope("/mw"), acc.receive, acc.send)
         assert order == ["before", "after"]
@@ -412,8 +453,7 @@ class TestMiddleware:
         async def deny(request):
             return TextResponse("blocked", Status.HTTP_401_UNAUTHORIZED)
 
-        app = App(middlewares=[deny])
-        Router().get("/mw", func=async_ok)
+        app = app_with_router(Router().get("/mw", func=async_ok), middlewares=[deny])
         acc = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
         await app(http_scope("/mw"), acc.receive, acc.send)
         assert acc.sent[0]["status"] == Status.HTTP_401_UNAUTHORIZED
@@ -428,12 +468,12 @@ class TestCaching:
             count["n"] += 1
             return JsonResponse({"count": count["n"]})
 
-        Router().get("/cached", func=counted, cache=60)
+        app = app_with_router(Router().get("/cached", func=counted, cache=60))
         scope = http_scope("/cached")
 
         for _ in range(2):
             acc = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
-            await App()(scope, acc.receive, acc.send)
+            await app(scope, acc.receive, acc.send)
         assert count["n"] == 1
 
     @pytest.mark.asyncio
@@ -441,12 +481,12 @@ class TestCaching:
         async def counted(request):
             return JsonResponse({"count": 1})
 
-        Router().get("/cached", func=counted, cache=60)
+        app = app_with_router(Router().get("/cached", func=counted, cache=60))
         scope = http_scope("/cached")
         acc1 = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
-        await App()(scope, acc1.receive, acc1.send)
+        await app(scope, acc1.receive, acc1.send)
         acc2 = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
-        await App()(scope, acc2.receive, acc2.send)
+        await app(scope, acc2.receive, acc2.send)
         headers = dict(acc2.sent[0]["headers"])
         assert headers == {b"r-cache": b"ok"} or (b"r-cache", b"ok") in acc2.sent[0]["headers"]
 
@@ -458,11 +498,11 @@ class TestCaching:
             count["n"] += 1
             return JsonResponse({"count": count["n"]})
 
-        Router().get("/uncached", func=counted)
+        app = app_with_router(Router().get("/uncached", func=counted))
         scope = http_scope("/uncached")
         for _ in range(3):
             acc = _MessageAccumulator([{"type": "http.request", "body": b"", "more_body": False}])
-            await App()(scope, acc.receive, acc.send)
+            await app(scope, acc.receive, acc.send)
         assert count["n"] == 3
 
 class TestResolveHandler:

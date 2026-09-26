@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+from renus.commands.routing import include_router_in_index
 from renus.commands.app.temp import (
     controller_temp,
     model_temp,
@@ -90,15 +91,7 @@ def add_routes(
         pname = ".".join(folder) + "."
         vname = "/".join(folder) + "/"
 
-    routes_file = os.path.join(base_dir, "routes", "index.py")
-    if os.path.exists(routes_file):
-        with open(routes_file, "r", encoding="utf-8") as f:
-            content = f.read()
-        import_line = f"import app.{pname + name}.route\n"
-        if import_line not in content:
-            content = import_line + content
-            with open(routes_file, "w", encoding="utf-8") as f:
-                f.write(content)
+    include_router_in_index(f"app.{pname + name}.route", base_dir=base_dir)
 
     router_js = os.path.join(base_dir, "frontend", "admin", "src", "router", "index.js")
     if os.path.exists(router_js):

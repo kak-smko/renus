@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import threading
-
 from renus.router.path import is_safe_path
 
 _SUPPORTED_METHODS = ("GET", "POST", "PUT", "DELETE", "OPTIONS", "WS", "HEAD")
@@ -21,63 +19,49 @@ def _build_result(route: RouteEntry, args: dict[str, object]) -> RouteResult:
     }
 
 class RouteRegistry:
-    """Singleton registry that stores and resolves registered routes."""
+    """Instance-owned registry that stores and resolves registered routes."""
 
-    _instance: "RouteRegistry | None" = None
-    _lock = threading.Lock()
-
-    def __new__(cls) -> "RouteRegistry":
-        """Create or return the shared registry singleton."""
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    instance = super().__new__(cls)
-                    instance._routes: dict[str, dict[str, list[RouteEntry]]] = {}
-                    instance._subdomains_cache: list[str] | None = None
-                    instance._matcher_cache: dict | None = None
-                    instance._has_subdomains: bool = False
-                    cls._instance = instance
-        return cls._instance
+    def __init__(self) -> None:
+        self._routes: dict[str, dict[str, list[RouteEntry]]] = {}
+        self._subdomains_cache: list[str] | None = None
+        self._matcher_cache: dict | None = None
+        self._has_subdomains = False
 
     def register(self, subdomain: str, method: str, route_entry: RouteEntry) -> None:
         """Register a route entry for a subdomain and HTTP method."""
         sub = subdomain or "_"
-        with self._lock:
-            if sub not in self._routes:
-                self._routes[sub] = {}
-            if method not in self._routes[sub]:
-                self._routes[sub][method] = []
-            self._routes[sub][method].append(route_entry)
-            if sub != "_":
-                self._has_subdomains = True
-            self._subdomains_cache = None
-            self._matcher_cache = None
+        if sub not in self._routes:
+            self._routes[sub] = {}
+        if method not in self._routes[sub]:
+            self._routes[sub][method] = []
+        self._routes[sub][method].append(route_entry)
+        if sub != "_":
+            self._has_subdomains = True
+        self._subdomains_cache = None
+        self._matcher_cache = None
 
     def _matcher(self) -> dict:
         matcher = self._matcher_cache
         if matcher is None:
-            with self._lock:
-                matcher = self._matcher_cache
-                if matcher is None:
-                    matcher = {}
-                    has_subdomains = False
-                    for sub, methods in self._routes.items():
-                        if sub != "_":
-                            has_subdomains = True
-                        buckets: dict = {}
-                        for method, routes in methods.items():
-                            static: dict = {}
-                            regexes: list = []
-                            for entry in routes:
-                                regex, params = entry["regex"]
-                                if params:
-                                    regexes.append((regex, params, entry))
-                                else:
-                                    static[entry["path"]] = entry
-                            buckets[method] = (static, regexes)
-                        matcher[sub] = buckets
-                    self._has_subdomains = has_subdomains
-                    self._matcher_cache = matcher
+            matcher = {}
+            has_subdomains = False
+            for sub, methods in self._routes.items():
+                if sub != "_":
+                    has_subdomains = True
+                buckets: dict = {}
+                for method, routes in methods.items():
+                    static: dict = {}
+                    regexes: list = []
+                    for entry in routes:
+                        regex, params = entry["regex"]
+                        if params:
+                            regexes.append((regex, params, entry))
+                        else:
+                            static[entry["path"]] = entry
+                    buckets[method] = (static, regexes)
+                matcher[sub] = buckets
+            self._has_subdomains = has_subdomains
+            self._matcher_cache = matcher
         return matcher
 
     @property
@@ -172,8 +156,7 @@ class RouteRegistry:
     def subdomains(self) -> list:
         """The list of registered subdomains."""
         if self._subdomains_cache is None:
-            with self._lock:
-                self._subdomains_cache = list(self._routes.keys())
+            self._subdomains_cache = list(self._routes.keys())
         return self._subdomains_cache
 
     def summary(self) -> str:
@@ -192,14 +175,8 @@ class RouteRegistry:
 
     def clear(self) -> None:
         """Clear all registered routes and caches."""
-        with self._lock:
-            self._routes.clear()
-            self._subdomains_cache = None
-            self._matcher_cache = None
-            self._has_subdomains = False
-
-    @classmethod
-    def reset(cls) -> None:
-        """Reset the singleton so a new registry is created on next access."""
-        cls._instance = None
+        self._routes.clear()
+        self._subdomains_cache = None
+        self._matcher_cache = None
+        self._has_subdomains = False
 

@@ -1,7 +1,6 @@
 import inspect
 
 from renus.cache import Cache
-from renus.router import RouteRegistry
 
 def resolve_handler(res, request):
     """Resolve the callable handler for a route result.
@@ -65,7 +64,7 @@ async def run_direct(res, request, method):
     endpoint = build_endpoint(res, method, request)
     return await endpoint(**res["args"])
 
-def resolve_routes(req, scope):
+def resolve_routes(registry, req, scope):
     """Resolve the matching route for a request or scope.
 
     Parameters
@@ -75,4 +74,4 @@ def resolve_routes(req, scope):
     scope:
         The ASGI scope.
     """
-    return RouteRegistry().resolve(req, scope)
+    return registry.resolve(req, scope)

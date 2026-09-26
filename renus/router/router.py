@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 from renus.router.convertors import build_path
 from renus.router.path import full_path_builder
-from renus.router.registry import RouteEntry, RouteRegistry
+from renus.router.registry import RouteEntry
 
 Controller = Callable | None
 
+
 class Router:
-    """Declarative API for registering routes and building sub-routers."""
+    """Declarative API for defining and composing routes."""
 
     def __init__(
         self,
@@ -17,34 +18,20 @@ class Router:
         middlewares: list[Callable] | None = None,
         subdomain: str | None = None,
     ) -> None:
-        """Create a new router.
-
-        Parameters
-        ----------
-        prefix:
-            Optional path prefix applied to all routes.
-        middlewares:
-            Optional list of middlewares applied to all routes.
-        subdomain:
-            Optional subdomain these routes apply to.
-        """
-        if middlewares is None:
-            middlewares = []
-
+        """Create a router whose routes can be mounted on another router or app."""
         if subdomain == "_":
             raise ValueError("subdomain cannot be '_'")
 
         self._prefix = prefix
-        self._middlewares = middlewares
+        self._middlewares = list(middlewares or [])
         self._subdomain = subdomain or "_"
-        self._registry = RouteRegistry()
+        self._routes: list[tuple[str, RouteEntry]] = []
+        self._included: list[tuple[Router, str, list[Callable]]] = []
 
     def __enter__(self) -> "Router":
-        """Return the router for use as a context manager."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
-        """Return ``False`` to propagate exceptions unhandled."""
         return False
 
     def _add(
@@ -55,24 +42,46 @@ class Router:
         method: str,
         middlewares: list[Callable] | None = None,
         cache: int | None = None,
-    ) -> None:
-        if middlewares is None:
-            middlewares = []
-
-        full_path = full_path_builder(self._prefix, path)
-        all_middlewares = self._middlewares.copy() + middlewares
-
+    ) -> RouteEntry:
         entry: RouteEntry = {
-            "path": full_path,
+            "path": full_path_builder("", path),
             "controller": controller,
             "func": func,
-            "middlewares": all_middlewares,
-            "regex": build_path(full_path),
+            "middlewares": list(middlewares or []),
+            "regex": None,
         }
         if cache:
             entry["cache"] = cache
+        self._routes.append((method, entry))
+        return entry
 
-        self._registry.register(self._subdomain, method, entry)
+    def _iter_routes(
+        self,
+        prefix: str = "",
+        middlewares: list[Callable] | None = None,
+        subdomain: str = "_",
+    ) -> Iterator[tuple[str, str, RouteEntry]]:
+        """Yield routes after applying all inherited prefixes and middleware."""
+        full_prefix = full_path_builder(prefix, self._prefix)
+        full_middlewares = list(middlewares or []) + self._middlewares
+        full_subdomain = self._subdomain if self._subdomain != "_" else subdomain
+
+        for method, route in self._routes:
+            path = full_path_builder(full_prefix, route["path"])
+            entry = {
+                **route,
+                "path": path,
+                "middlewares": full_middlewares + route["middlewares"],
+                "regex": build_path(path),
+            }
+            yield full_subdomain, method, entry
+
+        for child, child_prefix, child_middlewares in self._included:
+            yield from child._iter_routes(
+                prefix=full_path_builder(full_prefix, child_prefix),
+                middlewares=full_middlewares + child_middlewares,
+                subdomain=full_subdomain,
+            )
 
     def get(
         self,
@@ -153,25 +162,32 @@ class Router:
         self._add(path, controller, func, "WS", middlewares)
         return self
 
+    def include(
+        self,
+        router: "Router",
+        prefix: str = "",
+        middlewares: list[Callable] | None = None,
+    ) -> "Router":
+        """Include another router under an optional prefix and middleware set."""
+        if not isinstance(router, Router):
+            raise TypeError("router must be a Router instance")
+        if router is self or router._contains(self):
+            raise ValueError("Including this router would create a cycle")
+        self._included.append((router, prefix, list(middlewares or [])))
+        return self
+
+    def _contains(self, target: "Router") -> bool:
+        return any(child is target or child._contains(target) for child, _, _ in self._included)
+
     def group(
         self,
         prefix: str = "",
         middlewares: list[Callable] | None = None,
     ) -> "Router":
-        if middlewares is None:
-            middlewares = []
-
-        combined_prefix = full_path_builder(self._prefix, prefix)
-        combined_middlewares = self._middlewares.copy() + middlewares
-
-        """Return a new router inheriting this router's prefix and middlewares."""
-        subdomain = None if self._subdomain == "_" else self._subdomain
-
-        return Router(
-            prefix=combined_prefix,
-            middlewares=combined_middlewares,
-            subdomain=subdomain,
-        )
+        """Create and include a child router with an additional route context."""
+        group = Router(prefix=prefix, middlewares=middlewares)
+        self.include(group)
+        return group
 
     def crud(
         self,
@@ -180,19 +196,11 @@ class Router:
         middlewares: list[Callable] | None = None,
         func_prefix: str = "",
     ) -> "Router":
-        """Register index, store, update, and delete routes for a controller."""
+        """Define index, store, update, and delete routes for a controller."""
         self._add(path, controller, f"{func_prefix}index", "GET", middlewares)
         self._add(path, controller, f"{func_prefix}store", "POST", middlewares)
-        self._add(
-            path + "/{id:id}", controller, f"{func_prefix}update", "PUT", middlewares
-        )
-        self._add(
-            path + "/{id:id}",
-            controller,
-            f"{func_prefix}delete",
-            "DELETE",
-            middlewares,
-        )
+        self._add(path + "/{id:id}", controller, f"{func_prefix}update", "PUT", middlewares)
+        self._add(path + "/{id:id}", controller, f"{func_prefix}delete", "DELETE", middlewares)
         return self
 
     def mcud(
@@ -202,7 +210,7 @@ class Router:
         middlewares: list[Callable] | None = None,
         func_prefix: str = "",
     ) -> "Router":
-        """Register store, update, and delete routes for a controller."""
+        """Define store, update, and delete routes for a controller."""
         self._add(path, controller, f"{func_prefix}m_store", "POST", middlewares)
         self._add(path, controller, f"{func_prefix}m_update", "PUT", middlewares)
         self._add(path, controller, f"{func_prefix}m_delete", "DELETE", middlewares)

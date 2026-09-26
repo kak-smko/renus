@@ -193,8 +193,21 @@ class ItemController:
         return JsonResponse({{"msg\": \"updated\"}})
 
     async def delete(self, id):
+        data = await self.request.form()
         await self.repo.delete(Item.id == id)
-        return JsonResponse({{"msg\": \"deleted\"}})
+        return JsonResponse({{"msg": "deleted"}})
+'''.lstrip()
+
+ROUTES_TEMPLATE = '''from renus.router import Router
+
+from {pkg}.controllers import ItemController
+
+router = Router()
+router.get("/items", ItemController, "index")
+router.post("/items", ItemController, "store")
+router.get("/items/{{id}}", ItemController, "show")
+router.put("/items/{{id}}", ItemController, "update")
+router.delete("/items/{{id}}", ItemController, "delete")
 '''.lstrip()
 
 APP_TEMPLATE = '''from __future__ import annotations
@@ -202,8 +215,8 @@ APP_TEMPLATE = '''from __future__ import annotations
 from renus.app import App
 from renus.db import Database
 
-from {pkg}.controllers import ItemController
 from {pkg}.models import Item
+from {pkg}.routes import router
 
 def create_app(adapter) -> App:
     db = Database(adapter)
@@ -218,11 +231,7 @@ def create_app(adapter) -> App:
     app = App(on_startup=[on_startup], on_shutdown=[on_shutdown])
     app.state["db"] = db
 
-    app.router.get("/items", ItemController, "index")
-    app.router.post("/items", ItemController, "store")
-    app.router.get("/items/{{id}}", ItemController, "show")
-    app.router.put("/items/{{id}}", ItemController, "update")
-    app.router.delete("/items/{{id}}", ItemController, "delete")
+    app.include(router)
 
     return app
 '''.lstrip()
@@ -257,16 +266,24 @@ class PingController:
         return JsonResponse({{"msg": "pong", "method": self.request.method}})
 '''.lstrip()
 
+NODB_ROUTES_TEMPLATE = '''from renus.router import Router
+
+from {pkg}.controllers import PingController
+
+router = Router()
+router.get("/ping", PingController, "ping")
+'''.lstrip()
+
 NODB_APP_TEMPLATE = '''from __future__ import annotations
 
 from renus.app import App
 
-from {pkg}.controllers import PingController
+from {pkg}.routes import router
 
 def create_app() -> App:
     app = App()
 
-    app.router.get("/ping", PingController, "ping")
+    app.include(router)
 
     return app
 '''.lstrip()
@@ -350,12 +367,14 @@ def generate_api(root: str, name: str, pkg: str, database: str) -> bool:
 
     if database == "none":
         _write(os.path.join(root, "controllers.py"), PING_CONTROLLER_TEMPLATE)
+        _write(os.path.join(root, "routes.py"), NODB_ROUTES_TEMPLATE.format(pkg=pkg))
         _write(os.path.join(root, "app.py"), NODB_APP_TEMPLATE.format(pkg=pkg))
         _write(os.path.join(root, "main.py"), NODB_MAIN_TEMPLATE.format(pkg=pkg))
         return True
 
     _write(os.path.join(root, "models.py"), MODEL_TEMPLATE)
     _write(os.path.join(root, "controllers.py"), CONTROLLER_TEMPLATE.format(pkg=pkg))
+    _write(os.path.join(root, "routes.py"), ROUTES_TEMPLATE.format(pkg=pkg))
     _write(os.path.join(root, "app.py"), APP_TEMPLATE.format(pkg=pkg))
     _write(os.path.join(root, "main.py"),
            MAIN_TEMPLATE.format(pkg=pkg, adapter_body=ADAPTER_BODIES[database].replace("{pkg}", pkg)))

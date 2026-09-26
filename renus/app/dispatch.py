@@ -1,7 +1,7 @@
 from renus.app.handlers import resolve_routes
 from renus.request import Request
 from renus.response import JsonResponse, Response, Status, TextResponse, debug_response
-from renus.router import RouteRegistry, run_middleware_chain
+from renus.router import run_middleware_chain
 from renus.websockets import WebSocket
 
 _MUTATING_METHODS = frozenset(("POST", "PUT", "DELETE"))
@@ -17,7 +17,7 @@ async def serve_http(app, scope, receive, send) -> None:
         The ASGI connection parameters.
     """
     scope["method"] = scope["method"].upper()
-    registry = RouteRegistry()
+    registry = app.registry
     # Most routes do not access request data. Delay its relatively expensive
     # construction until routing or dispatch proves that it is required.
     request = Request(scope, receive) if registry.has_subdomains else None
@@ -28,7 +28,7 @@ async def serve_http(app, scope, receive, send) -> None:
             if fast_route is not None:
                 route, args = fast_route
                 method = route["func"]
-                middlewares = app.middlewares + route["middlewares"]
+                middlewares = route["middlewares"]
                 if (
                     route["controller"] is None
                     and not middlewares
@@ -42,7 +42,7 @@ async def serve_http(app, scope, receive, send) -> None:
                     return
             request = Request(scope, receive)
 
-        res = resolve_routes(request, scope)
+        res = resolve_routes(registry, request, scope)
         if not res:
             if request is None:
                 request = Request(scope, receive)
@@ -56,7 +56,7 @@ async def serve_http(app, scope, receive, send) -> None:
             request = Request(scope, receive)
 
         method = app._resolve_handler(res, request)
-        middlewares = app.middlewares + res["middlewares"]
+        middlewares = res["middlewares"]
         if request is None and (
             middlewares or res["cache"] or "request" in method.__code__.co_varnames
         ):
@@ -101,7 +101,7 @@ async def serve_view(app, request, scope, receive, send) -> None:
     scope, receive, send:
         The ASGI connection parameters.
     """
-    res = resolve_routes(request, scope)
+    res = resolve_routes(app.registry, request, scope)
 
     if not res:
         if request is not None:
@@ -123,7 +123,7 @@ async def serve_view(app, request, scope, receive, send) -> None:
         request = Request(scope, receive)
 
     method = app._resolve_handler(res, request)
-    middlewares = app.middlewares + res["middlewares"]
+    middlewares = res["middlewares"]
 
     if request is None and (middlewares or res["cache"] or "request" in method.__code__.co_varnames):
         request = Request(scope, receive)
@@ -177,7 +177,7 @@ async def serve_websocket(app, scope, receive, send) -> None:
     ws = WebSocket(scope, receive, send)
 
     try:
-        res = resolve_routes(ws, scope)
+        res = resolve_routes(app.registry, ws, scope)
         setattr(ws, "route", res)
         if not res:
             await ws.close(1004)
@@ -191,7 +191,7 @@ async def serve_websocket(app, scope, receive, send) -> None:
                 await method(**kwargs)
                 return True
 
-            middlewares = app.middlewares + res["middlewares"]
+            middlewares = res["middlewares"]
             passed = await run_middleware_chain(ws, middlewares, res, ws_endpoint)
             if passed is not True:
                 await ws.close(1003)

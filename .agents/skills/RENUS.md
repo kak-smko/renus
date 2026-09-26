@@ -194,18 +194,19 @@ async def auth(request, method, res):
     return await method(**res["args"])
 ```
 
-Register at app, router, or route level:
+Register on a router, when mounting it, or directly on a route:
 
 ```python
-app = App(middlewares=[global_middleware])
+private_router = Router(middlewares=[auth])
+app.include(private_router, prefix="/private", middlewares=[timing])
 
-@app.get("/private", middlewares=[auth])
-async def private(): ...
+@app.get("/health", middlewares=[health_check])
+async def health(): ...
 ```
 
 - Onion middleware receives `(request, method, res)`, can run before and after the next handler, rewrite `res["args"]`, and short-circuit by not calling `method`.
 - Legacy middleware takes only `request`; it must be async and return exactly `True` to continue. Any other result becomes the short-circuit result.
-- Middleware order is app-level first, then router/route-level. The chain wraps in reverse so the first listed middleware is outermost.
+- Middleware order is mounted/router-level first, then route-level. The chain wraps in reverse so the first listed middleware is outermost.
 - The same chain applies to WebSockets, where a short-circuit closes the connection instead of returning an HTTP response.
 - Route-level response cache lookup occurs inside endpoint dispatch, so middleware wraps cached dispatch too.
 

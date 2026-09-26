@@ -25,9 +25,10 @@ The `App` exposes `@app.get`, `@app.post`, `@app.put`, `@app.delete`, and `@app.
 
 ### With the `Router` fluent API
 
-Create a `Router` and register routes with its fluent methods. Routes register into the shared route registry automatically, so they are served by your `App()` without mounting the router explicitly:
+Create a `Router` and register routes with its fluent methods. Routers collect definitions without registering them globally; mount a router explicitly on an `App` or include it in another router:
 
 ```python
+from renus.app import App
 from renus.router import Router
 
 r = Router()
@@ -35,6 +36,9 @@ r.get('/items', ItemController, 'index')
 r.post('/items', ItemController, 'store')
 r.put('/items/{id:id}', ItemController, 'update')
 r.delete('/items/{id:id}', ItemController, 'delete')
+
+app = App()
+app.include(r)
 ```
 
 Each method takes the path, an optional controller, a handler name or callable, and optional `middlewares` and `cache`:
@@ -49,7 +53,7 @@ Each method takes the path, an optional controller, a handler name or callable, 
 | `.option(path, ...)` | `OPTIONS` |
 | `.ws(path, ...)`     | `WS` (WebSocket) |
 
-Any route registered on a `Router` is stored in the shared singleton registry that your `App()` resolves against, so standalone routers work alongside routes registered with `@app.<method>` decorators.
+Each `App` owns its route registry. Router definitions are isolated until mounted with `app.include(router)`, so the same router can be mounted on multiple apps with different prefixes or middleware.
 
 ## Path parameters
 
@@ -103,9 +107,10 @@ When a controller's `__init__` declares a `request` parameter, the current `Requ
 
 ## Route groups
 
-`Router` supports a `prefix` and shared `middlewares`. Calling `group()` returns a new router that inherits the parent's prefix and middlewares, letting you nest routes. Use it with `with` so the group stays scoped:
+`Router` supports a `prefix` and shared `middlewares`. Calling `group()` creates and includes a child router, inheriting the parent route context. Mount the top-level router on the app:
 
 ```python
+from renus.app import App
 from renus.router import Router
 
 v1 = Router(prefix='/api/v1', middlewares=[AuthMiddleware])
@@ -113,12 +118,16 @@ v1 = Router(prefix='/api/v1', middlewares=[AuthMiddleware])
 with v1.group('/items') as items:
     items.get('/{id:id}', ItemController, 'show')
     items.post('', ItemController, 'store')
+
+app = App()
+app.include(v1)
 ```
 
 The `Router` constructor also accepts `subdomain`:
 
 ```python
 admin = Router(prefix='/api/admin', subdomain='admin')
+app.include(admin)
 ```
 
 Routes resolve by matching the request's subdomain first (the first label of the `Host` header), then the default domain.
@@ -144,7 +153,7 @@ Use the optional `func_prefix` to call methods with a prefix, and `mcud()` to re
 
 ## How routes are resolved
 
-Route entries are stored in a shared `RouteRegistry` singleton, grouped by subdomain and method. When a request arrives, the registry:
+Each `App` owns a `RouteRegistry` instance, grouped by subdomain and method. Routers hold route definitions until explicitly included in another router or mounted on an app. When a request arrives, the app's registry:
 
 1. Reads the request method and the normalized path from the scope (a trailing `/` is stripped).
 2. Rejects unsupported methods and raises on path-traversal attempts (`..` or a null byte).
@@ -152,14 +161,13 @@ Route entries are stored in a shared `RouteRegistry` singleton, grouped by subdo
 4. Matches the exact (static) path first, then tries the compiled path-parameter regexes in registration order.
 5. Builds a route result carrying the resolved arguments (already converted to their typed values), the controller, handler, middlewares, and optional cache TTL.
 
-The router distinguishes static routes (exact matches, resolved in O(1)) from parameterized routes (matched against compiled regexes). Registered routes are cached and rebuilt lazily on registration or via `RouteRegistry.clear()` / `reset()`.
+The registry distinguishes static routes (exact matches, resolved in O(1)) from parameterized routes (matched against compiled regexes). Its matcher is cached and rebuilt lazily when routes are mounted or via `app.registry.clear()`.
 
 You can inspect registered routes:
 
 ```python
-from renus.router import RouteRegistry
-
-print(RouteRegistry().summary())
+app = App()
+print(app.registry.summary())
 ```
 
 ## Path safety

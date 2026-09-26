@@ -83,13 +83,14 @@ route_temp = '''from renus.router import Router
 from renus.config import Config
 from app.{name}.controller import {name_camel}Controller
 
-r = Router(
+admin_router = Router(
     subdomain=Config("app").get("admin_subdomain", "admin"),
-    prefix="api/admin{folder}",
+    prefix="/admin{folder}",
 )
-r.crud("/{names}", {name_camel}Controller)
+admin_router.crud("/{names}", {name_camel}Controller)
 
-h = Router(prefix="api/home")
+router = Router()
+router.include(admin_router)
 '''
 
 route_user_temp = '''from renus.router import Router
@@ -98,15 +99,19 @@ from app.{name}.controller import {name_camel}Controller
 from app.extension.codenus.user.middleware import AuthMiddleware
 from app.extension.codenus.user.middleware import PermissionMiddleware
 
-r = Router(
+admin_router = Router(
     subdomain=Config("app").get("admin_subdomain", "admin"),
-    prefix="api/admin{folder}",
+    prefix="/admin{folder}",
     middlewares=[AuthMiddleware, PermissionMiddleware("admin")],
 )
-r.crud("/{names}", {name_camel}Controller, middlewares=[PermissionMiddleware("{names}")])
+admin_router.crud("/{names}", {name_camel}Controller, middlewares=[PermissionMiddleware("{names}")])
 
-u = Router(prefix="api/user", middlewares=[AuthMiddleware])
-h = Router(prefix="api/home")
+user_router = Router(prefix="/user", middlewares=[AuthMiddleware])
+home_router = Router(prefix="/home")
+router = Router()
+router.include(admin_router)
+router.include(user_router)
+router.include(home_router)
 '''
 
 vue_temp = '''<template>

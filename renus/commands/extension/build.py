@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from typing import Any
+
+from renus.commands.routing import (
+    include_router_in_index,
+    remove_router_from_index,
+)
 
 def _add_cls(install: Any, app: str, base_dir: str = "./") -> None:
     if getattr(install, "cls", None):
@@ -27,29 +33,25 @@ def _add_route(install: Any, app: str, base_dir: str = "./") -> None:
     if getattr(install, "route", None):
         target_dir = os.path.join(base_dir, "app", "extension", app)
         os.makedirs(target_dir, exist_ok=True)
+        extension_name = re.sub(r"\W+", "_", app).strip("_")
+        if extension_name and extension_name[0].isdigit():
+            extension_name = f"_{extension_name}"
+        extension_router = f"{extension_name}_router"
         with open(os.path.join(target_dir, "route.py"), "w", encoding="utf-8") as file:
-            file.write(f"import {install.route}\n")
+            file.write(
+                "from renus.router import Router\n"
+                f"from {install.route} import router as {extension_router}\n\n"
+                "router = Router()\n"
+                f"router.include({extension_router})\n"
+            )
 
-        routes_index = os.path.join(base_dir, "routes", "index.py")
-        if os.path.exists(routes_index):
-            with open(routes_index, "r", encoding="utf-8") as file:
-                content = file.read()
-            route_import = f"import app.extension.{app.replace('/', '.')}.route\n"
-            if route_import not in content:
-                content = route_import + content
-                with open(routes_index, "w", encoding="utf-8") as b:
-                    b.write(content)
+        module = f"app.extension.{app.replace('/', '.')}.route"
+        include_router_in_index(module, base_dir=base_dir)
 
 def _remove_route(install: Any, app: str, base_dir: str = "./") -> None:
     if getattr(install, "route", None):
-        routes_index = os.path.join(base_dir, "routes", "index.py")
-        if os.path.exists(routes_index):
-            with open(routes_index, "r", encoding="utf-8") as file:
-                content = file.read()
-            route_import = f"import app.extension.{app.replace('/', '.')}.route\n"
-            content = content.replace(route_import, "")
-            with open(routes_index, "w", encoding="utf-8") as b:
-                b.write(content)
+        module = f"app.extension.{app.replace('/', '.')}.route"
+        remove_router_from_index(module, base_dir=base_dir)
 
 def _add_command(install: Any, app: str, base_dir: str = "./") -> None:
     if getattr(install, "command", None):
