@@ -167,7 +167,7 @@ class RouteRegistry:
             for method, routes in sorted(methods.items()):
                 for route in routes:
                     lines.append(
-                        f"  {method:7s} {route['path']:40s} → {route.get('func', '?')}"
+                        f" {sub} {method:7s} {route['path']:40s} → {route.get('func', '?')}"
                     )
                     total += 1
         header = f"╔══ Route Registry: {total} routes registered ══╗"

@@ -31,6 +31,7 @@ codenus/
 ├── job/                   # Background jobs
 ├── public/                # Public assets
 ├── routes/                # API routes
+│   ├── api.py             # Api routes
 │   ├── index.py           # Route entry point
 │   └── web.py             # Web routes
 ├── storage/               # File storage

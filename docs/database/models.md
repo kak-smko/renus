@@ -739,7 +739,32 @@ payload = to_dict(
 customer = from_dict(Customer, payload, validate=False)
 ```
 
-## 13. Indexes and field-level database rules
+## 13. JSON Schema
+
+`Model.schema()` returns a JSON-serializable JSON Schema document for a model. The schema uses the JSON Schema draft 2020-12 vocabulary and is built from the model's annotations, field defaults and descriptions, validation rules, and relationship metadata. It describes data shape; it does not create database tables or replace runtime validation.
+
+```python
+from renus.db import Field, Model
+from renus.db.validation.rules import MaxLen, MinLen
+
+
+class Profile(Model):
+    display_name: str = Field(MinLen(1), MaxLen(80))
+    bio: str | None = None
+
+
+schema = Profile.schema()
+assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+assert schema["properties"]["display_name"]["minLength"] == 1
+```
+
+The root schema is an object with `title`, `properties`, and `additionalProperties: true`. Non-nullable fields without defaults are listed in `required`. Nullable annotations allow `null`. Non-nullable fields without defaults are listed in `required`; a validation rule marked as required can also add a property to that list. Declared defaults are included after conversion to JSON-compatible values. Built-in Python types map to JSON Schema types (for example, `int` to `integer` and `datetime` to a `string` with `date-time` format). A field's `Field` description and validation-rule schema fragments are included when present. Custom validation rules contribute only the fragment returned by their `json_schema()` method; rules that return `{}` add no schema constraints.
+
+Nested model fields and model collections are represented recursively. Relationships are included as properties, including relationships declared without a Python annotation such as `items = EmbeddedMany(Item)`. Recursive model references use `$defs` and `$ref` to avoid infinitely nested schemas. Non-collection relationship properties allow `null`; collection relationships are represented as arrays.
+
+The schema documents validation shape, but it cannot capture arbitrary Python validation logic or custom runtime types unless a rule provides a JSON Schema fragment. Inspect or extend the rule's `json_schema()` implementation when the generated schema needs additional constraints.
+
+## 14. Indexes and field-level database rules
 
 Field-level `unique=True` and `indexed=True` create indexes from the field declaration. Use `Meta.indexes` for a multi-column index:
 
@@ -793,7 +818,7 @@ class Post(Model):
     )
 ```
 
-## 14. Inspecting model metadata
+## 15. Inspecting model metadata
 
 Use `Model.metadata()` to inspect the resolved schema description:
 
@@ -832,7 +857,7 @@ assert meta.primary_key_field == "id"
 
 `primary_key_field` is for single-column identities. It raises `ValueError` for composite identities; use `primary_key_fields` instead.
 
-## 15. A complete model example
+## 16. A complete model example
 
 This example combines the main model features:
 

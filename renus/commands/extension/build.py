@@ -51,7 +51,7 @@ def _add_route(install: Any, app: str, base_dir: str = "./") -> None:
 def _remove_route(install: Any, app: str, base_dir: str = "./") -> None:
     if getattr(install, "route", None):
         module = f"app.extension.{app.replace('/', '.')}.route"
-        remove_router_from_index(module, base_dir=base_dir)
+        remove_router_from_index(module, app, base_dir=base_dir)
 
 def _add_command(install: Any, app: str, base_dir: str = "./") -> None:
     if getattr(install, "command", None):
@@ -81,7 +81,7 @@ def _add_admin_templates(install: Any, app: str, base_dir: str = "./") -> None:
                 content = import_stmt + content
             content = content.replace(
                 "/* {{place new route}} */",
-                f"/* {{place new route}} */\n...{name}_routes,",
+                f"/* {{{{place new route}}}} */\n...{name}_routes,",
             )
             with open(router_js, "w", encoding="utf-8") as b:
                 b.write(content)
@@ -116,7 +116,7 @@ def _add_index_templates(install: Any, app: str, base_dir: str = "./") -> None:
                 content = import_stmt + content
             content = content.replace(
                 "/* {{place new route}} */",
-                f"/* {{place new route}} */\n...{name}_routes,",
+                f"/* {{{{place new route}}}} */\n...{name}_routes,",
             )
             with open(router_js, "w", encoding="utf-8") as b:
                 b.write(content)

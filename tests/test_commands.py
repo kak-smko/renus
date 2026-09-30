@@ -391,9 +391,9 @@ class TestAppScaffolding:
         assert code == 0
         assert (tmp_path / "app" / "invoice" / "controller.py").exists()
         assert (tmp_path / "app" / "invoice" / "model.py").exists()
-        routes_index = (tmp_path / "routes" / "index.py").read_text()
-        assert "from app.invoice.route import router as _included_router_app_invoice_route" in routes_index
-        assert "router.include(_included_router_app_invoice_route)" in routes_index
+        routes_index = (tmp_path / "routes" / "api.py").read_text()
+        assert "from app.invoice.route import router as invoice_route" in routes_index
+        assert "router.include(invoice_route)" in routes_index
 
 class TestGeneratedScaffoldRunsAgainstDatabase:
 
@@ -548,8 +548,8 @@ class TestExtensionCommands:
         ).read_text()
         assert "router as codenus_user_router" in route_source
         assert "router.include(codenus_user_router)" in route_source
-        routes_index = (tmp_path / "routes" / "index.py").read_text()
-        assert "router.include(_included_router_app_extension_codenus_user_route)" in routes_index
+        routes_index = (tmp_path / "routes" / "api.py").read_text()
+        assert "router.include(codenus_user_route)" in routes_index
 
     def test_extension_route_removal_removes_index_mount(self, tmp_path):
         install = SimpleNamespace(route="codenus.user.routes")
@@ -557,8 +557,8 @@ class TestExtensionCommands:
         from renus.commands.extension.build import _remove_route
 
         _remove_route(install, "codenus/user", base_dir=str(tmp_path))
-        routes_index = (tmp_path / "routes" / "index.py").read_text()
-        assert "_included_router_app_extension_codenus_user_route" not in routes_index
+        routes_index = (tmp_path / "routes" / "api.py").read_text()
+        assert "codenus_user_route" not in routes_index
 
     def test_update_vs_upgrade_modes(self):
         mock_install = MagicMock()
