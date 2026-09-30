@@ -96,6 +96,8 @@ class TestCommandDiscoveryAndHelp:
         assert "app" in out
         assert "db" in out
         assert "extension" in out
+        assert "renus extension codenus/user" in out
+        assert "renus extension --remove codenus/user" in out
 
 class TestCLIRunner:
 

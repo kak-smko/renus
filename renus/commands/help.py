@@ -77,8 +77,7 @@ def Help(commands: dict[str, str] | None = None) -> None:
 
     rows = []
     for name, desc in commands.items():
-        first_line = desc.strip().split("\n")[0]
-        rows.append([Terminal.green(name), Terminal.white(first_line)])
+        rows.append([Terminal.green(name), Terminal.white(desc.strip())])
 
     Terminal.table(headers=["Command", "Description"]).print(rows)
     print()

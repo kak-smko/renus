@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from renus.rich import Progress, Terminal
@@ -21,6 +23,54 @@ class TestExports:
 
     def test_terminal_progress_returns_progress(self):
         assert isinstance(Terminal.progress(10), Progress)
+
+class TestTable:
+    def test_multiline_cells_and_headers_are_rendered_as_aligned_rows(self):
+        table = Terminal.table(headers=["Name\n(full)", "Details"])
+
+        rendered = table([["item", "first\nsecond"]])
+
+        assert rendered == "\n".join(
+            [
+                "┌──────────────────┐",
+                "│ Name   │ Details │",
+                "│ (full) │         │",
+                "├──────────────────┤",
+                "│ item   │ first   │",
+                "│        │ second  │",
+                "└──────────────────┘",
+            ]
+        )
+
+    def test_ragged_rows_are_padded_to_the_same_column_count(self):
+        rendered = Terminal.table()([["one", "two"], ["only one"]])
+
+        assert "│ only one │     │" in rendered
+
+    def test_ansi_styling_does_not_affect_column_alignment(self, color):
+        rendered = Terminal.table(headers=["Column", "Value"])(
+            [[Terminal.red("x"), "long"], ["longer", "y"]]
+        )
+        plain = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", rendered)
+        body_lines = [line for line in plain.splitlines() if line.startswith("│")]
+
+        assert len({len(line) for line in plain.splitlines()}) == 1
+        assert len({line.index(" │ ") for line in body_lines}) == 1
+
+    def test_ansi_style_is_reapplied_to_each_multiline_cell_line(self, color):
+        rendered = Terminal.table(headers=["Value", "Other"])(
+            [[Terminal.red("first\nsecond"), "a longer value"]]
+        )
+        styled_lines = [
+            line for line in rendered.splitlines() if "first" in line or "second" in line
+        ]
+
+        assert len(styled_lines) == 2
+        for line in styled_lines:
+            assert "\x1b[91m" in line
+            assert "\x1b[0m" in line
+            assert line.index("\x1b[0m") < line.index(" │ ")
+
 
 class TestProgress:
     def test_starts_empty(self):
