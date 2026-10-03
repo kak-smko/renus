@@ -117,6 +117,7 @@ class Relationship:
         through: type | str | None = None,
         is_embedded: bool = False,
         is_collection: bool = False,
+        rules: tuple[Any, ...] = (),
     ) -> None:
         """Configure a relationship descriptor.
 
@@ -176,6 +177,7 @@ class Relationship:
         self.through = through
         self.is_embedded = is_embedded
         self.is_collection = is_collection
+        self.rules = tuple(rules)
         self._name: str | None = None
         self._owner: type | None = None
 
@@ -222,7 +224,7 @@ class EmbeddedOne(Relationship):
     def __init__(
         self,
         target: type,
-        *,
+        *rules: Any,
         loading: str | LoadingStrategy = "lazy",
     ) -> None:
         """Declare an embedded single relationship.
@@ -232,6 +234,9 @@ class EmbeddedOne(Relationship):
         target:
             The embedded model class or a reference to it.
 
+        *rules:
+            Positional validation rules applied to the embedded value, using
+            the same rule contract as ``Field``.
         loading:
             Strategy used to load the embedded record. One of ``"lazy"``
             or ``"joined"``. Defaults to ``"lazy"``.
@@ -245,6 +250,7 @@ class EmbeddedOne(Relationship):
             loading=loading,
             is_embedded=True,
             is_collection=False,
+            rules=rules,
         )
 
 Embedded = EmbeddedOne
@@ -254,8 +260,7 @@ class EmbeddedMany(Relationship):
     def __init__(
         self,
         target: type,
-        *,
-
+        *rules: Any,
         loading: str | LoadingStrategy = "lazy",
     ) -> None:
         """Declare an embedded collection relationship.
@@ -265,6 +270,9 @@ class EmbeddedMany(Relationship):
         target:
             The embedded model class or a reference to it.
 
+        *rules:
+            Positional validation rules applied to the embedded collection,
+            using the same rule contract as ``Field``.
         loading:
             Strategy used to load the embedded records. One of ``"lazy"``
             or ``"joined"``. Defaults to ``"lazy"``.
@@ -278,6 +286,7 @@ class EmbeddedMany(Relationship):
             loading=loading,
             is_embedded=True,
             is_collection=True,
+            rules=rules,
         )
 
 class Reference(Relationship):

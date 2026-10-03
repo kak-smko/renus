@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 import pytest
 
-from renus.db import Embedded, EmbeddedOne, Field, Model, ValidationError
+from renus.db import Embedded, EmbeddedMany, EmbeddedOne, Field, Model, ValidationError
 from renus.db.validation.base import Rule
 from renus.db.validation import (
     Convert,
@@ -245,6 +245,40 @@ def test_nested_list_of_models():
         {"name": "Apple", "quantity": 3, "id": None},
         {"name": "Banana", "quantity": 5, "id": None},
     ]
+
+
+def test_embedded_relationship_validation_rules():
+    class Contact(Model):
+        name: str
+        city: str
+
+    class Customer(Model):
+        contact: Contact = EmbeddedOne(Contact, MinLen(2))
+        contacts: list[Contact] = EmbeddedMany(Contact, MinLen(1), MaxLen(2))
+
+    customer = Customer(
+        contact={"name": "Ada", "city": "London"},
+        contacts=[{"name": "Grace", "city": "Arlington"}],
+    )
+    assert isinstance(customer.contact, Contact)
+    assert customer.contact.city == "London"
+    assert isinstance(customer.contacts[0], Contact)
+
+    with pytest.raises(ValidationError) as exc_info:
+        Customer(
+            contact={"name": "Ada"},
+            contacts=[
+                {"name": "Grace", "city": "Arlington"},
+                {"name": "Lin", "city": "Beijing"},
+                {"name": "Margaret", "city": "Hampton"},
+            ],
+        )
+    assert "contact" in exc_info.value.errors
+    assert "contacts" in exc_info.value.errors
+
+    with pytest.raises(ValidationError) as exc_info:
+        customer.contacts = []
+    assert "contacts" in exc_info.value.errors
 
 def test_model_dict_access_and_membership():
     user = User(

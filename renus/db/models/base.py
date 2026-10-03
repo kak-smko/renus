@@ -139,22 +139,22 @@ class ModelMeta(type):
         for rname, rel in all_relationships.items():
             rel.__set_name__(cls, rname)
             setattr(cls, rname, rel)
-            if rname not in validation_fields:
-                target = rel.target
-                field_type = (
-                    list[target]
-                    if rel.is_collection
-                    and isinstance(target, type)
-                    and target not in (list, dict)
-                    else (list if rel.is_collection else target)
-                )
-                validation_fields[rname] = FieldInfo(
-                    name=rname,
-                    field_type=field_type,
-                    field=Field(default=None if not rel.is_collection else []),
-                    default=None if not rel.is_collection else [],
-                    model_base=Model,
-                )
+            target = rel.target
+            field_type = (
+                list[target]
+                if rel.is_collection
+                and isinstance(target, type)
+                and target not in (list, dict)
+                else (list if rel.is_collection else target)
+            )
+            default = None if not rel.is_collection else []
+            validation_fields[rname] = FieldInfo(
+                name=rname,
+                field_type=field_type,
+                field=Field(*rel.rules, default=default),
+                default=default,
+                model_base=Model,
+            )
 
         if "_id" in annotations or "_id" in declared_db_fields:
             _id_type = annotations.get("_id", ID)
