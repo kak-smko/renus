@@ -184,6 +184,25 @@ def test_sensitive_fields_hidden_in_to_dict():
     assert "security_token" not in d
     assert "$2b$12$secret_hash_xyz" not in str(d)
 
+def test_sensitive_fields_hidden_from_model_display_and_mapping():
+    user = SensitiveUser(
+        id="u6",
+        username="frank",
+        email="frank@example.com",
+        password="plain-text-secret",
+        security_token="token-secret",
+    )
+
+    assert "plain-text-secret" not in repr(user)
+    assert "token-secret" not in str(user)
+    assert "password='***'" in repr(user)
+    assert "security_token='***'" in repr(user)
+
+    model_dict = dict(user)
+    assert "password" not in model_dict
+    assert "security_token" not in model_dict
+    assert "plain-text-secret" not in repr(model_dict)
+
 def test_to_dict_include_sensitive_true():
     user = SensitiveUser(
         id="u5",

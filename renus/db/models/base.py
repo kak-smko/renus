@@ -702,7 +702,11 @@ class Model(metaclass=ModelMeta):
             if (not k.startswith("_") and k not in keys) or (k == "_id" and k not in keys):
                 keys.append(k)
 
+        meta = self.__db_metadata__
         for key in keys:
+            field_meta = meta.fields.get(key) if meta is not None else None
+            if field_meta is not None and field_meta.sensitive:
+                continue
             val = self.get_sensitive(key)
             yield (key, self._dump_value(val))
 
@@ -719,8 +723,17 @@ class Model(metaclass=ModelMeta):
         return hasattr(self, item)
 
     def __repr__(self) -> str:
-        attrs = ", ".join(f"{k}={self.get_sensitive(k)!r}" for k in self._model_fields)
-        return f"{self.__class__.__name__}({attrs})"
+        meta = self.__db_metadata__
+        attrs_list = []
+        for key in self._model_fields:
+            value = self.get_sensitive(key)
+            field_meta = meta.fields.get(key) if meta is not None else None
+            if field_meta is not None and field_meta.sensitive:
+                value = "***" if value is not None else None
+            else:
+                value = self._dump_value(value)
+            attrs_list.append(f"{key}={value!r}")
+        return f"{self.__class__.__name__}({', '.join(attrs_list)})"
 
     def __str__(self) -> str:
         return self.__repr__()
