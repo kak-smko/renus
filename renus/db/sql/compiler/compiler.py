@@ -419,8 +419,12 @@ class SQLCompiler:
         op = c.operator
         val = c.value
 
-        if c.path is not None and op in (Operator.EQ, Operator.NE, Operator.IN, Operator.NOT_IN):
-            raw_cond = self._raw_dict_condition(c, op)
+        if c.path is not None and op not in (
+            Operator.AND,
+            Operator.OR,
+            Operator.NOT,
+        ):
+            raw_cond = self._raw_dict_condition(c, op, table_ref=table_ref)
             if raw_cond is not None:
                 return raw_cond
 
@@ -602,7 +606,13 @@ class SQLCompiler:
             params,
         )
 
-    def _raw_dict_condition(self, c: Condition, op: Operator) -> tuple[str, list[Any]] | None:
+    def _raw_dict_condition(
+        self,
+        c: Condition,
+        op: Operator,
+        *,
+        table_ref: str | None = None,
+    ) -> tuple[str, list[Any]] | None:
         if c.path is None:
             return None
         paths = c.path.parts
@@ -613,8 +623,11 @@ class SQLCompiler:
         if rel is None or not rel.is_embedded:
             return None
 
-        parent_table = self.dialect.quote(meta.table)
-        parent_pk = self.dialect.quote(meta.primary_key_field)
+        parent_table = table_ref or self.dialect.quote(meta.table)
+        parent_pk = self.dialect.quote(
+            self._field_name(c.path.model, meta.primary_key_field)
+        )
+        parent_key = f"{parent_table}.{parent_pk}"
         e_table = self.dialect.quote(
             f"{meta.table}_{'_'.join(paths[:-1])}"
         )
@@ -627,13 +640,24 @@ class SQLCompiler:
             key_col = self.dialect.quote("key")
             fixed_key = (f"e.{key_col} = {self.dialect.placeholder}", [rest[0]])
             return self._embed_sub_exists(
-                e_table, pid, parent_table, parent_pk, "value", op, c.value,
-                fixed_key=fixed_key, string_values=True,
+                e_table,
+                pid,
+                parent_key,
+                self.dialect.quote("value"),
+                op,
+                c.value,
+                fixed_key=fixed_key,
+                string_values=True,
             )
 
         if rel.target is list:
             return self._embed_sub_exists(
-                e_table, pid, parent_table, parent_pk, "value", op, c.value,
+                e_table,
+                pid,
+                parent_key,
+                self.dialect.quote("value"),
+                op,
+                c.value,
                 string_values=True,
             )
 
@@ -653,15 +677,14 @@ class SQLCompiler:
         fmeta = child_meta.fields.get(col_name)
         col = self.dialect.quote(fmeta.column_name if fmeta else col_name)
         return self._embed_sub_exists(
-            e_table, pid, parent_table, parent_pk, col, op, c.value,
+            e_table, pid, parent_key, col, op, c.value,
         )
 
     def _embed_sub_exists(
         self,
         e_table: str,
         pid: str,
-        parent_table: str,
-        parent_pk: str,
+        parent_key: str,
         col: str,
         op: Operator,
         value: Any,
@@ -672,31 +695,116 @@ class SQLCompiler:
         def enc(v: Any) -> Any:
             return str(v) if string_values else v
 
+        if op == Operator.IS_NULL:
+            inner = f"e.{pid} = {parent_key}"
+            params: list[Any] = []
+            if fixed_key:
+                inner += f" AND {fixed_key[0]}"
+                params.extend(fixed_key[1])
+            inner += f" AND e.{col} IS NOT NULL"
+            return f"NOT EXISTS (SELECT 1 FROM {e_table} e WHERE {inner})", params
+
+        if op == Operator.IS_NOT_NULL:
+            inner = f"e.{pid} = {parent_key}"
+            params = []
+            if fixed_key:
+                inner += f" AND {fixed_key[0]}"
+                params.extend(fixed_key[1])
+            inner += f" AND e.{col} IS NOT NULL"
+            return f"EXISTS (SELECT 1 FROM {e_table} e WHERE {inner})", params
+
+        if op == Operator.EQ and value is None:
+            return self._embed_sub_exists(
+                e_table,
+                pid,
+                parent_key,
+                col,
+                Operator.IS_NULL,
+                None,
+                fixed_key=fixed_key,
+                string_values=string_values,
+            )
+
+        if op == Operator.NE and value is None:
+            return self._embed_sub_exists(
+                e_table,
+                pid,
+                parent_key,
+                col,
+                Operator.IS_NOT_NULL,
+                None,
+                fixed_key=fixed_key,
+                string_values=string_values,
+            )
+
+        if op == Operator.NE:
+            inner = f"e.{pid} = {parent_key}"
+            params: list[Any] = []
+            if fixed_key:
+                inner += f" AND {fixed_key[0]}"
+                params.extend(fixed_key[1])
+            inner += f" AND e.{col} = {self.dialect.placeholder}"
+            params.append(enc(value))
+            return f"NOT EXISTS (SELECT 1 FROM {e_table} e WHERE {inner})", params
+
         if op == Operator.EQ and isinstance(value, list) and string_values:
             clauses: list[str] = []
             params: list[Any] = []
             for v in value:
                 clauses.append(
                     f"EXISTS (SELECT 1 FROM {e_table} e WHERE e.{pid} = "
-                    f"{parent_table}.{parent_pk} AND e.{col} = "
+                    f"{parent_key} AND e.{col} = "
                     f"{self.dialect.placeholder})"
                 )
                 params.append(enc(v))
             return f"( { ' AND '.join(clauses) } )", params
 
         if op in (Operator.IN, Operator.NOT_IN):
-            vals = list(value) if isinstance(value, list) else [value]
+            vals = (
+                list(value)
+                if isinstance(value, (list, tuple, set))
+                else ([] if value is None else [value])
+            )
             if not vals:
                 return ("1=0" if op == Operator.IN else "1=1"), []
-            not_prefix = "NOT " if op == Operator.NOT_IN else ""
             placeholders = self.dialect.placeholders(len(vals))
-            expr = f"e.{col} {not_prefix}IN ({placeholders})"
+            expr = f"e.{col} IN ({placeholders})"
+            if op == Operator.NOT_IN:
+                inner = f"e.{pid} = {parent_key}"
+                params: list[Any] = []
+                if fixed_key:
+                    inner += f" AND {fixed_key[0]}"
+                    params.extend(fixed_key[1])
+                params.extend(enc(v) for v in vals)
+                return f"NOT EXISTS (SELECT 1 FROM {e_table} e WHERE {inner} AND {expr})", params
         else:
-            op_str = "<>" if op == Operator.NE else "="
-            expr = f"e.{col} {op_str} {self.dialect.placeholder}"
-            vals = [value]
+            op_str = {
+                Operator.EQ: "=",
+                Operator.NE: "<>",
+                Operator.GT: ">",
+                Operator.GE: ">=",
+                Operator.LT: "<",
+                Operator.LE: "<=",
+                Operator.LIKE: "LIKE",
+                Operator.REGEX: "REGEXP",
+            }.get(op)
+            if op == Operator.BETWEEN:
+                try:
+                    lower, upper = value
+                except (TypeError, ValueError):
+                    raise ValueError("BETWEEN requires a lower and upper value") from None
+                expr = (
+                    f"e.{col} BETWEEN {self.dialect.placeholder} "
+                    f"AND {self.dialect.placeholder}"
+                )
+                vals = [lower, upper]
+            elif op_str is not None:
+                expr = f"e.{col} {op_str} {self.dialect.placeholder}"
+                vals = [value]
+            else:
+                return None
 
-        inner = f"e.{pid} = {parent_table}.{parent_pk}"
+        inner = f"e.{pid} = {parent_key}"
         params = []
         if fixed_key:
             inner += f" AND {fixed_key[0]}"

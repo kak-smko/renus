@@ -4756,3 +4756,90 @@ async def test_scalar_type_roundtrips_and_sql_text_length(kind):
         assert fetched.custom == CustomValue("custom-value")
     finally:
         await cleanup(db)
+
+
+class TableWithEmbedded(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    name: str
+    settings = Embedded(dict, loading="joined")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_search_matches_values_in_embedded_dictionary_paths(kind):
+    async def setup():
+        database = await database_for(kind, [TableWithEmbedded])
+        repository = database.repository(TableWithEmbedded)
+        await repository.create(
+            TableWithEmbedded(
+                id="1",
+                name="first",
+                settings={"en": "Hello world", "fa": "Salam", "code": "alpha"},
+            )
+        )
+        await repository.create(
+            TableWithEmbedded(
+                id="2",
+                name="second",
+                settings={"en": "Good morning", "fa": "صبح بخیر", "code": "bravo"},
+            )
+        )
+        await repository.create(
+            TableWithEmbedded(
+                id="3",
+                name="third",
+                settings={"en": "Good morning", "fa": "صبح زیبا", "code": "charlie"},
+            )
+        )
+        await repository.create(
+            TableWithEmbedded(
+                id="4",
+                name="fourth",
+                settings={"en": "Good evening", "fa": "سلام"},
+            )
+        )
+        return database, repository
+
+    database, repository = await setup()
+    try:
+        results = await repository.where(
+            TableWithEmbedded.settings.fa.like("%صبح%")
+        ).order_by(TableWithEmbedded.id.asc()).all()
+        assert len(results) == 2
+        assert results[0].settings["fa"] == "صبح بخیر"
+        assert results[1].settings["fa"] == "صبح زیبا"
+        assert await repository.where(
+            TableWithEmbedded.settings.fa.like("%صبح%")
+        ).count() == 2
+
+        async def matching_ids(condition):
+            return [
+                row.id
+                for row in await repository.where(condition)
+                .order_by(TableWithEmbedded.id.asc())
+                .all()
+            ]
+
+        code = TableWithEmbedded.settings.code
+        assert await matching_ids(code == "bravo") == ["2"]
+        assert await matching_ids(code != "bravo") == ["1", "3", "4"]
+        assert await matching_ids(code > "bravo") == ["3"]
+        assert await matching_ids(code >= "bravo") == ["2", "3"]
+        assert await matching_ids(code < "bravo") == ["1"]
+        assert await matching_ids(code <= "bravo") == ["1", "2"]
+        assert await matching_ids(code.in_(["alpha", "charlie"])) == ["1", "3"]
+        assert await matching_ids(code.not_in(["alpha", "charlie"])) == ["2", "4"]
+        assert await matching_ids(TableWithEmbedded.settings.missing.is_null()) == [
+            "1", "2", "3", "4"
+        ]
+        assert await matching_ids(code.is_not_null()) == ["1", "2", "3"]
+        assert await matching_ids(code.like("%li%")) == ["3"]
+        assert await matching_ids(code.regex(r"^b.*o$")) == ["2"]
+        assert await matching_ids(code.between("bravo", "charlie")) == ["2", "3"]
+        assert await matching_ids((code >= "bravo") & (code < "charlie")) == ["2"]
+        assert await matching_ids((code == "alpha") | (code == "charlie")) == [
+            "1", "3"
+        ]
+        assert await matching_ids(~(code == "bravo")) == ["1", "3", "4"]
+    finally:
+        await cleanup(database)
