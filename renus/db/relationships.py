@@ -118,6 +118,7 @@ class Relationship:
         is_embedded: bool = False,
         is_collection: bool = False,
         rules: tuple[Any, ...] = (),
+        **extra: Any,
     ) -> None:
         """Configure a relationship descriptor.
 
@@ -178,6 +179,7 @@ class Relationship:
         self.is_embedded = is_embedded
         self.is_collection = is_collection
         self.rules = tuple(rules)
+        self.extra = extra
         self._name: str | None = None
         self._owner: type | None = None
 
@@ -226,6 +228,7 @@ class EmbeddedOne(Relationship):
         target: type,
         *rules: Any,
         loading: str | LoadingStrategy = "lazy",
+        **extra: Any,
     ) -> None:
         """Declare an embedded single relationship.
 
@@ -251,6 +254,7 @@ class EmbeddedOne(Relationship):
             is_embedded=True,
             is_collection=False,
             rules=rules,
+            **extra,
         )
 
 Embedded = EmbeddedOne
@@ -262,6 +266,7 @@ class EmbeddedMany(Relationship):
         target: type,
         *rules: Any,
         loading: str | LoadingStrategy = "lazy",
+        **extra: Any,
     ) -> None:
         """Declare an embedded collection relationship.
 
@@ -287,6 +292,7 @@ class EmbeddedMany(Relationship):
             is_embedded=True,
             is_collection=True,
             rules=rules,
+            **extra,
         )
 
 class Reference(Relationship):
@@ -303,6 +309,7 @@ class Reference(Relationship):
         loading: str | LoadingStrategy = "lazy",
         kind: RelationshipKind | str = RelationshipKind.REFERENCE,
         is_collection: bool = False,
+        **extra: Any,
     ) -> None:
         """Declare a reference relationship.
 
@@ -345,6 +352,7 @@ class Reference(Relationship):
             foreign_key=foreign_key,
             is_embedded=False,
             is_collection=is_collection,
+            **extra
         )
 
 class OneToOne(Reference):
@@ -359,6 +367,7 @@ class OneToOne(Reference):
         on_delete: str | ReferentialAction = "restrict",
         on_update: str | ReferentialAction = "cascade",
         loading: str | LoadingStrategy = "lazy",
+        **extra: Any,
     ) -> None:
         """Declare a one-to-one relationship.
 
@@ -396,6 +405,7 @@ class OneToOne(Reference):
             loading=loading,
             kind=RelationshipKind.ONE_TO_ONE,
             is_collection=False,
+            **extra
         )
 
 class OneToMany(Reference):
@@ -410,6 +420,7 @@ class OneToMany(Reference):
         on_delete: str | ReferentialAction = "restrict",
         on_update: str | ReferentialAction = "cascade",
         loading: str | LoadingStrategy = "lazy",
+        **extra: Any,
     ) -> None:
         """Declare a one-to-many relationship.
 
@@ -447,6 +458,7 @@ class OneToMany(Reference):
             loading=loading,
             kind=RelationshipKind.ONE_TO_MANY,
             is_collection=True,
+            **extra
         )
 
 class ManyToOne(Reference):
@@ -459,6 +471,7 @@ class ManyToOne(Reference):
         foreign_key: str | None = None,
         on_save: SaveAction | str = "no action",
         loading: str | LoadingStrategy = "lazy",
+        **extra: Any,
     ) -> None:
         """Declare a many-to-one relationship.
 
@@ -488,6 +501,7 @@ class ManyToOne(Reference):
             loading=loading,
             kind=RelationshipKind.MANY_TO_ONE,
             is_collection=False,
+            **extra
         )
 
 class ManyToMany(Reference):
@@ -501,6 +515,7 @@ class ManyToMany(Reference):
         foreign_key: str | None = None,
         on_save: SaveAction | str = "no action",
         loading: str | LoadingStrategy = "lazy",
+        **extra: Any,
     ) -> None:
         """Declare a many-to-many relationship.
 
@@ -532,5 +547,6 @@ class ManyToMany(Reference):
             loading=loading,
             kind=RelationshipKind.MANY_TO_MANY,
             is_collection=True,
+            **extra
         )
         self.through = through

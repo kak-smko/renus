@@ -151,7 +151,7 @@ class ModelMeta(type):
             validation_fields[rname] = FieldInfo(
                 name=rname,
                 field_type=field_type,
-                field=Field(*rel.rules, default=default),
+                field=Field(*rel.rules, default=default, **rel.extra),
                 default=default,
                 model_base=Model,
             )

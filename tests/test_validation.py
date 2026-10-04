@@ -253,8 +253,18 @@ def test_embedded_relationship_validation_rules():
         city: str
 
     class Customer(Model):
-        contact: Contact = EmbeddedOne(Contact, MinLen(2))
-        contacts: list[Contact] = EmbeddedMany(Contact, MinLen(1), MaxLen(2))
+        contact: Contact = EmbeddedOne(
+            Contact, MinLen(2), description="Primary contact", widget="contact-card"
+        )
+        contacts: list[Contact] = EmbeddedMany(
+            Contact, MinLen(1), MaxLen(2), description="Other contacts", widget="contact-list"
+        )
+
+    assert Customer.__db_metadata__.relationships["contact"].target is Contact
+    assert Customer.__dict__["contact"].extra["widget"] == "contact-card"
+    assert Customer._model_fields["contact"].field.description == "Primary contact"
+    assert Customer.__dict__["contacts"].extra["widget"] == "contact-list"
+    assert Customer._model_fields["contacts"].field.description == "Other contacts"
 
     customer = Customer(
         contact={"name": "Ada", "city": "London"},
