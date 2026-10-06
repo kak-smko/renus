@@ -131,7 +131,7 @@ The original media type is in `real-type`; the wire body is binary encrypted dat
 
 If your client sends encrypted request bodies to Renus, send the base64 form expected by `decrypt_text()`. If the client must decrypt Renus responses with `decrypt_text()`-compatible logic, either base64-decode the response body before decryption or change the cryptor integration consistently on both sides. Do not make this change on only one side.
 
-The `cryptor` response argument is available on the base `Response` and response subclasses that pass it through, including `JsonResponse` and `JsonResponseRedirect`. See [`/docs/development/response.md`](/docs/development/response.md) for the response API.
+The `cryptor` response argument is available on the base `Response` and response subclasses that pass it through, including `JsonResponse`. See [`/docs/development/response.md`](/docs/development/response.md) for the response API.
 
 The response implementation catches an exception from `encrypt()` and falls back to an unencrypted response. Treat that fallback as a deployment concern: if encryption is mandatory, add an application-level check or middleware so a cryptor failure cannot silently disclose the body.
 

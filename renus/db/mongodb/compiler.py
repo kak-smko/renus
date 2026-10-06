@@ -793,9 +793,9 @@ class MongoCompiler:
 
         if self._is_raw_list_path(c):
             if op == Operator.EQ and isinstance(val, list):
-                return {path: {"$all": val}}
+                return {path: {"$all": [self.dialect.encode_value(v) for v in val]}}
             if op == Operator.IN and not isinstance(val, (list, tuple, set)):
-                return {path: val}
+                return {path: self.dialect.encode_value(val)}
 
         if op == Operator.EQ:
             return {path: self.dialect.encode_value(val)}

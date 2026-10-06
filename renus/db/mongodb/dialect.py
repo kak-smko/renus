@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from renus.db.core import convert
+from renus.db.core import DatabaseError, convert
 from renus.db.models.base import Model
 from renus.datastructures.id import ID, is_identity
 
@@ -86,6 +86,8 @@ class MongoDialect:
         if hasattr(field_meta, "fields") and isinstance(value, dict):
             encoded_doc: dict[str, Any] = {}
             for k, v in value.items():
+                if str(k).startswith("$"):
+                    raise DatabaseError(f"{k}: key with $ not allowed")
                 fmeta = field_meta.fields.get(k)
                 encoded_doc[k] = self.encode_value(v, fmeta)
             return encoded_doc
@@ -97,8 +99,18 @@ class MongoDialect:
             target_model = getattr(field_meta, "target", None)
             nested_meta = getattr(target_model, "__db_metadata__", None) if target_model else None
             if nested_meta:
-                return {k: self.encode_value(v, nested_meta.fields.get(k)) for k, v in value.items()}
-            return {k: self.encode_value(v) for k, v in value.items()}
+                r= {}
+                for k, v in value.items():
+                    if str(k).startswith("$"):
+                        raise DatabaseError(f"{k}: key with $ not allowed")
+                    r[k]=self.encode_value(v, nested_meta.fields.get(k))
+                return r
+            r= {}
+            for k, v in value.items():
+                if str(k).startswith("$"):
+                    raise DatabaseError(f"{k}: key with $ not allowed")
+                r[k]=self.encode_value(v)
+            return r
 
         if isinstance(value, (list, tuple, set)):
             target_model = getattr(field_meta, "target", None)

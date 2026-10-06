@@ -10,6 +10,14 @@ from renus.response.status import Status
 
 _CONTENT_ENCODING_NONE = b"none"
 _CONTENT_ENCODING_GZIP = b"gzip"
+_FORBIDDEN_HEADER_CHARS = ("\r", "\n", "\0")
+
+def _validate_header_value(name: str, value: str) -> None:
+    """Reject header/cookie values that could split HTTP headers."""
+    if any(c in value for c in _FORBIDDEN_HEADER_CHARS):
+        raise ValueError(
+            f"Header value for {name!r} contains illegal control characters"
+        )
 
 @lru_cache(maxsize=64)
 def _encode_content_type(media_type: str, charset: str) -> bytes:
@@ -106,6 +114,7 @@ class Response:
         if headers is not None:
             for key, value in headers.items():
                 lower_key = key.lower()
+                _validate_header_value(lower_key, value)
                 if lower_key not in ("content-length", "cache-control"):
                     encoded_value = value.encode("utf-8")
                     if self.encrypt and lower_key == "content-type":
@@ -136,11 +145,14 @@ class Response:
         expires: Optional[int] = None,
         path: str = "/",
         domain: Optional[str] = None,
-        secure: bool = False,
-        httponly: bool = False,
+        secure: bool = True,
+        httponly: bool = True,
         samesite: str = "lax",
     ) -> None:
-        """Set a cookie on the response."""
+        """Set a cookie on the response.
+        """
+        _validate_header_value(key, key)
+        _validate_header_value(key, value)
         cookie = http.cookies.SimpleCookie()
         cookie[key] = value
         if max_age is not None:
@@ -215,4 +227,3 @@ class Response:
 
         if self.background is not None:
             await self.background()
-

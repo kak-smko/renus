@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import pickle
 import threading
 import time
 import uuid
 
 from renus.cache.base import BaseCache
+from renus.cache.signing import dumps as _signed_dumps
+from renus.cache.signing import loads as _signed_loads
 from renus.config import Config
 
 
@@ -65,7 +66,7 @@ class RedisCache(BaseCache):
         """Store ``value`` under ``key`` with a TTL of ``expire`` seconds."""
         client = self._client()
         rid = self._id(key)
-        blob = pickle.dumps(value, pickle.HIGHEST_PROTOCOL)
+        blob = _signed_dumps(value)
         if expire is None or expire < 0:
             client.set(rid, blob)
         else:
@@ -76,7 +77,13 @@ class RedisCache(BaseCache):
         client = self._client()
         rid = self._id(key)
         raw = client.get(rid)
-        return default if raw is None else pickle.loads(raw)
+        if raw is None:
+            return default
+        try:
+            return _signed_loads(raw)
+        except ValueError:
+            self.delete(key)
+            return default
 
     def increment(self, key, value, expire: int = 60):
         """Add ``value`` to the existing value and return the new total."""
@@ -85,8 +92,14 @@ class RedisCache(BaseCache):
         token = self._acquire_lock(rid)
         try:
             raw = client.get(rid)
-            new = value if raw is None else pickle.loads(raw) + value
-            blob = pickle.dumps(new, pickle.HIGHEST_PROTOCOL)
+            if raw is None:
+                new = value
+            else:
+                try:
+                    new = _signed_loads(raw) + value
+                except ValueError:
+                    new = value
+            blob = _signed_dumps(new)
             if expire is None or expire < 0:
                 client.set(rid, blob)
             else:
@@ -123,7 +136,7 @@ class RedisCache(BaseCache):
 
     def delete_expired(self):
         """No-op for Redis: expired keys are handled by Redis TTL."""
-        
+
         return 0
 
 _pool = None
@@ -134,10 +147,20 @@ def _get_client():
     conf = Config("app")
     with _pool_lock:
         if _pool is None:
-            _pool = _redis_lib.ConnectionPool(
-                host=conf.get("redis_host", "localhost"),
-                port=conf.get("redis_port", 6379),
-                db=conf.get("redis_db", 0),
-                decode_responses=False,
-            )
+            kwargs: dict = {
+                "host": conf.get("redis_host", "localhost"),
+                "port": conf.get("redis_port", 6379),
+                "db": conf.get("redis_db", 0),
+                "decode_responses": False,
+            }
+            password = conf.get("redis_password")
+            if password:
+                kwargs["password"] = password
+            username = conf.get("redis_username")
+            if username:
+                kwargs["username"] = username
+            if conf.get("redis_ssl", False):
+                kwargs["connection_class"] = _redis_lib.SSLConnection
+                kwargs["ssl_cert_reqs"] = conf.get("redis_ssl_cert_reqs", "required")
+            _pool = _redis_lib.ConnectionPool(**kwargs)
         return _redis_lib.Redis(connection_pool=_pool)

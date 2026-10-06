@@ -36,11 +36,11 @@ class SQLDialect(ABC):
     ) -> str:
         """Append LIMIT and OFFSET clauses to ``sql``."""
         if limit is not None:
-            sql += f" LIMIT {limit}"
+            sql += f" LIMIT {int(limit)}"
         elif offset is not None:
             sql += " LIMIT -1"
         if offset is not None:
-            sql += f" OFFSET {offset}"
+            sql += f" OFFSET {int(offset)}"
         return sql
 
     @abstractmethod

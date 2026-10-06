@@ -181,7 +181,7 @@ return StreamingResponse(stream(), media_type="text/plain")
 abort("not found", Status.HTTP_404_NOT_FOUND)
 ```
 
-Use response objects for headers, cookies, status, media type, background tasks, and optional cryptors. Available exports include `Response`, `TextResponse`, `HtmlResponse`, `JsonResponse`, `JsonResponseRedirect`, `RedirectResponse`, `StreamingResponse`, `FileResponse`, `PrivateResponse`, `Status`, `HTTPException`, `abort`, `abort_if`, and `abort_unless`.
+Use response objects for headers, cookies, status, media type, background tasks, and optional cryptors. Available exports include `Response`, `TextResponse`, `HtmlResponse`, `JsonResponse`, `RedirectResponse`, `StreamingResponse`, `FileResponse`, `PrivateResponse`, `Status`, `HTTPException`, `abort`, `abort_if`, and `abort_unless`.
 
 ### 40–50%: middleware, lifecycle, and application state
 

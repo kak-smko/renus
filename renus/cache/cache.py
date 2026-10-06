@@ -167,8 +167,9 @@ def cache(time: int, prefix: str = ""):
         def wrapper(*args, **kw):
             k = prefix + file + name
             for i in args:
-                if type(i) in [str, int, float, list, dict, tuple, set]:
-                    k = k + hash_key(i)
+                k = k + hash_key(i)
+            if kw:
+                k = k + hash_key(sorted(kw.items()))
 
             has = Cache().get(k, "no_cached")
             if has != "no_cached":

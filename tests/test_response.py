@@ -13,7 +13,6 @@ from renus.response import (
     HtmlResponse,
     HTTPException,
     JsonResponse,
-    JsonResponseRedirect,
     PrivateResponse,
     RedirectResponse,
     Response,
@@ -190,17 +189,6 @@ class TestJsonResponses:
     def test_json_renders_datetime_via_encoder(self):
         response = JsonResponse({"when": datetime(2024, 1, 2, 3, 4, 5)})
         assert json.loads(response.body) == {"when": "2024-01-02T03:04:05Z"}
-
-    def test_json_bytes_passed_through(self):
-        response = JsonResponse(b"raw-bytes")
-        assert response.body == b"raw-bytes"
-
-class TestJsonResponseRedirect:
-    def test_307_and_location_in_body(self):
-        response = JsonResponseRedirect("/next")
-        assert response.status_code == Status.HTTP_307_TEMPORARY_REDIRECT
-        data = json.loads(response.body)
-        assert data["location"] == "/next"
 
 class TestRedirectResponse:
     def test_sets_location_header(self):

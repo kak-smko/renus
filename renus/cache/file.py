@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import pickle
 import sqlite3
 import threading
 import time
 from pathlib import Path
 
 from renus.cache.base import BaseCache
+from renus.cache.signing import dumps as _signed_dumps
+from renus.cache.signing import loads as _signed_loads
 from renus.config import Config
 
 
@@ -57,7 +58,7 @@ class FileCache(BaseCache):
     def put(self, key, value, expire: int = 60):
         """Store ``value`` under ``key`` with a TTL of ``expire`` seconds."""
         expires = -1.0 if expire is None or expire < 0 else time.time() + expire
-        blob = pickle.dumps(value, pickle.HIGHEST_PROTOCOL)
+        blob = _signed_dumps(value)
         with _db_lock:
             self._connection().execute(
                 "INSERT INTO entries(key, value, expires) VALUES(?, ?, ?) "
@@ -79,7 +80,11 @@ class FileCache(BaseCache):
         if expires != -1 and expires < time.time():
             self.delete(key)
             return default
-        return pickle.loads(blob)
+        try:
+            return _signed_loads(blob)
+        except ValueError:
+            self.delete(key)
+            return default
 
     def increment(self, key, value, expire: int = 60):
         """Add ``value`` to the existing value and return the new total."""
@@ -96,11 +101,14 @@ class FileCache(BaseCache):
                             "SELECT value FROM entries WHERE key=?", (rid,)
                         ).fetchone()
                         if row is not None:
-                            new = pickle.loads(row[0]) + value
+                            try:
+                                new = _signed_loads(row[0]) + value
+                            except ValueError:
+                                new = value
                         self._connection().execute(
                             "INSERT INTO entries(key, value, expires) VALUES(?, ?, ?) "
                             "ON CONFLICT(key) DO UPDATE SET value=excluded.value, expires=excluded.expires",
-                            (rid, pickle.dumps(new, pickle.HIGHEST_PROTOCOL), expires),
+                            (rid, _signed_dumps(new), expires),
                         )
                         self._connection().commit()
                     except BaseException:

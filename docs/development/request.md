@@ -36,7 +36,7 @@ A controller whose `__init__` declares `request` receives the current `Request` 
 | -------------- | ----------- |
 | `request.client`   | Client host and port from the ASGI scope (a list). |
 | `request.ip`       | Client IP. Honors the `ipHeader` app config when set; otherwise uses the client address. |
-| `request.subdomain`| The first label of the `Host` header, or `None` for bare hosts / IP literals. |
+| `request.subdomain`| Subdomain of the `Host` header, validated against the `host` app config: hosts outside the configured domain yield `None`. Without a configured `host`, this is the first Host label. `None` for bare hosts / IP literals. |
 
 The `ipHeader` value is read from the `config.app` module via `Config("app").get("ipHeader", False)`.
 

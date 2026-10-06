@@ -75,8 +75,27 @@ class FileResponse(Response):
             self._set_content_disposition(self.filename)
 
         self.stat_result = stat_result
-        if stat_result is not None:
-            self.set_stat_headers(stat_result, False)
+
+    def _stat_headers(self, stat_result: os.stat_result, is_zip: bool) -> list[tuple[bytes, bytes]]:
+        """Build stat-derived headers (length, modified, etag).
+
+        ``content-length`` is only emitted for uncompressed responses: the
+        gzip body length is not known until streaming completes.
+        """
+        headers: list[tuple[bytes, bytes]] = []
+        if not is_zip:
+            content_length = str(stat_result.st_size)
+            headers.append((b"content-length", content_length.lower().encode("utf-8")))
+        last_modified = formatdate(stat_result.st_mtime, usegmt=True)
+        etag_base = str(stat_result.st_mtime) + "-" + str(stat_result.st_size)
+        etag = md5(etag_base.encode()).hexdigest()
+        headers.append((b"last-modified", last_modified.lower().encode("utf-8")))
+        headers.append((b"etag", etag.lower().encode("utf-8")))
+        return headers
+
+    def set_stat_headers(self, stat_result: os.stat_result, is_zip: bool) -> None:
+        """Add stat-derived headers (length, modified, etag)."""
+        self.raw_headers.extend(self._stat_headers(stat_result, is_zip))
 
     def _set_content_disposition(self, filename: str) -> None:
         content_disposition_filename = quote(filename)
@@ -90,17 +109,6 @@ class FileResponse(Response):
             (b"content-disposition", content_disposition.encode("utf-8"))
         )
 
-    def set_stat_headers(self, stat_result: os.stat_result, is_zip: bool) -> None:
-        """Add stat-derived headers (length, modified, etag)."""
-        content_length = str(stat_result.st_size)
-        last_modified = formatdate(stat_result.st_mtime, usegmt=True)
-        etag_base = str(stat_result.st_mtime) + "-" + str(stat_result.st_size)
-        etag = md5(etag_base.encode()).hexdigest()
-        if not is_zip:
-            self.raw_headers.append((b"content-length", content_length.lower().encode("utf-8")))
-        self.raw_headers.append((b"last-modified", last_modified.lower().encode("utf-8")))
-        self.raw_headers.append((b"etag", etag.lower().encode("utf-8")))
-
     async def __call__(self, request, scope, receive, send) -> None:
         """Stream the file over the ASGI interface."""
         headers = request.headers
@@ -110,11 +118,10 @@ class FileResponse(Response):
             and not self.send_header_only
         )
         zipper = GzipStreamer() if is_zip else None
-        self.raw_headers.append(
-            (b"content-encoding", ("gzip" if is_zip else "none").encode("utf-8"))
-        )
+        content_encoding = (b"gzip" if is_zip else b"none")
 
-        if self.stat_result is None:
+        stat_result = self.stat_result
+        if stat_result is None:
             try:
                 stat_result = await anyio.to_thread.run_sync(os.stat, self.path)
             except FileNotFoundError:
@@ -124,13 +131,19 @@ class FileResponse(Response):
                 raise FileResponseError(
                     f"File at path {self.path} is not a file."
                 ) from None
-            self.set_stat_headers(stat_result, is_zip)
+            self.stat_result = stat_result
+
+        response_headers = [
+            *self.raw_headers,
+            (b"content-encoding", content_encoding),
+            *self._stat_headers(stat_result, is_zip),
+        ]
 
         await send(
             {
                 "type": "http.response.start",
                 "status": self.status_code,
-                "headers": self.raw_headers,
+                "headers": response_headers,
             }
         )
         if self.send_header_only:

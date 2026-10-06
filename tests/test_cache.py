@@ -276,6 +276,65 @@ class TestCacheFunc:
         assert double(2) == 4
         assert len(calls) == 2
 
+class TestSignedSerialization:
+    def test_tampered_entry_returns_default(self, file_cache):
+        from renus.cache import file as file_module
+
+        file_cache.put("k", {"a": 1}, expire=60)
+        rid = file_cache._id("k")
+        conn = file_cache._connection()
+        row = conn.execute("SELECT value FROM entries WHERE key=?", (rid,)).fetchone()
+        blob = bytearray(row[0])
+        blob[-1] ^= 0xFF
+        conn.execute("UPDATE entries SET value=? WHERE key=?", (bytes(blob), rid))
+        conn.commit()
+        assert file_cache.get("k") is None
+
+    def test_unsigned_legacy_entry_returns_default_and_is_purged(self, file_cache):
+        import pickle as _pickle
+
+        from renus.cache import file as file_module
+
+        file_cache.put("k", "v", expire=60)
+        rid = file_cache._id("k")
+        conn = file_cache._connection()
+        conn.execute(
+            "UPDATE entries SET value=? WHERE key=?", (_pickle.dumps("evil"), rid)
+        )
+        conn.commit()
+        assert file_cache.get("k") is None
+        assert conn.execute("SELECT value FROM entries WHERE key=?", (rid,)).fetchone() is None
+
+    def test_increment_over_unsigned_entry_resets_counter(self, file_cache):
+        import pickle as _pickle
+
+        from renus.cache import file as file_module
+
+        file_cache.put("cnt", 5, expire=60)
+        rid = file_cache._id("cnt")
+        conn = file_cache._connection()
+        conn.execute(
+            "UPDATE entries SET value=? WHERE key=?", (_pickle.dumps(999), rid)
+        )
+        conn.commit()
+        assert file_cache.increment("cnt", 3, expire=60) == 3
+        assert file_cache.get("cnt") == 3
+
+    def test_corrupt_redis_entry_returns_default(self, redis_cache):
+        redis_cache.put("k", "v", expire=60)
+        redis_cache._rd.data[redis_cache._id("k")] = b"not-a-signed-blob"
+        assert redis_cache.get("k") is None
+
+    def test_tampered_redis_entry_returns_default(self, redis_cache):
+        redis_cache.put("k", {"a": 1}, expire=60)
+        rid = redis_cache._id("k")
+        entry = redis_cache._rd.data[rid]
+        blob = bytearray(entry[0] if isinstance(entry, tuple) else entry)
+        blob[-1] ^= 0xFF
+        redis_cache._rd.data[rid] = bytes(blob)
+        assert redis_cache.get("k") is None
+
+
 class TestConcurrency:
     def test_file_increment_atomic_across_threads(self, file_cache):
         n_threads, per = 8, 100

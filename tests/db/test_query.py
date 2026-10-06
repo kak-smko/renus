@@ -203,6 +203,28 @@ def test_offset_limit_pagination():
     assert q.ast.offset == 10
     assert q.ast.limit == 20
 
+def test_paginate_coerces_untrusted_types():
+    q = Query(User).paginate("2", "10")
+    assert q.ast.offset == 10
+    assert q.ast.limit == 10
+
+def test_paginate_clamps_negative_and_zero():
+    q = Query(User).paginate(0, "5")
+    assert q.ast.offset == 0
+    assert q.ast.limit == 5
+    q_neg = Query(User).paginate(1, -5)
+    assert q_neg.ast.limit == 0
+
+def test_limit_offset_dialect_coerces_values():
+    from renus.db.sqlite.dialect import SQLiteDialect
+
+    dialect = SQLiteDialect()
+    sql = dialect.limit_offset("SELECT 1", "5", "10")
+    assert sql == "SELECT 1 LIMIT 5 OFFSET 10"
+    # Non-numeric expressions now fail closed instead of being interpolated.
+    with pytest.raises(ValueError):
+        dialect.limit_offset("SELECT 1", "(SELECT CASE WHEN 1=1 THEN 1 ELSE 999999 END)", None)
+
 def test_page_size_pagination():
     q_p1 = Query(User).paginate(page=1, size=25)
     assert q_p1.ast.offset == 0

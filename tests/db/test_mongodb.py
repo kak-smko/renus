@@ -33,6 +33,10 @@ class Location(Model):
     city: str
     country: str
 
+class TagDoc(Model):
+    id: int = Field(database=DatabaseField(primary_key=True, generated=True))
+    tags: list
+
 class OrderItem(Model):
     name: str
     price: float
@@ -73,6 +77,33 @@ def test_mongo_compiler_comparisons_and_predicates():
     q_between = repo.query(AccountDoc.age.between(20, 30)).ast
     compiled_between = compiler.compile_query(q_between)
     assert compiled_between.filter["age"] == {"$gte": 20, "$lte": 30}
+
+def test_mongo_filter_rejects_operator_dicts_in_values():
+    from renus.db import DatabaseError, Path
+
+    compiler = MongoCompiler()
+    repo = Repository(MongoDBAdapter(), AccountDoc)
+
+    # A dict value must be treated as data, not re-interpreted as operators.
+    q_ast = repo.query(Path(AccountDoc, ("age",)) == {"$ne": None}).ast
+    with pytest.raises(DatabaseError):
+        compiler.compile_query(q_ast)
+
+def test_mongo_raw_list_path_encodes_values():
+    from renus.db import DatabaseError, Path
+
+    compiler = MongoCompiler()
+    repo = Repository(MongoDBAdapter(), TagDoc)
+
+    # Embedded-many-of-primitives bypasses the normal operator compilation,
+    # so values there must still go through encode_value.
+    q_ast = repo.query(Path(TagDoc, ("tags",)) == [{"$ne": None}]).ast
+    with pytest.raises(DatabaseError):
+        compiler.compile_query(q_ast)
+
+    q_ok = repo.query(Path(TagDoc, ("tags",)) == ["a", "b"]).ast
+    compiled = compiler.compile_query(q_ok)
+    assert compiled.filter["tags"] == {"$all": ["a", "b"]}
 
 def test_mongo_compiler_logical_combinations():
     compiler = MongoCompiler()

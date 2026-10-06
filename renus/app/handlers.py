@@ -39,12 +39,13 @@ def build_endpoint(res, method, request):
         return await method(**kwargs)
 
     async def cached(**kwargs):
-        c = Cache().get(request.full_path, None)
+
+        c = Cache().get(request.path, None)
         if c is not None:
             c.raw_headers.append((b"r-cache", b"ok"))
             return c
         r = await dispatch(**kwargs)
-        Cache().put(request.full_path, r, res["cache"])
+        Cache().put(request.path, r, res["cache"])
         return r
 
     return cached

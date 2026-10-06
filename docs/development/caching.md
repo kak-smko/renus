@@ -30,7 +30,7 @@ r = Router()
 r.get('/slow-report', None, report, None, 60)
 ```
 
-Cached responses are keyed by `request.full_path` and stored in the configured cache backend. On a cache hit the stored response is returned and annotated with an `r-cache: ok` header so you can see when a response was served from cache. See [Routing](/docs/development/routing.md) and [Application](/docs/development/app.md) for the full signature of the `cache` argument.
+Cached responses are keyed by `request.path` (the request path only) and stored in the configured cache backend. On a cache hit the stored response is returned and annotated with an `r-cache: ok` header so you can see when a response was served from cache. See [Routing](/docs/development/routing.md) and [Application](/docs/development/app.md) for the full signature of the `cache` argument.
 
 > Route caching only applies to `GET` and `HEAD` methods.
 

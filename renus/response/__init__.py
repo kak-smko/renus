@@ -11,7 +11,7 @@ from renus.response.exceptions import (
 )
 from renus.response.file import FileResponse
 from renus.response.gzip import GzipStreamer
-from renus.response.json import JsonResponse, JsonResponseRedirect
+from renus.response.json import JsonResponse
 from renus.response.private import PrivateResponse
 from renus.response.redirects import RedirectResponse
 from renus.response.status import Status
@@ -23,7 +23,6 @@ __all__ = [
     "HtmlResponse",
     "TextResponse",
     "JsonResponse",
-    "JsonResponseRedirect",
     "RedirectResponse",
     "StreamingResponse",
     "FileResponse",

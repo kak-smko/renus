@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from __future__ import annotations
-
 from renus.db.core.exceptions import (
     ConfigurationError,
     ConnectionError as DBConnectionError,

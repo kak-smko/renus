@@ -4,7 +4,7 @@ import typing
 from urllib.parse import parse_qsl
 
 from renus.datastructures import FormData, UploadFile
-from renus.request.limits import MAX_BODY_SIZE
+from renus.request.limits import MAX_BODY_SIZE, MAX_FORM_PARTS
 from renus.request.options import parse_options_header
 
 HeaderDict = typing.Mapping[str, typing.Any]
@@ -76,6 +76,7 @@ class MultiPartParser:
         self.headers = headers
         self.stream = stream
         self.max_body_size = MAX_BODY_SIZE
+        self.max_parts = MAX_FORM_PARTS
 
     async def parse(self) -> FormData:
         """Parse the multipart body into a form-data mapping."""
@@ -102,7 +103,13 @@ class MultiPartParser:
         delimiter = b"--" + boundary
         chunks = body.split(delimiter)
         items: list[tuple[str, FormItem]] = []
+        part_count = 0
         for chunk in chunks[1:-1]:
+            part_count += 1
+            if part_count > self.max_parts:
+                raise RuntimeError(
+                    f"Multipart body exceeds the maximum of {self.max_parts} parts"
+                )
             await self._parse_part(chunk, charset, items)
         return FormData(items)
 

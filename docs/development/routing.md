@@ -130,7 +130,7 @@ admin = Router(prefix='/api/admin', subdomain='admin')
 app.include(admin)
 ```
 
-Routes resolve by matching the request's subdomain first (the first label of the `Host` header), then the default domain.
+Routes resolve by matching the request's subdomain first, then the default domain.
 
 ## CRUD shorthand
 
@@ -157,7 +157,7 @@ Each `App` owns a `RouteRegistry` instance, grouped by subdomain and method. Rou
 
 1. Reads the request method and the normalized path from the scope (a trailing `/` is stripped).
 2. Rejects unsupported methods and raises on path-traversal attempts (`..` or a null byte).
-3. Checks the request's subdomain, then the default domain.
+3. Checks the request's subdomain (validated against the configured `host` app config), then the default domain.
 4. Matches the exact (static) path first, then tries the compiled path-parameter regexes in registration order.
 5. Builds a route result carrying the resolved arguments (already converted to their typed values), the controller, handler, middlewares, and optional cache TTL.
 

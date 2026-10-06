@@ -20,6 +20,21 @@ _UNSET = types.SimpleNamespace()
 _IP_LITERAL_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){3}(?::[0-9]+)?$")
 
 
+def _host_without_port(host: str) -> str:
+    """Strip the port from a ``Host`` header value (name, IPv4, or IPv6)."""
+    if host.startswith("["):
+        return host[: host.index("]") + 1] if "]" in host else host
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
+def _normalize_domain(domain: str) -> str:
+    """Normalize a configured domain name for case-insensitive comparison."""
+    d = domain.strip().lower()
+    if "://" in d:
+        d = d.split("://", 1)[1]
+    return _host_without_port(d.split("/", 1)[0]).rstrip(".")
+
+
 class Request:
     """Represent an incoming HTTP request."""
 
@@ -47,6 +62,7 @@ class Request:
         self._cookies: dict[str, str] | object = _UNSET
         self._subdomain: str | None | object = _UNSET
         self._base_path: str | object = _UNSET
+        self._path: str | object = _UNSET
         self._full_path: str | object = _UNSET
         self._query_params: dict[str, str] | object = _UNSET
         self._body: bytes | object = _UNSET
@@ -96,13 +112,23 @@ class Request:
 
     @property
     def subdomain(self) -> typing.Optional[str]:
-        """First label of the host header, or ``None`` for bare hosts."""
+        """Subdomain derived from the ``Host`` header.
+        """
         if self._subdomain is _UNSET:
             host = self.headers.get("host")
             if host is None or _IP_LITERAL_RE.match(host) or host.count(".") == 0:
                 self._subdomain = None
             else:
-                self._subdomain = host.split(".")[0]
+                host = _host_without_port(host).rstrip(".").lower()
+                domain = Config("app").get("host")
+                prefix: typing.Optional[str] = None
+                if isinstance(domain, str) and domain.strip():
+                    normalized = _normalize_domain(domain)
+                    if host.endswith("." + normalized):
+                        prefix = host[: -(len(normalized) + 1)] or None
+                else:
+                    prefix = host.split(".")[0]
+                self._subdomain = None if prefix in (None, "_") else prefix
         return typing.cast(typing.Optional[str], self._subdomain)
 
     @property
@@ -139,6 +165,13 @@ class Request:
             self._base_path = url
 
         return typing.cast(str, self._base_path)
+
+    @property
+    def path(self) -> str:
+        """Request path including ``root_path``, without scheme/host or query string."""
+        if self._path is _UNSET:
+            self._path = self._scope.get("root_path", "") + self._scope.get("path", "")
+        return typing.cast(str, self._path)
 
     @property
     def full_path(self) -> str:

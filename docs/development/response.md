@@ -8,7 +8,6 @@ from renus.response import (
     TextResponse,
     HtmlResponse,
     JsonResponse,
-    JsonResponseRedirect,
     RedirectResponse,
     StreamingResponse,
     FileResponse,
@@ -86,16 +85,6 @@ from renus.response import JsonResponse
 @app.get('/user/{name}')
 async def user(name):
     return JsonResponse({'name': name, 'hits': [1, 2, 3]})
-```
-
-### `JsonResponseRedirect`
-
-A JSON response that carries a redirect location. It builds the body as `{"location": <url>}` and defaults to status `HTTP_307_TEMPORARY_REDIRECT`:
-
-```python
-from renus.response import JsonResponseRedirect
-
-return JsonResponseRedirect('/next')
 ```
 
 ## Redirect responses

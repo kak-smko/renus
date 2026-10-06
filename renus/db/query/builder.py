@@ -149,15 +149,17 @@ class Query(Generic[T]):
 
     def offset(self, n: int) -> Query[T]:
         """Return a new query skipping the first n rows."""
-        return self._clone(offset=n)
+        return self._clone(offset=int(n))
 
     def limit(self, n: int) -> Query[T]:
         """Return a new query limited to n rows."""
-        return self._clone(limit=n)
+        return self._clone(limit=int(n))
 
     def paginate(self, page: int, size: int) -> Query[T]:
         """Return a new query scoped to a page of the given size."""
-        offset_val = max(0, page - 1) * size
+        page = max(1, int(page))
+        size = max(0, int(size))
+        offset_val = (page - 1) * size
         return self._clone(offset=offset_val, limit=size)
 
     def cursor(self, token: Any, field: Path | None = None) -> Query[T]:

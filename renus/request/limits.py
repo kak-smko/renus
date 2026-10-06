@@ -13,3 +13,5 @@ MAX_COOKIES: int = Config("app").get("max_cookies", 50)
 MAX_COOKIE_SIZE: int = Config("app").get("max_cookies_size", 4096)
 
 MAX_QUERY_SIZE: int = Config("app").get("max_query_size", 1024)
+
+MAX_FORM_PARTS: int = Config("app").get("max_form_parts", 1000)
