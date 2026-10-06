@@ -14,7 +14,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 # Version is read dynamically from renus/__init__.py (single source of truth).
 dynamic = ["version"]
-license = { text = "BSD-3-Clause" }
+license = "BSD-3-Clause"
 authors = [
     { name = "Smko Bayazidi", email = "ba.smko@gmail.com" },
 ]
@@ -25,7 +25,7 @@ classifiers = [
     "Environment :: Web Environment",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: BSD License",
+
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -76,9 +76,6 @@ version = { attr = "renus.__version__" }
 [tool.setuptools]
 packages = { find = { where = ["."], exclude = ["tests*","venv*", "benchmarks*", "storage*"] } }
 
-[[tool.setuptools.ext-modules]]
-name = "renus._speedup"
-sources = ["renus/_speedup.pyx"]
 
 [tool.cibuildwheel]
 # The wheel depends only on the Cython extension, so there is no per-platform

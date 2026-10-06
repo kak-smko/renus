@@ -134,32 +134,39 @@ class FileResponse(Response):
             }
         )
         if self.send_header_only:
-            await send({"type": "http.response.body", "body": b"", "more_body": False})
-        else:
+            await send({
+                "type": "http.response.body",
+                "body": b"",
+                "more_body": False,
+            })
+        elif zipper is None:
             async with await anyio.open_file(self.path, mode="rb") as file:
                 more_body = True
                 while more_body:
                     chunk = await file.read(self.chunk_size)
                     more_body = len(chunk) == self.chunk_size
-                    if zipper is not None:
-                        chunk = zipper.write(chunk)
-                    await send(
-                        {
+                    await send({
+                        "type": "http.response.body",
+                        "body": chunk,
+                        "more_body": more_body,
+                    })
+        else:
+            async with await anyio.open_file(self.path, mode="rb") as file:
+                while chunk := await file.read(self.chunk_size):
+                    compressed_chunk = zipper.write(chunk)
+                    if compressed_chunk:
+                        await send({
                             "type": "http.response.body",
-                            "body": chunk,
-                            "more_body": more_body,
-                        }
-                    )
-            if zipper is not None:
-                trailer = zipper.finish()
-                if trailer:
-                    await send(
-                        {
-                            "type": "http.response.body",
-                            "body": trailer,
-                            "more_body": False,
-                        }
-                    )
+                            "body": compressed_chunk,
+                            "more_body": True,
+                        })
+        
+            trailer = zipper.finish()
+            await send({
+                "type": "http.response.body",
+                "body": trailer,
+                "more_body": False,
+            })
         if self.on_end is not None:
             self.on_end()
         if self.background is not None:
