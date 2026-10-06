@@ -85,7 +85,7 @@ Rules are imported from `renus.db.validation.rules`:
 | Formats | `Email`, `Regex`, `Url`, `Ip` |
 | Files and records | `Extension`, `FileSize`, `Unique`, `Exists`, `ExistsCount` |
 | Collections and structure | `Each`, `MaxDepth`, `Schema`, `Or`, `And` |
-| Input processing | `Required`, `Default`, `Convert` |
+| Input processing | `Required` |
 
 Most rules treat `None` as valid; use `Required` when absence must be rejected. `Schema` can reject unknown keys when created with its default `strict=True`:
 
@@ -129,7 +129,7 @@ class Invoice(Model):
 
 `Field` rejects plain functions, lambdas, and other opaque callables. If a rule cannot be represented by JSON Schema, its `json_schema()` method should return `{}` rather than guessing at a constraint. `Model.schema()` includes the fragments returned by these methods.
 
-Use `And(rule_a, rule_b)` when every rule must pass and `Or(rule_a, rule_b)` when at least one must pass. Nested rules supplied to `Each`, `And`, and `Or` must also inherit `Rule`. Use `Convert` before later rules when input needs normalization or type conversion.
+Use `And(rule_a, rule_b)` when every rule must pass and `Or(rule_a, rule_b)` when at least one must pass. Nested rules supplied to `Each`, `And`, and `Or` must also inherit `Rule`.
 
 ## Security checklist
 

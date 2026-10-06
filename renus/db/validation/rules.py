@@ -2,9 +2,18 @@ import os
 import re
 
 from renus.db.validation.base import Rule
-from renus.db.validation.primitives import Convert, Default, Required
-from renus.db.validation.schema import Schema
 
+class Required(Rule):
+    """Pass when the input is not ``None``."""
+
+    is_required = True
+
+    def __call__(self, input) -> any:
+        return True if input is not None else "required_error"
+
+    def json_schema(self) -> dict[str, any]:
+        return {}
+        
 class String(Rule):
     """Pass when the input is a string."""
 

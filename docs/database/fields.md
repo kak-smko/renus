@@ -246,22 +246,6 @@ class Invoice(Model):
 
 `Field` rejects plain functions, lambdas, and other opaque callables. If a rule cannot be expressed in JSON Schema, return `{}` from `json_schema()`. The runtime callable may still normalize values by returning the transformed value, but the rule remains an explicit `Rule` class.
 
-### Conversion rules
-
-Use `Convert` when a value should be converted before type validation:
-
-```python
-from datetime import date
-
-from renus.db import Field, Model
-from renus.db.validation.primitives import Convert
-
-
-class Appointment(Model):
-    day: date = Field(Convert(date))
-```
-
-`Convert(date)` accepts an ISO date string and converts it with `date.fromisoformat`. `Convert(datetime)` does the equivalent for an ISO datetime string. The same pattern can be used with `Convert(time)` and an ISO time string. A conversion failure becomes a validation error.
 
 ## 6. When validation runs
 

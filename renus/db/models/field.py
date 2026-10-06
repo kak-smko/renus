@@ -157,10 +157,6 @@ class Field:
                 r = r()
             if not isinstance(r, Rule):
                 raise TypeError("Validation rules must inherit Rule")
-            if hasattr(r, "__class__") and r.__class__.__name__ == "Default":
-                if self.default is _UNSET and self.default_factory is None:
-                    self.default = r.d
-                continue
             self.rules.append(r)
 
 class FieldInfo:
@@ -354,14 +350,6 @@ class FieldInfo:
                 return None, []
 
         for rule in self.field.rules:
-
-            if hasattr(rule, "__class__") and rule.__class__.__name__ == "Convert":
-                try:
-                    value = rule(value)
-                except Exception as e:
-                    errors.append(f"Failed to convert '{self.name}': {e}")
-                continue
-
             if callable(rule):
                 try:
                     res = rule(value)

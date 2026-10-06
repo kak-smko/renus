@@ -115,7 +115,7 @@ class Response:
             for key, value in headers.items():
                 lower_key = key.lower()
                 _validate_header_value(lower_key, value)
-                if lower_key not in ("content-length", "cache-control"):
+                if lower_key !="content-length":
                     encoded_value = value.encode("utf-8")
                     if self.encrypt and lower_key == "content-type":
                         raw_headers.append((b"real-type", encoded_value))
@@ -198,12 +198,8 @@ class Response:
                 accepts_gzip = "gzip" in request.headers.get("accept-encoding", "")
 
         if self.encrypt:
-            try:
-                body = self.cryptor(request=request).encrypt(body)
-            except Exception:
-                self.encrypt = False
-                self.init_headers()
-                raw_headers = self.raw_headers
+
+            body = self.cryptor(request=request).encrypt(body)
         if accepts_gzip and len(body) > GZIP_MIN_LENGTH:
             gzip_streamer = GzipStreamer()
             body = gzip_streamer.write(body) + gzip_streamer.finish()

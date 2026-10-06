@@ -64,15 +64,16 @@ class StreamingResponse(Response):
         headers = request.headers
         is_zip = self.zipped and "gzip" in headers.get("accept-encoding", "")
         zipper = GzipStreamer() if is_zip else None
-        self.raw_headers.append(
-            (b"content-encoding", ("gzip" if is_zip else "none").encode("utf-8"))
-        )
+        response_headers = [
+            *self.raw_headers,
+            (b"content-encoding", ("gzip" if is_zip else "none").encode("utf-8")),
+        ]
 
         await send(
             {
                 "type": "http.response.start",
                 "status": self.status_code,
-                "headers": self.raw_headers,
+                "headers": response_headers,
             }
         )
         async for chunk in self.body_iterator:

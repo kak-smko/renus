@@ -31,6 +31,8 @@ _B64_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 def _require_text(value: object, name: str) -> bytes:
     if not isinstance(value, str):
         raise TypeError(f"{name} must be a string")
+    if "\x00" in value:
+        raise ValueError(f"{name} must not contain NUL characters")
     return value.encode("utf-8")
 
 
@@ -76,6 +78,8 @@ def hash_new_password(password: str) -> str:
     ------
     TypeError
         If ``password`` is not a string.
+    ValueError
+        If ``password`` contains NUL characters
     """
     salt = secrets.token_bytes(_SALT_BYTES)
     digest = _derive(password, salt, DEFAULT_ITERATIONS)
@@ -102,7 +106,8 @@ def is_correct_password(pw_hash: object, password: object) -> bool:
     """Return whether ``password`` matches a stored password hash.
 
     Malformed, unsupported, or tampered hashes return ``False``.  Comparison
-    of the derived digest is constant-time.
+    of the derived digest is constant-time.  Passwords containing NUL
+    characters are rejected and return ``False``.
     """
     if not isinstance(password, str):
         return False
@@ -111,5 +116,8 @@ def is_correct_password(pw_hash: object, password: object) -> bool:
         return False
 
     iterations, salt, stored_digest = parsed
-    candidate = _derive(password, salt, iterations)
+    try:
+        candidate = _derive(password, salt, iterations)
+    except ValueError:
+        return False
     return secrets.compare_digest(candidate, stored_digest)

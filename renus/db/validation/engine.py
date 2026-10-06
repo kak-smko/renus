@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 
 from renus.db.validation.base import Rule
-from renus.db.validation.primitives import Convert, Default, Required
 from renus.response import abort_if
 from renus.log import Log
 
@@ -45,35 +44,11 @@ class Validate:
         self._error = False
         self._msg = {}
 
-    def has_default(self, rules):
-        for item in rules:
-            if isinstance(item, Default):
-                return item
-        return False
-
-    def has_convert(self, rules):
-        for item in rules:
-            if isinstance(item, Convert):
-                return item
-        return False
-
-    def has_required(self, rules):
-        for item in rules:
-            if item is Required or item == Required:
-                return True
-        return False
-
     def rules(self, rules_data: dict, msg: str = "invalid_data") -> dict:
         result = {}
         for field, field_rules in rules_data.items():
             keys = field.split(".")
             value = keys_exists(self._form, keys)
-            default = self.has_default(field_rules)
-            convert = self.has_convert(field_rules)
-            if value is None and default is not False:
-                value = default(value)
-            if convert:
-                value = convert(value)
 
             check = self._check(value, field_rules)
             if check is True:
@@ -97,8 +72,7 @@ class Validate:
                 rule = rule()
             if not isinstance(rule, Rule):
                 raise TypeError("Validation rules must inherit Rule")
-            if isinstance(rule, (Default, Convert)):
-                continue
+           
             test = rule(value)
             if test is not True:
                 error = True

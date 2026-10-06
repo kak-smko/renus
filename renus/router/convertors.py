@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 import uuid
 from abc import ABC, abstractmethod
@@ -66,8 +67,11 @@ class FloatConvertor(BaseConvertor):
     regex = r"[0-9]+(?:\.[0-9]+)?"
 
     def convert(self, value: str) -> float:
-        """Convert the value to ``float``."""
-        return float(value)
+        """Convert the value to ``float``, rejecting non-finite results."""
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError(f"float route parameter must be finite: {value!r}")
+        return result
 
 
 class BoolConvertor(BaseConvertor):

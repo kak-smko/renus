@@ -14,6 +14,15 @@ from renus.websockets.protocol import WebSocketProtocol, WebSocketProtocolError
 from renus.util.codec import json_decode
 from renus.websockets.state import WebSocketDisconnect, WebSocketState
 
+_TOKEN_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    "!#$%&'*+-.^_`|~"
+)
+
+def _is_token(value: str) -> bool:
+    """Whether the value is a non-empty HTTP token usable as a subprotocol."""
+    return bool(value) and all(char in _TOKEN_CHARS for char in value)
+
 class WebSocket(Request, WebSocketProtocol):
 
     def __init__(self, scope, receive, send) -> None:
@@ -51,7 +60,12 @@ class WebSocket(Request, WebSocketProtocol):
         return offered
 
     async def accept(self, subprotocol: str | None = None) -> None:
-        """Accept the connection, optionally selecting a subprotocol."""
+        """Accept the connection, optionally selecting a subprotocol.
+        """
+        if subprotocol is not None and not _is_token(subprotocol):
+            raise WebSocketProtocolError(
+                f"Subprotocol {subprotocol!r} is not a valid token."
+            )
         if subprotocol is not None and subprotocol not in self.requested_subprotocols:
             raise WebSocketProtocolError(
                 f"Subprotocol {subprotocol!r} was not offered by the client."

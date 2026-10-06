@@ -6,8 +6,6 @@ import pytest
 from renus.db import Embedded, EmbeddedMany, EmbeddedOne, Field, Model, ValidationError
 from renus.db.validation.base import Rule
 from renus.db.validation import (
-    Convert,
-    Default,
     Email,
     In,
     Len,
@@ -40,8 +38,8 @@ class User(Model):
     email: str = Field(Email("gmail"))
     age: int = Field(Min(18), Max(120))
 
-    is_active: bool = Field(Default(True))
-    birth_date: date | None = Field(Convert(datetime))
+    is_active: bool = Field(default=True)
+    birth_date: date | None 
 
     address:Address
 
@@ -334,17 +332,6 @@ def test_email_with_domain_restrictions():
 
     with pytest.raises(ValidationError):
         RestrictedUser(email="test@yahoo.com")
-
-def test_convert_datetime_string():
-    class Event(Model):
-        title: str
-        event_time: datetime = Field(Convert(datetime))
-
-    e = Event(title="Launch", event_time="2025-06-15T10:30:00")
-    assert isinstance(e.event_time, datetime)
-    assert e.event_time.year == 2025
-    assert e.event_time.month == 6
-    assert e.event_time.day == 15
 
 def test_required_derived_from_type_optionality():
 
