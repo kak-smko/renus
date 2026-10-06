@@ -27,6 +27,8 @@ from renus.datastructures.id import ID
 from renus.db.mongodb.dialect import MongoDialect
 from renus.util import to_plural_lower
 
+_ALLOWED_AGGREGATE_FUNCTIONS = frozenset({"count", "sum", "avg", "min", "max"})
+
 
 class MongoCompiledQuery:
 
@@ -208,23 +210,29 @@ class MongoCompiler:
             group_stage: dict[str, Any] = {"_id": group_id}
             distinct_aliases: dict[str, tuple[str, str]] = {}
             for agg in ast.aggregates:
+                if not (
+                    isinstance(agg.function, str)
+                    and agg.function.lower() in _ALLOWED_AGGREGATE_FUNCTIONS
+                ):
+                    raise ValueError(
+                        f"Unsupported aggregate function: {agg.function!r}"
+                    )
+                fn = agg.function.lower()
                 field_target = f"${self._path_str(agg.path)}" if agg.path else 1
                 if agg.distinct and agg.path:
                     temp = f"__renus_distinct_{agg.alias}"
-                    distinct_aliases[agg.alias] = (temp, agg.function)
+                    distinct_aliases[agg.alias] = (temp, fn)
                     group_stage[temp] = {"$addToSet": field_target}
-                elif agg.function == "count":
+                elif fn == "count":
                     group_stage[agg.alias] = {"$sum": 1}
-                elif agg.function == "sum":
+                elif fn == "sum":
                     group_stage[agg.alias] = {"$sum": field_target}
-                elif agg.function == "avg":
+                elif fn == "avg":
                     group_stage[agg.alias] = {"$avg": field_target}
-                elif agg.function == "min":
+                elif fn == "min":
                     group_stage[agg.alias] = {"$min": field_target}
-                elif agg.function == "max":
+                else:  # max
                     group_stage[agg.alias] = {"$max": field_target}
-                else:
-                    group_stage[agg.alias] = {"$sum": 1}
 
             pipeline.append({"$group": group_stage})
 

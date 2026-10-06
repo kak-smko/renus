@@ -804,7 +804,15 @@ class Model(metaclass=ModelMeta):
                 else:
                     values[name] = cleaned_val
 
+            relationship_names = set(meta.relationships.keys()) if meta else set()
             for key, val in data.items():
+                if key not in self._model_fields and key not in relationship_names:
+                    # Mass-assignment guard: input dicts (e.g. request bodies,
+                    # untrusted JSON via from_dict) may only set declared
+                    # fields; relationship keys are allowed so row hydration
+                    # can carry eagerly loaded data onto the instance.
+                    errors[key] = [f"Unknown field '{key}'"]
+                    continue
                 if key not in self._model_fields:
                     values[key] = val
 

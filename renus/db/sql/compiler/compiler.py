@@ -15,6 +15,8 @@ from renus.db.query.ast import (
 from renus.db.sql.dialect.base import SQLDialect
 from renus.util import to_plural_lower
 
+_ALLOWED_AGGREGATE_FUNCTIONS = frozenset({"count", "sum", "avg", "min", "max"})
+
 
 class SQLCompiled:
 
@@ -88,7 +90,7 @@ class SQLCompiler:
         if ast.aggregates:
             select_items: list[str] = [self._path(p) for p in ast.group_by]
             for agg in ast.aggregates:
-                fn_name = agg.function.upper()
+                fn_name = self._agg_sql_name(agg.function)
                 distinct_agg = "DISTINCT " if agg.distinct else ""
                 target = self._path(agg.path) if agg.path else "*"
                 alias = self.dialect.quote(agg.alias)
@@ -474,6 +476,17 @@ class SQLCompiler:
 
         raise ValueError(f"Unsupported query condition operator: {op}")
 
+    def _agg_sql_name(self, function: str) -> str:
+        """Validate an aggregate function name and return its SQL form.
+
+        Function names are interpolated into SQL, so anything outside the
+        allowlist is rejected instead of being rendered.
+        """
+        fn = function.lower() if isinstance(function, str) else function
+        if fn not in _ALLOWED_AGGREGATE_FUNCTIONS:
+            raise ValueError(f"Unsupported aggregate function: {function!r}")
+        return fn.upper()
+
     def _new_alias(self, prefix: str) -> str:
         self._alias_counter += 1
         return f"{prefix}{self._alias_counter}"
@@ -837,7 +850,7 @@ class SQLCompiler:
 
         if isinstance(h, HavingCondition):
             agg = h.aggregate
-            fn_name = agg.function.upper()
+            fn_name = self._agg_sql_name(agg.function)
             target = self._path(agg.path) if agg.path else "*"
             distinct_str = "DISTINCT " if agg.distinct else ""
             expr = f"{fn_name}({distinct_str}{target})"

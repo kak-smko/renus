@@ -297,7 +297,14 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
                 [dict(d) for d in docs], mongo_query
             )
             for d in normalized_docs:
-                doc = dict(d)
+                # Drop framework-reserved pipeline artifacts (e.g. lookup
+                # arrays used for $elemMatch filtering) before hydration;
+                # they are internal and must not reach model init.
+                doc = {
+                    k: v
+                    for k, v in dict(d).items()
+                    if not str(k).startswith("__renus_")
+                }
                 if "_id" in doc:
                     if "id" not in doc:
                         doc["id"] = doc["_id"]
