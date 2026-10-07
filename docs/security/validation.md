@@ -31,7 +31,8 @@ payload = {
 try:
     registration = Registration(payload)
 except ValidationError as error:
-    # A mapping from field names to lists of messages.
+    # A mapping from field names to structured error codes and arguments.
+    # Example: {"age": [["type_error", ["int", "str"]]]}
     print(error.errors)
 ```
 

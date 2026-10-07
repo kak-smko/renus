@@ -98,9 +98,6 @@ class Field:
         *rules: Any,
         default: Any = _UNSET,
         default_factory: Callable[[], Any] | None = None,
-        error: str | None = None,
-        validator: Callable[[Any], Any] | list[Callable[[Any], Any]] | None = None,
-        validators: list[Callable[[Any], Any]] | None = None,
         description: str | None = None,
         database: DatabaseField | None = None,
         sensitive: bool = False,
@@ -116,12 +113,6 @@ class Field:
             Static default value used when no value is provided.
         default_factory:
             Zero-argument callable producing a default value.
-        error:
-            Custom error message template used by compatible validation rules.
-        validator:
-            Callable or list of callables used as validation rules.
-        validators:
-            Additional callables used as validation rules.
         description:
             Human-readable description of the field.
         database:
@@ -134,7 +125,6 @@ class Field:
         self.sensitive = sensitive
         self.default = default
         self.default_factory = default_factory
-        self.error = error
         self.description = description
         self.database = database
         if is_identity(self.default_factory) and self.database is not None:
@@ -147,12 +137,7 @@ class Field:
 
         self.extra = extra
         self.rules: list[Any] = []
-        parsed_rules = list(rules)
-        if validator is not None:
-            parsed_rules.extend(validator if isinstance(validator, (list, tuple)) else [validator])
-        if validators is not None:
-            parsed_rules.extend(validators)
-        for r in parsed_rules:
+        for r in rules:
             if isinstance(r, type) and issubclass(r, Rule):
                 r = r()
             if not isinstance(r, Rule):
@@ -326,17 +311,10 @@ class FieldInfo:
             return self.field.default
         return None
 
-    def _custom_message(self, context: list[Any]) -> str | None:
-        if self.field.error is not None:
-            try:
-                return self.field.error.format(self.name, *context)
-            except (IndexError, KeyError, ValueError):
-                return None
-        return None
 
-    def clean_and_validate(self, value: Any, owner_cls: type | None = None) -> tuple[Any, list[str]]:
-        """Coerce and validate a value, returning it with any error messages."""
-        errors: list[str] = []
+    def clean_and_validate(self, value: Any, owner_cls: type | None = None) -> tuple[Any, list[Any]]:
+        """Coerce and validate a value, returning it with any error details."""
+        errors: list[Any] = []
 
         if value is None:
             if self.has_default:
@@ -346,7 +324,7 @@ class FieldInfo:
                 if self.is_nullable:
                     return None, []
                 if self.required:
-                    return None, [f"'{self.name}' is required"]
+                    return None, ["required_error"]
                 return None, []
 
         for rule in self.field.rules:
@@ -356,24 +334,25 @@ class FieldInfo:
                     if res is True:
                         continue
                     elif res is False:
-                        errors.append(f"Validation failed for '{self.name}'")
+                        errors.append("validation_error")
+                    elif isinstance(res, str) and res.endswith("_error"):
+                        errors.append(res)
                     elif (
                         isinstance(res, (list, tuple))
                         and len(res) > 0
                         and isinstance(res[0], str)
                         and res[0].endswith("_error")
                     ):
-                        errors.append(format_rule_error(self.name, res))
+                        errors.append(list(res))
                     elif isinstance(res, list) and all(isinstance(x, (list, tuple)) for x in res):
                         for item in res:
-                            errors.append(format_rule_error(self.name, item))
+                            errors.append(list(item))
                     else:
 
                         value = res
-                except (ValidationError, ValueError, TypeError) as e:
-                    errors.append(str(e))
-                except Exception as e:
-                    errors.append(f"Validator error on '{self.name}': {e}")
+                except Exception:
+                    if "internal_error" not in errors:
+                        errors.append("internal_error")
 
         f = self.field
 
@@ -392,16 +371,15 @@ class FieldInfo:
                 try:
                     value = self.model_cls(value)
                 except ValidationError as e:
-                    for sub_field, sub_errs in e.errors.items():
-                        prefix = f"{self.name}.{sub_field}"
+                    for sub_errs in e.errors.values():
                         if isinstance(sub_errs, list):
-                            errors.extend(f"{prefix}: {err}" for err in sub_errs)
+                            errors.extend(sub_errs)
                         else:
-                            errors.append(f"{prefix}: {sub_errs}")
-                except Exception as e:
-                    errors.append(f"Failed to instantiate {self.model_cls.__name__} for '{self.name}': {e}")
+                            errors.append(sub_errs)
+                except Exception:
+                    errors.append("internal_error")
             elif not isinstance(value, self.model_cls):
-                errors.append(f"'{self.name}' must be an instance of {self.model_cls.__name__} or a dict")
+                errors.append(["type_error", [self.model_cls.__name__, type(value).__name__]])
 
         elif self.is_model_list and self.model_cls is not None:
             if isinstance(value, list):
@@ -411,21 +389,20 @@ class FieldInfo:
                         try:
                             new_list.append(self.model_cls(item))
                         except ValidationError as e:
-                            for sub_field, sub_errs in e.errors.items():
-                                prefix = f"{self.name}[{idx}].{sub_field}"
+                            for sub_errs in e.errors.values():
                                 if isinstance(sub_errs, list):
-                                    errors.extend(f"{prefix}: {err}" for err in sub_errs)
+                                    errors.extend(sub_errs)
                                 else:
-                                    errors.append(f"{prefix}: {sub_errs}")
-                        except Exception as e:
-                            errors.append(f"Error at '{self.name}[{idx}]': {e}")
+                                    errors.append(sub_errs)
+                        except Exception:
+                            errors.append("internal_error")
                     elif isinstance(item, self.model_cls):
                         new_list.append(item)
                     else:
-                        errors.append(f"'{self.name}[{idx}]' must be a {self.model_cls.__name__} or a dict")
+                        errors.append(["type_error", [self.model_cls.__name__, type(item).__name__]])
                 value = new_list
             else:
-                errors.append(f"'{self.name}' must be a list of {self.model_cls.__name__}")
+                errors.append(["type_error", [f"list[{self.model_cls.__name__}]", type(value).__name__]])
 
         elif self.effective_types and not self.is_model and not self.is_model_list:
             matched = False
@@ -470,11 +447,10 @@ class FieldInfo:
                     break
 
             if not matched and self.effective_types != (object,):
-                type_names = ", ".join(
+                expected_types = [
                     getattr(t, "__name__", str(t)) for t in self.effective_types
-                )
-                errors.append(
-                    f"'{self.name}' must be of type {type_names}, got {type(value).__name__}"
-                )
+                ]
+                expected = expected_types[0] if len(expected_types) == 1 else expected_types
+                errors.append(["type_error", [expected, type(value).__name__]])
 
         return value, errors

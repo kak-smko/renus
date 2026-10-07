@@ -42,7 +42,7 @@ class Validate(dict[str, Any]):
 
         source = copy.deepcopy(form)
         values: dict[str, Any] = {}
-        errors: dict[str, list[str]] = {}
+        errors: dict[str, list[Any]] = {}
         for name in selected_fields:
             if name not in source:
                 continue

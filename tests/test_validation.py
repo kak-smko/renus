@@ -205,7 +205,7 @@ def test_nested_models_simple():
     }
 
 
-def test_field_keyword_validator():
+def test_field_rules_are_positional():
     class NormalizeHandle(Rule):
         def __call__(self, value):
             return value.strip().lower()
@@ -214,7 +214,7 @@ def test_field_keyword_validator():
             return {}
 
     class Profile(Model):
-        handle: str = Field(MinLen(3), validator=NormalizeHandle())
+        handle: str = Field(MinLen(3), NormalizeHandle())
 
     p = Profile(handle="  CoolGuy  ")
     assert p.handle == "coolguy"
@@ -390,9 +390,10 @@ def test_validate_model_fields_nested_failed():
             ("username", "age", "address"),
         )
         
-    assert "age" in exc_info.value.errors
-    assert "address" in exc_info.value.errors
-    assert "address.fake: Unknown field 'fake'" in exc_info.value.errors["address"]
+    assert exc_info.value.errors == {
+        "age": ["internal_error", ["type_error", ["int", "str"]]],
+        "address": [["unknown_field", ["fake"]]],
+    }
 
 
 def test_validate_model_fields_nested():
@@ -518,22 +519,3 @@ def test_field_max_digits_and_decimal_places():
 
     with pytest.raises(ValidationError):
         Money(amount=-1)
-
-
-def test_field_custom_error_template():
-    class Score(Model):
-        value: int = Field(Min(10), error="{0} error {1} msg {2}.")
-
-    with pytest.raises(ValidationError) as exc:
-        Score(value=5)
-    assert "greater than or equal to 10" in exc.value.errors["value"][0]
-
-
-def test_field_uses_callable_rules():
-    import inspect
-
-    params = inspect.signature(Field.__init__).parameters
-    assert "min_length" not in params
-    assert "gt" not in params
-    assert "max_digits" not in params
-    assert "error" in params

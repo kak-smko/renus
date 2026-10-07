@@ -1,49 +1,31 @@
 controller_temp = '''from renus.request import Request
 from renus.response import JsonResponse
+from app.extension.codenus.kit.table.service import Table
+from renus.db.validation import Validate
 from app.{name}.model import {name_camel}
 
 class {name_camel}Controller:
     def __init__(self, request: Request) -> None:
         self.request = request
-
-    @property
-    def repo(self):
-        """Repository bound to the request-scoped database.
-
-        ``db`` is placed on ``app.state`` at startup and exposed on each
-        request, so controllers reach it generically via ``self.request.db``.
-        """
-        db = self.request.db
-        return db.repository({name_camel})
-
-    @property
-    def __inputs(self):
-        return {name_camel}(self.request.inputs).to_dict()
+        self.repo:Repository[{name_camel}] = request.db.repository({name_camel})
 
     async def index(self):
-        """Get {name_camel} Records.
-        :method: get
-        :return: JsonResponse
-        """
-        records = await self.repo.query().all()
-        return JsonResponse([dict(r) for r in records])
+        table = Table({name_camel}, self.request)
+        table.search_fields = []
+        return JsonResponse(await table.index())
 
     async def store(self):
-        """Add new {name_camel} Item.
-        :method: post
-        :return: JsonResponse
-        """
-        await self.repo.create({name_camel}(**self.__inputs))
-        return JsonResponse({"msg": "stored"})
+        payload = await self.request.form()
+        payload = {name_camel}(dict(payload))
 
-    async def update(self, id):
-        """Update {name_camel} by primary key.
-        :method: put
-        :param id: {name_camel} primary key
-        :return: JsonResponse
-        """
-        values = {k: v for k, v in self.__inputs.items() if k != "id"}
-        await self.repo.update({name_camel}.id == id, values=values)
+        await self.repo.create(payload)
+        return JsonResponse({"msg": "stored"}, Status.HTTP_201_CREATED)
+
+    async def update(self, id: ID):
+        payload = await self.request.form()
+        payload = Validate({name_camel},dict(payload),None)
+
+        await self.repo.where({name_camel}.id == id).update(payload)
         return JsonResponse({"msg": "updated"})
 
     async def delete(self, id):
@@ -72,7 +54,6 @@ class {name_camel}(Model):
 
     # --- Example fields; customize for your domain. ---
     name: str = Field(max_len=120)
-    payload: dict | None = None
 
     class Meta:
         soft_delete = True
@@ -87,7 +68,10 @@ admin_router = Router(
     subdomain=Config("app").get("admin_subdomain", "admin"),
     prefix="/admin{folder}",
 )
-admin_router.crud("/{names}", {name_camel}Controller)
+admin_router.get("/{names}", {name_camel}Controller, "index")
+admin_router.post("/{names}", {name_camel}Controller, "store")
+admin_router.put("/{names}/{id:id}", {name_camel}Controller, "update")
+admin_router.delete("/{names}/{id:id}", {name_camel}Controller, "delete")
 
 router = Router()
 router.include(admin_router)
@@ -104,7 +88,10 @@ admin_router = Router(
     prefix="/admin{folder}",
     middlewares=[AuthMiddleware, PermissionMiddleware("admin")],
 )
-admin_router.crud("/{names}", {name_camel}Controller, middlewares=[PermissionMiddleware("{names}")])
+admin_router.get("/{names}", {name_camel}Controller, "index", middlewares=[PermissionMiddleware("{names}.view")])
+admin_router.post("/{names}", {name_camel}Controller, "store", middlewares=[PermissionMiddleware("{names}.create")])
+admin_router.put("/{names}/{id:id}", {name_camel}Controller, "update", middlewares=[PermissionMiddleware("{names}.edit")])
+admin_router.delete("/{names}/{id:id}", {name_camel}Controller, "delete", middlewares=[PermissionMiddleware("{names}.remove")])
 
 user_router = Router(prefix="/user", middlewares=[AuthMiddleware])
 home_router = Router(prefix="/home")

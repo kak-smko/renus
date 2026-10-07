@@ -132,24 +132,16 @@ app.include(admin)
 
 Routes resolve by matching the request's subdomain first, then the default domain.
 
-## CRUD shorthand
+## Registering controller routes
 
-For controllers with conventional methods, `crud()` registers four routes at once:
+Register each controller action explicitly with the matching HTTP method:
 
 ```python
-r.crud('/items', ItemController)
+r.get('/items', ItemController, 'index')
+r.post('/items', ItemController, 'store')
+r.put('/items/{id:id}', ItemController, 'update')
+r.delete('/items/{id:id}', ItemController, 'delete')
 ```
-
-This registers:
-
-| Method | Path             | Handler       |
-| ------ | ---------------- | ------------- |
-| `GET`    | `/items`         | `index`       |
-| `POST`   | `/items`         | `store`       |
-| `PUT`    | `/items/{id:id}`| `update`      |
-| `DELETE` | `/items/{id:id}`| `delete`      |
-
-Use the optional `func_prefix` to call methods with a prefix, and `mcud()` to register only store/update/delete (methods named `m_store`, `m_update`, `m_delete`).
 
 ## How routes are resolved
 

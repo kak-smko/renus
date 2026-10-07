@@ -1592,7 +1592,9 @@ async def test_unannotated_embedded_many_is_validated_before_save(kind):
                     data=[{"id": "1", "name": "invalid"}],
                 )
             )
-        assert "data[0].id" in str(exc_info.value)
+        assert exc_info.value.errors == {
+            "data": [["type_error", ["int", "str"]]],
+        }
         assert await repo.count() == 0
 
         created = await repo.create(
@@ -1750,10 +1752,10 @@ async def test_nested_relationship_validation(kind):
 
             with pytest.raises(ValidationError) as exc_info:
                 owner(invalid)
+            error_field = error_path.split(".", 1)[0].split("[", 1)[0]
             assert any(
-                error_path in message
-                for messages in exc_info.value.errors.values()
-                for message in messages
+                isinstance(error, (list, tuple)) and error[0] == "type_error"
+                for error in exc_info.value.errors[error_field]
             )
     finally:
         await cleanup(db)

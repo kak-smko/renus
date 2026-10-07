@@ -189,29 +189,3 @@ class Router:
         self.include(group)
         return group
 
-    def crud(
-        self,
-        path: str,
-        controller: Controller = None,
-        middlewares: list[Callable] | None = None,
-        func_prefix: str = "",
-    ) -> "Router":
-        """Define index, store, update, and delete routes for a controller."""
-        self._add(path, controller, f"{func_prefix}index", "GET", middlewares)
-        self._add(path, controller, f"{func_prefix}store", "POST", middlewares)
-        self._add(path + "/{id:id}", controller, f"{func_prefix}update", "PUT", middlewares)
-        self._add(path + "/{id:id}", controller, f"{func_prefix}delete", "DELETE", middlewares)
-        return self
-
-    def mcud(
-        self,
-        path: str,
-        controller: Controller = None,
-        middlewares: list[Callable] | None = None,
-        func_prefix: str = "",
-    ) -> "Router":
-        """Define store, update, and delete routes for a controller."""
-        self._add(path, controller, f"{func_prefix}m_store", "POST", middlewares)
-        self._add(path, controller, f"{func_prefix}m_update", "PUT", middlewares)
-        self._add(path, controller, f"{func_prefix}m_delete", "DELETE", middlewares)
-        return self

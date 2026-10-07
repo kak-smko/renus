@@ -126,7 +126,7 @@ Important routing behavior:
 
 - `Router` registrations enter the shared `RouteRegistry`; an `App()` resolves them without a separate mount operation.
 - `Router(prefix=..., middlewares=..., subdomain=...)` supports scoped groups with `with router.group(...) as group:`.
-- `crud(path, Controller)` registers conventional `index`, `store`, `update`, and `delete` routes; use only when the controller follows that contract.
+- Register controller routes explicitly with `get`, `post`, `put`, and `delete`.
 - Static paths are resolved before parameterized paths. Registration order matters for parameterized matches.
 - The registry normalizes trailing slashes, checks subdomains, and rejects null bytes/path traversal (`..`). Use `RouteRegistry().summary()` while debugging route registration.
 - Use `RouteRegistry.reset()`/`clear()` only in tests or controlled reconfiguration; it is a shared singleton.

@@ -572,7 +572,7 @@ print(credential.get_sensitive("password"))  # secret
 
 `get_sensitive(name)` returns the raw value for code that is explicitly authorized to access it. Treat that method as a deliberate boundary around secret data.
 
-## 14. Field descriptions and custom errors
+## 14. Field descriptions
 
 Use `description` to attach human-readable field metadata:
 
@@ -584,21 +584,6 @@ class Profile(Model):
     )
 ```
 
-Use `error` to provide a format string for compatible rule errors:
-
-```python
-from renus.db import Field, Model
-from renus.db.validation.rules import Min
-
-
-class Score(Model):
-    value: int = Field(
-        Min(10),
-        error="{0} must be at least {1}; received {2}.",
-    )
-```
-
-The format fields are the field name followed by the context supplied by the validation rule. If a custom format cannot be applied, Renus uses the normal rule error instead.
 
 ## 15. Fields and model state
 

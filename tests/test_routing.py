@@ -340,60 +340,6 @@ class TestRouter:
         assert "WS" in registry.all["_"]
         assert len(registry.all["_"]["WS"]) == 1
 
-    def test_crud_generation(self):
-        router = Router()
-        controller = _create_mock_controller()
-        router.crud("/users", controller)
-
-        registry = _router_registry(router)
-
-        assert "GET" in registry.all["_"]
-        get_routes = [r for r in registry.all["_"]["GET"] if r["path"] == "/users"]
-        assert len(get_routes) == 1
-        assert get_routes[0]["func"] == "index"
-
-        assert "POST" in registry.all["_"]
-        post_routes = [r for r in registry.all["_"]["POST"] if r["path"] == "/users"]
-        assert len(post_routes) == 1
-        assert post_routes[0]["func"] == "store"
-
-        assert "PUT" in registry.all["_"]
-        put_routes = [
-            r for r in registry.all["_"]["PUT"] if r["path"] == "/users/{id:id}"
-        ]
-        assert len(put_routes) == 1
-        assert put_routes[0]["func"] == "update"
-
-        assert "DELETE" in registry.all["_"]
-        delete_routes = [
-            r for r in registry.all["_"]["DELETE"] if r["path"] == "/users/{id:id}"
-        ]
-        assert len(delete_routes) == 1
-        assert delete_routes[0]["func"] == "delete"
-
-    def test_mcud_generation(self):
-        router = Router()
-        controller = _create_mock_controller()
-        router.mcud("/users", controller)
-
-        registry = _router_registry(router)
-
-        assert "POST" in registry.all["_"]
-        post_routes = [r for r in registry.all["_"]["POST"] if r["path"] == "/users"]
-        assert len(post_routes) == 1
-        assert post_routes[0]["func"] == "m_store"
-
-        assert "PUT" in registry.all["_"]
-        put_routes = [r for r in registry.all["_"]["PUT"] if r["path"] == "/users"]
-        assert len(put_routes) == 1
-        assert put_routes[0]["func"] == "m_update"
-
-        assert "DELETE" in registry.all["_"]
-        delete_routes = [
-            r for r in registry.all["_"]["DELETE"] if r["path"] == "/users"
-        ]
-        assert len(delete_routes) == 1
-        assert delete_routes[0]["func"] == "m_delete"
 
     def test_router_with_prefix(self):
         router = Router(prefix="/api/v1")

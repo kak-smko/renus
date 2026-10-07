@@ -22,7 +22,7 @@ class String(Rule):
             return True
         if type(input) is str:
             return True
-        return ['type_error', ['string', str(type(input))]]
+        return ['type_error', ['string', type(input).__name__]]
 
     def json_schema(self):
         return {"type": "string"}
@@ -36,7 +36,7 @@ class Bool(Rule):
             return True
         if type(input) is bool:
             return True
-        return ['type_error', ['bool', str(type(input))]]
+        return ['type_error', ['bool', type(input).__name__]]
 
     def json_schema(self):
         return {"type": "boolean"}
@@ -50,7 +50,7 @@ class List(Rule):
             return True
         if type(input) is list:
             return True
-        return ['type_error', ['list', str(type(input))]]
+        return ['type_error', ['list', type(input).__name__]]
 
     def json_schema(self):
         return {"type": "array"}
@@ -64,7 +64,7 @@ class Dict(Rule):
             return True
         if type(input) is dict:
             return True
-        return ['type_error', ['dict', str(type(input))]]
+        return ['type_error', ['dict', type(input).__name__]]
 
     def json_schema(self):
         return {"type": "object"}
@@ -78,7 +78,7 @@ class Int(Rule):
             return True
         if type(input) is int:
             return True
-        return ['type_error', ['int', str(type(input))]]
+        return ['type_error', ['int', type(input).__name__]]
 
     def json_schema(self):
         return {"type": "integer"}
@@ -92,7 +92,7 @@ class Float(Rule):
             return True
         if type(input) in (float, int):
             return True
-        return ['type_error', ['float', str(type(input))]]
+        return ['type_error', ['float', type(input).__name__]]
 
     def json_schema(self):
         return {"type": "number"}
@@ -660,7 +660,7 @@ class Each(Rule):
             return True
 
         if not isinstance(input, list) and not isinstance(input, dict):
-            return ['type_error', ['list|dict', str(type(input))]]
+            return ['type_error', ['list|dict', type(input).__name__]]
 
         if isinstance(input, list):
             d=enumerate(input)

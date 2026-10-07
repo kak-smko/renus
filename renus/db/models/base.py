@@ -779,7 +779,7 @@ class Model(metaclass=ModelMeta):
             if kwargs:
                 data.update(kwargs)
 
-            errors: dict[str, list[str]] = {}
+            errors: dict[str, list[Any]] = {}
             values: dict[str, Any] = {}
 
             for name, field_info in self._model_fields.items():
@@ -792,7 +792,7 @@ class Model(metaclass=ModelMeta):
                         val = None
                     else:
                         if field_info.required:
-                            errors[name] = [f"'{name}' is required"]
+                            errors[name] = ["required_error"]
                             continue
                         val = None
                 else:
@@ -811,7 +811,7 @@ class Model(metaclass=ModelMeta):
                     # untrusted JSON via from_dict) may only set declared
                     # fields; relationship keys are allowed so row hydration
                     # can carry eagerly loaded data onto the instance.
-                    errors[key] = [f"Unknown field '{key}'"]
+                    errors[key] = [["unknown_field", [key]]]
                     continue
                 if key not in self._model_fields:
                     values[key] = val

@@ -32,7 +32,7 @@ class ValidationError(DBError, ValueError):
     def __init__(
         self,
         message: str | dict[str, Any] | list[Any],
-        errors: dict[str, list[str]] | None = None,
+        errors: dict[str, list[Any]] | None = None,
     ) -> None:
         """Construct a validation error from a message or field errors.
 
@@ -43,20 +43,17 @@ class ValidationError(DBError, ValueError):
         errors:
             Optional precomputed field-to-errors mapping used for the message.
         """
-        self.errors: dict[str, list[str]] = {}
+        self.errors: dict[str, list[Any]] = {}
 
         if errors is not None:
             self.errors = errors
             msg = self._format_errors(self.errors)
         elif isinstance(message, dict):
             for k, v in message.items():
-                if isinstance(v, list):
-                    self.errors[k] = [str(x) for x in v]
-                else:
-                    self.errors[k] = [str(v)]
+                self.errors[k] = list(v) if isinstance(v, list) else [v]
             msg = self._format_errors(self.errors)
         elif isinstance(message, list):
-            self.errors["__all__"] = [str(x) for x in message]
+            self.errors["__all__"] = list(message)
             msg = self._format_errors(self.errors)
         else:
             msg = str(message)
@@ -66,13 +63,44 @@ class ValidationError(DBError, ValueError):
         self.message = msg
 
     @staticmethod
-    def _format_errors(errors: dict[str, Any]) -> str:
+    def _format_error(field: str, error: Any) -> str:
+        if error == "required_error":
+            return f"'{field}' is required"
+        if error == "internal_error":
+            return "Internal validation error"
+        if not isinstance(error, (list, tuple)) or not error:
+            return str(error)
+
+        code = error[0]
+        args = error[1] if len(error) > 1 and isinstance(error[1], (list, tuple)) else []
+        if code == "type_error":
+            expected = args[0] if args else "correct type"
+            return f"'{field}' must be of type {expected}"
+        if code == "unknown_field":
+            name = args[0] if args else field
+            return f"Unknown field '{name}'"
+        if code == "min_error":
+            return f"'{field}' must be greater than or equal to {args[0]}"
+        if code == "max_error":
+            return f"'{field}' must be less than or equal to {args[0]}"
+        if code == "eq_error":
+            return f"'{field}' must be equal to {args[0]}"
+        if code == "min_len_error":
+            return f"'{field}' length must be at least {args[0]}"
+        if code == "max_len_error":
+            return f"'{field}' length must be at most {args[0]}"
+        if code == "len_error":
+            return f"'{field}' length must be {args[0]}"
+        return str(error)
+
+    @classmethod
+    def _format_errors(cls, errors: dict[str, Any]) -> str:
         lines = ["Validation failed:"]
         for field, err_list in errors.items():
             if isinstance(err_list, (list, tuple)):
-                err_text = "; ".join(str(e) for e in err_list)
+                err_text = "; ".join(cls._format_error(field, error) for error in err_list)
             else:
-                err_text = str(err_list)
+                err_text = cls._format_error(field, err_list)
             lines.append(f"  {field}: {err_text}")
         return "\n".join(lines)
 
