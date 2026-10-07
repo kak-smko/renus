@@ -1,80 +1,62 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
 
-from renus.db.validation.base import Rule
-from renus.response import abort_if
-from renus.log import Log
+from renus.db.core.exceptions import ValidationError
 
-
-def keys_exists(element, keys):
-    """Resolve a nested value, creating missing keys along the path."""
-    if not isinstance(element, dict):
-        raise AttributeError("keys_exists() expects dict as first argument.")
-    if len(keys) == 0:
-        raise AttributeError("keys_exists() expects at least two arguments, one given.")
-
-    current = element
-    for index, key in enumerate(keys):
-        try:
-            current = current[key]
-        except KeyError:
-            current[key] = None if index == len(keys) - 1 else {}
-            current = current[key]
-    return current
+if TYPE_CHECKING:
+    from renus.db.models.base import Model
 
 
-def set_key(result, keys, value):
-    """Set a nested value, creating intermediate keys as needed."""
-    current = result
-    for index, key in enumerate(keys):
-        if index == len(keys) - 1:
-            current[key] = value
-            return
-        current = current.setdefault(key, {})
+class Validate(dict[str, Any]):
+    """Validate form data and return a dictionary of allowed fields.
 
+    The model-based form validates only fields explicitly listed in ``fields``
+    and present in ``form``.
+    """
 
-class Validate:
-    """Validate form data against a set of rules."""
+    def __init__(
+        self,
+        model: type[Model],
+        form: dict[str, Any],
+        fields: Iterable[str] | None = None
+    ) -> None:
+        super().__init__()
 
-    def __init__(self, form: dict, break_on_error: bool = False, log_on_error: bool = False) -> None:
-        self._form = copy.deepcopy(form)
-        self._break_on_error = break_on_error
-        self._log_on_error = log_on_error
-        self._error = False
-        self._msg = {}
+        if not isinstance(form, dict):
+            raise TypeError("form must be a dict")
+        if fields is None :
+            fields=model.metadata().fields.keys()
 
-    def rules(self, rules_data: dict, msg: str = "invalid_data") -> dict:
-        result = {}
-        for field, field_rules in rules_data.items():
-            keys = field.split(".")
-            value = keys_exists(self._form, keys)
+        selected_fields = [fields] if isinstance(fields, str) else list(fields)
+        if any(not isinstance(name, str) for name in selected_fields):
+            raise TypeError("fields must contain only field names as strings")
 
-            check = self._check(value, field_rules)
-            if check is True:
-                set_key(result, keys, value)
+        model_cls = model
+        model_fields = model_cls._model_fields
+        invalid_fields = [name for name in selected_fields if name not in model_fields]
+        if invalid_fields:
+            raise ValueError(f"Unknown model field(s): {', '.join(invalid_fields)}")
+
+        source = copy.deepcopy(form)
+        values: dict[str, Any] = {}
+        errors: dict[str, list[str]] = {}
+        for name in selected_fields:
+            if name not in source:
+                continue
+
+            value, field_errors = model_fields[name].clean_and_validate(source[name], model_cls)
+            if field_errors:
+                errors[name] = field_errors
             else:
-                self._error = True
-                self._msg[field] = check
-                if self._break_on_error:
-                    break
+                values[name] = value
 
-        if self._log_on_error:
-            Log().error({"msg": msg, "errors": self._msg})
-        abort_if(self._error, {"msg": msg, "errors": self._msg}, 422)
-        return result
+        if errors:
+            raise ValidationError(errors)
 
-    def _check(self, value, rules):
-        error = False
-        messages = []
-        for rule in rules:
-            if isinstance(rule, type) and issubclass(rule, Rule):
-                rule = rule()
-            if not isinstance(rule, Rule):
-                raise TypeError("Validation rules must inherit Rule")
-           
-            test = rule(value)
-            if test is not True:
-                error = True
-                messages.append(test)
-        return True if not error else messages
+        super().update(values)
+        self._form = source
+
+    

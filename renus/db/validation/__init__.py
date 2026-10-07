@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from renus.db.validation.base import Rule
 from renus.db.validation.rules import (
     Accepted,
     And,
@@ -34,9 +33,9 @@ from renus.db.validation.rules import (
     Url,
 )
 from renus.db.validation.engine import Validate
+from renus.db.validation.base import Rule
 
 __all__ = [
-
     "Rule",
     "Validate",
     "Required",

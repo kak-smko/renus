@@ -166,6 +166,6 @@ async def test_query_after_connection_loss_reconnects(kind, tmp_path):
         assert [row.email for row in rows] == ["one@example.com"]
         assert await adapter.health_check() is True
     finally:
-        await db.disconnect()
+        await cleanup(db)
 
 
