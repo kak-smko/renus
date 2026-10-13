@@ -236,6 +236,49 @@ class TestCreateProject:
         assert (project / "README.md").exists()
         assert fetched["dest"] == str(project)
         assert fetched["repo"] == create_module.MVP_REPO_URL
+        database_config = (project / "config" / "database.py").read_text()
+        requirements = (project / "requirements.txt").read_text()
+        assert "SQLiteAdapter" in database_config
+        assert '"database": "./mvpapp.db"' in database_config
+        assert "renus[server]" in requirements
+
+    @pytest.mark.parametrize(
+        ("database", "adapter", "requirement"),
+        [
+            ("sqlite", "SQLiteAdapter", "renus[server]"),
+            ("mongodb", "MongoDBAdapter", "renus[server,mongo]"),
+            ("mysql", "MySQLAdapter", "renus[server,mysql]"),
+        ],
+    )
+    def test_mvp_configures_selected_database(
+        self, tmp_path, monkeypatch, database, adapter, requirement
+    ):
+        monkeypatch.chdir(tmp_path)
+
+        def fake_fetch(dest, repo=create_module.MVP_REPO_URL, branch=create_module.MVP_REPO_BRANCH):
+            Path(dest).mkdir(parents=True, exist_ok=True)
+            Path(dest, "config").mkdir()
+            Path(dest, "config", "database.py").write_text("old adapter config\n")
+            Path(dest, "requirements.txt").write_text("renus[server,mongo]\nPillow\n")
+            return True
+
+        monkeypatch.setattr(create_module, "fetch_project", fake_fetch)
+        assert create_run([f"starter_{database}", "mvp", database]) == 0
+
+        project = tmp_path / f"starter_{database}"
+        database_config = (project / "config" / "database.py").read_text()
+        requirements = (project / "requirements.txt").read_text()
+        assert adapter in database_config
+        assert requirement in requirements
+        assert "Pillow" in requirements
+        if database != "mongodb":
+            assert "MongoDBAdapter" not in database_config
+        compile(database_config, str(project / "config" / "database.py"), "exec")
+
+    def test_database_less_mvp_is_rejected(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert create_run(["nodbmvp", "mvp", "none"]) == 1
+        assert not (tmp_path / "nodbmvp").exists()
 
     def test_mvp_fetch_failure_returns_error(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -260,6 +303,10 @@ class TestCreateProject:
         assert (project / "main.py").exists()
         assert (project / "commands" / "__init__.py").exists()
         assert (project / "commands" / "local" / "__init__.py").exists()
+        database_config = (project / "config" / "database.py").read_text()
+        requirements = (project / "requirements.txt").read_text()
+        assert "SQLiteAdapter" in database_config
+        assert "renus[server]" in requirements
         assert "def _create_extension" in command_source
         assert '"-new-extension": "new-extension"' in command_source
         assert "def _install_local" in command_source

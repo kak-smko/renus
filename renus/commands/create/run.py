@@ -307,6 +307,64 @@ def generate_api(root: str, name: str, pkg: str, database: str) -> bool:
 MVP_REPO_URL = "https://github.com/kak-smko/codenus"
 MVP_REPO_BRANCH = "master"
 
+MVP_DATABASE_CONFIGS: dict[str, str] = {
+    "sqlite": '''from renus.db import SQLiteAdapter
+
+adapter = SQLiteAdapter({"database": "./{pkg}.db"})
+ID = int
+''',
+    "mongodb": '''import os
+
+from renus.db import MongoDBAdapter
+
+adapter = MongoDBAdapter({
+    "uri": os.environ.get("RENUS_MONGO_URI", "mongodb://127.0.0.1:27017"),
+    "database": os.environ.get("RENUS_MONGO_DB", "{pkg}"),
+})
+ID = int
+''',
+    "mysql": '''import os
+
+from renus.db import MySQLAdapter
+
+adapter = MySQLAdapter({
+    "host": os.environ.get("RENUS_MYSQL_HOST", "127.0.0.1"),
+    "port": int(os.environ.get("RENUS_MYSQL_PORT", "3306")),
+    "username": os.environ.get("RENUS_MYSQL_USER", "root"),
+    "password": os.environ.get("RENUS_MYSQL_PASSWORD", ""),
+    "database": os.environ.get("RENUS_MYSQL_DB", "{pkg}"),
+})
+ID = int
+''',
+}
+
+MVP_DATABASE_REQUIREMENTS = {
+    "sqlite": "renus[server]",
+    "mongodb": "renus[server,mongo]",
+    "mysql": "renus[server,mysql]",
+}
+
+
+def _configure_mvp_database(root: str, pkg: str, database: str) -> None:
+    """Set the downloaded Codenus starter's adapter and matching dependency."""
+    config_path = os.path.join(root, "config", "database.py")
+    _write(config_path, MVP_DATABASE_CONFIGS[database].replace("{pkg}", pkg))
+
+    requirements_path = os.path.join(root, "requirements.txt")
+    if os.path.isfile(requirements_path):
+        lines = Path(requirements_path).read_text(encoding="utf-8").splitlines()
+    else:
+        lines = []
+
+    requirement = MVP_DATABASE_REQUIREMENTS[database]
+    for index, line in enumerate(lines):
+        if re.match(r"^\s*renus(?:\s*\[|\s*[<>=!~@;]|\s*$)", line, re.IGNORECASE):
+            lines[index] = requirement
+            break
+    else:
+        lines.insert(0, requirement)
+    _write(requirements_path, "\n".join(lines).rstrip() + "\n")
+
 def _archive_url(repo: str = MVP_REPO_URL, branch: str = MVP_REPO_BRANCH) -> str:
     slug = repo.rstrip("/").removesuffix(".git")
     slug = slug.split("github.com/", 1)[-1]
@@ -383,14 +441,19 @@ def fetch_project(
     return download_project(repo, dest, branch)
 
 def generate_mvp(root: str, name: str, pkg: str, database: str) -> bool:
-    """Scaffold an MVP project by fetching it into the root directory."""
+    """Fetch the Codenus starter and configure its selected database adapter."""
     Terminal.cyan.print(f"Fetching MVP project from {MVP_REPO_URL}...")
-    if fetch_project(root):
-        return True
+    if not fetch_project(root):
+        Terminal.red.print(f"Error: could not fetch the MVP project from {MVP_REPO_URL}.")
+        Terminal.dim.print("Requires network access and 'git' (or GitHub reachability) — check and retry.")
+        return False
 
-    Terminal.red.print(f"Error: could not fetch the MVP project from {MVP_REPO_URL}.")
-    Terminal.dim.print("Requires network access and 'git' (or GitHub reachability) — check and retry.")
-    return False
+    try:
+        _configure_mvp_database(root, pkg, database)
+    except OSError as exc:
+        Terminal.red.print(f"Error: could not configure the {database} database adapter: {exc}")
+        return False
+    return True
 
 
 LOCAL_EXTENSION_COMMAND = Path(__file__).with_name("local_run_template.py").read_text(
@@ -431,7 +494,7 @@ def _run_generator(template: str, root: str, name: str, pkg: str, database: str)
     if generator(root, name, pkg, database) is False:
         return False
 
-    detail = "" if template in ("mvp", "extension") else f" (database: {database})"
+    detail = f" (database: {database})"
     Terminal.green.print(f"Project '{name}' created with template '{template}'{detail}.")
     return True
 
@@ -488,6 +551,12 @@ def run(args: list[str] | None = None) -> int:
             return 1
         if database not in DATABASES:
             Terminal.red.print(f"Error: unknown database '{database}' (expected one of {', '.join(DATABASES)}).")
+            return 1
+        if template in ("mvp", "extension") and database == "none":
+            Terminal.red.print(
+                f"Error: the '{template}' template requires a database adapter "
+                f"(choose one of {', '.join(MVP_DATABASE_CONFIGS)})."
+            )
             return 1
 
         if not _run_generator(template, out_dir, dir_name, pkg, database):
