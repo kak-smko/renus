@@ -20,7 +20,6 @@ from renus.commands.base import BaseCommand
 from renus.commands.help import Help, discover_commands
 from renus.commands.cli import execute_handler, find_command, get_version, run
 from renus.commands.app.run import (
-    _is_user_extension_installed,
     add_routes,
     add_temp,
     to_camel_case,
@@ -96,8 +95,8 @@ class TestCommandDiscoveryAndHelp:
         assert "app" in out
         assert "db" in out
         assert "extension" in out
-        assert "renus extension codenus/user" in out
-        assert "renus extension --remove codenus/user" in out
+        assert "renus extension codenus/kit" in out
+        assert "renus extension --remove codenus/kit" in out
 
 class TestCLIRunner:
 
@@ -427,7 +426,7 @@ class TestAppScaffolding:
     def _count_in(text: str, needle: str) -> int:
         return text.count(needle)
 
-    def test_route_generation_with_and_without_user_extension(self, tmp_path):
+    def test_route_generation_with_and_without_kit_extension(self, tmp_path):
 
         add_temp(
             name="tag",
@@ -442,9 +441,10 @@ class TestAppScaffolding:
         assert "router = Router()" in plain_route
         assert 'router.include(admin_router)' in plain_route
 
-        user_ext_dir = tmp_path / "app" / "extension" / "codenus" / "user"
-        user_ext_dir.mkdir(parents=True)
-        (user_ext_dir / "middleware.py").write_text("# user middleware\n")
+        kit_ext_dir = tmp_path / "app" / "extension" / "codenus" / "kit"
+        kit_ext_dir.mkdir(parents=True)
+        (kit_ext_dir / "middlewares").mkdir()
+        (kit_ext_dir / "middlewares" / "auth.py").write_text("# kit auth middleware\n")
 
         add_temp(
             name="order",
@@ -455,14 +455,14 @@ class TestAppScaffolding:
             folder=[],
             base_dir=str(tmp_path),
         )
-        user_route = (tmp_path / "app" / "order" / "route.py").read_text()
-        assert "from app.extension.codenus.user.middleware import AuthMiddleware" in user_route
-        assert "from app.extension.codenus.user.middleware import PermissionMiddleware" in user_route
-        assert "AuthMiddleware" in user_route
-        assert 'PermissionMiddleware("admin")' in user_route
-        assert "router.include(admin_router)" in user_route
-        assert "router.include(user_router)" in user_route
-        assert "router.include(home_router)" in user_route
+        kit_route = (tmp_path / "app" / "order" / "route.py").read_text()
+        assert "from app.extension.codenus.kit.middlewares.auth import AuthMiddleware" in kit_route
+        assert "from app.extension.codenus.kit.middlewares.permission import PermissionMiddleware" in kit_route
+        assert "AuthMiddleware" in kit_route
+        assert 'PermissionMiddleware("admin")' in kit_route
+        assert "router.include(admin_router)" in kit_route
+        assert "router.include(user_router)" in kit_route
+        assert "router.include(home_router)" in kit_route
 
     def test_app_run_cli(self, tmp_path):
         code = app_run(["invoice"], base_dir=str(tmp_path))
@@ -595,11 +595,11 @@ class TestExtensionCommands:
 
     def test_manifest_and_lock_json_round_trip(self, tmp_path):
         (tmp_path / "extension.json").write_text(
-            '{"apps": {"codenus/user": "1.2.*"}}', encoding="utf-8"
+            '{"apps": {"codenus/kit": "1.2.*"}}', encoding="utf-8"
         )
-        assert load_apps(base_dir=str(tmp_path)) == {"codenus/user": "1.2.*"}
+        assert load_apps(base_dir=str(tmp_path)) == {"codenus/kit": "1.2.*"}
 
-        installed = {"codenus/user": "1.2.3", "codenus/blog": "0.1.0"}
+        installed = {"codenus/kit": "1.2.3", "codenus/blog": "0.1.0"}
         write_lock(installed, base_dir=str(tmp_path))
         assert (tmp_path / "extension-lock.json").exists()
         assert load_installed(base_dir=str(tmp_path)) == installed
@@ -607,36 +607,26 @@ class TestExtensionCommands:
         assert load_apps(base_dir=str(tmp_path / "nope")) == {}
         assert load_installed(base_dir=str(tmp_path / "nope")) == {}
 
-    def test_extension_route_scaffold_uses_extension_name_alias(self, tmp_path):
-        install = SimpleNamespace(route="codenus.user.routes")
-        _add_route(install, "codenus/user", base_dir=str(tmp_path))
+    def test_extension_route_scaffold_uses_kit_extension_name_alias(self, tmp_path):
+        install = SimpleNamespace(route="codenus.kit.routes")
+        _add_route(install, "codenus/kit", base_dir=str(tmp_path))
 
         route_source = (
-            tmp_path / "app" / "extension" / "codenus" / "user" / "route.py"
+            tmp_path / "app" / "extension" / "codenus" / "kit" / "route.py"
         ).read_text()
-        assert "router as codenus_user_router" in route_source
-        assert "router.include(codenus_user_router)" in route_source
-
-    def test_extension_route_scaffold_uses_extension_name_alias(self, tmp_path):
-        install = SimpleNamespace(route="codenus.user.routes")
-        _add_route(install, "codenus/user", base_dir=str(tmp_path))
-
-        route_source = (
-            tmp_path / "app" / "extension" / "codenus" / "user" / "route.py"
-        ).read_text()
-        assert "router as codenus_user_router" in route_source
-        assert "router.include(codenus_user_router)" in route_source
+        assert "router as codenus_kit_router" in route_source
+        assert "router.include(codenus_kit_router)" in route_source
         routes_index = (tmp_path / "routes" / "api.py").read_text()
-        assert "router.include(codenus_user_route)" in routes_index
+        assert "router.include(codenus_kit_route)" in routes_index
 
     def test_extension_route_removal_removes_index_mount(self, tmp_path):
-        install = SimpleNamespace(route="codenus.user.routes")
-        _add_route(install, "codenus/user", base_dir=str(tmp_path))
+        install = SimpleNamespace(route="codenus.kit.routes")
+        _add_route(install, "codenus/kit", base_dir=str(tmp_path))
         from renus.commands.extension.build import _remove_route
 
-        _remove_route(install, "codenus/user", base_dir=str(tmp_path))
+        _remove_route(install, "codenus/kit", base_dir=str(tmp_path))
         routes_index = (tmp_path / "routes" / "api.py").read_text()
-        assert "codenus_user_route" not in routes_index
+        assert "codenus_kit_route" not in routes_index
 
     def test_update_vs_upgrade_modes(self):
         mock_install = MagicMock()

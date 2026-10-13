@@ -28,11 +28,11 @@ from renus.util.codec import json_decode, json_encode
 from renus.util.version import get_version
 
 DESCRIPTION = """Install/update/remove extensions.
-  renus extension codenus/user
-  renus extension codenus/user==1.2.*
-  renus extension --update codenus/user
-  renus extension --upgrade codenus/user
-  renus extension --remove codenus/user"""
+  renus extension codenus/kit
+  renus extension codenus/kit==1.2.*
+  renus extension --update codenus/kit
+  renus extension --upgrade codenus/kit
+  renus extension --remove codenus/kit"""
 
 EXTENSION_CONFIG = "extension.json"
 EXTENSION_LOCK = "extension-lock.json"

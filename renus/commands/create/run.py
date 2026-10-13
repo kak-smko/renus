@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import http.client
+import json
 import os
 import re
 import shutil
@@ -8,7 +9,6 @@ import subprocess
 import sys
 import tarfile
 import urllib.request
-import zipfile
 from io import BytesIO
 from pathlib import Path
 
@@ -307,64 +307,6 @@ def generate_api(root: str, name: str, pkg: str, database: str) -> bool:
 MVP_REPO_URL = "https://github.com/kak-smko/codenus"
 MVP_REPO_BRANCH = "master"
 
-MVP_DATABASE_CONFIGS: dict[str, str] = {
-    "sqlite": '''from renus.db import SQLiteAdapter
-
-adapter = SQLiteAdapter({"database": "./{pkg}.db"})
-ID = int
-''',
-    "mongodb": '''import os
-
-from renus.db import MongoDBAdapter
-
-adapter = MongoDBAdapter({
-    "uri": os.environ.get("RENUS_MONGO_URI", "mongodb://127.0.0.1:27017"),
-    "database": os.environ.get("RENUS_MONGO_DB", "{pkg}"),
-})
-ID = int
-''',
-    "mysql": '''import os
-
-from renus.db import MySQLAdapter
-
-adapter = MySQLAdapter({
-    "host": os.environ.get("RENUS_MYSQL_HOST", "127.0.0.1"),
-    "port": int(os.environ.get("RENUS_MYSQL_PORT", "3306")),
-    "username": os.environ.get("RENUS_MYSQL_USER", "root"),
-    "password": os.environ.get("RENUS_MYSQL_PASSWORD", ""),
-    "database": os.environ.get("RENUS_MYSQL_DB", "{pkg}"),
-})
-ID = int
-''',
-}
-
-MVP_DATABASE_REQUIREMENTS = {
-    "sqlite": "renus[server]",
-    "mongodb": "renus[server,mongo]",
-    "mysql": "renus[server,mysql]",
-}
-
-
-def _configure_mvp_database(root: str, pkg: str, database: str) -> None:
-    """Set the downloaded Codenus starter's adapter and matching dependency."""
-    config_path = os.path.join(root, "config", "database.py")
-    _write(config_path, MVP_DATABASE_CONFIGS[database].replace("{pkg}", pkg))
-
-    requirements_path = os.path.join(root, "requirements.txt")
-    if os.path.isfile(requirements_path):
-        lines = Path(requirements_path).read_text(encoding="utf-8").splitlines()
-    else:
-        lines = []
-
-    requirement = MVP_DATABASE_REQUIREMENTS[database]
-    for index, line in enumerate(lines):
-        if re.match(r"^\s*renus(?:\s*\[|\s*[<>=!~@;]|\s*$)", line, re.IGNORECASE):
-            lines[index] = requirement
-            break
-    else:
-        lines.insert(0, requirement)
-    _write(requirements_path, "\n".join(lines).rstrip() + "\n")
-
 def _archive_url(repo: str = MVP_REPO_URL, branch: str = MVP_REPO_BRANCH) -> str:
     slug = repo.rstrip("/").removesuffix(".git")
     slug = slug.split("github.com/", 1)[-1]
@@ -441,19 +383,14 @@ def fetch_project(
     return download_project(repo, dest, branch)
 
 def generate_mvp(root: str, name: str, pkg: str, database: str) -> bool:
-    """Fetch the Codenus starter and configure its selected database adapter."""
+    """Scaffold an MVP project by fetching it into the root directory."""
     Terminal.cyan.print(f"Fetching MVP project from {MVP_REPO_URL}...")
-    if not fetch_project(root):
-        Terminal.red.print(f"Error: could not fetch the MVP project from {MVP_REPO_URL}.")
-        Terminal.dim.print("Requires network access and 'git' (or GitHub reachability) — check and retry.")
-        return False
+    if fetch_project(root):
+        return True
 
-    try:
-        _configure_mvp_database(root, pkg, database)
-    except OSError as exc:
-        Terminal.red.print(f"Error: could not configure the {database} database adapter: {exc}")
-        return False
-    return True
+    Terminal.red.print(f"Error: could not fetch the MVP project from {MVP_REPO_URL}.")
+    Terminal.dim.print("Requires network access and 'git' (or GitHub reachability) — check and retry.")
+    return False
 
 
 LOCAL_EXTENSION_COMMAND = Path(__file__).with_name("local_run_template.py").read_text(
@@ -494,8 +431,74 @@ def _run_generator(template: str, root: str, name: str, pkg: str, database: str)
     if generator(root, name, pkg, database) is False:
         return False
 
-    detail = f" (database: {database})"
+    detail = "" if template in ("mvp", "extension") else f" (database: {database})"
     Terminal.green.print(f"Project '{name}' created with template '{template}'{detail}.")
+    return True
+
+
+def configure_eslint(root: str) -> bool:
+    """Install ESLint and add a Vue ESLint config to generated frontends."""
+    project = Path(root)
+    config = '''import js from '@eslint/js'
+import globals from 'globals'
+import pluginVue from 'eslint-plugin-vue'
+
+export default [
+  {
+    files: ['**/*.{js,mjs,jsx,vue}'],
+    ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**'],
+    languageOptions: {
+      globals: globals.browser,
+    },
+  },
+  js.configs.recommended,
+  ...pluginVue.configs['flat/essential'],
+  {
+    rules: {
+      'vue/no-v-text-v-html-on-component': 'off',
+      'vue/multi-word-component-names': 'off',
+    },
+  },
+]
+'''
+    npm = shutil.which("npm")
+    if npm is None:
+        Terminal.red.print("Error: npm is required to install ESLint.")
+        return False
+
+    for frontend in ("admin", "index"):
+        frontend_dir = project / "frontend" / frontend
+        package_path = frontend_dir / "package.json"
+        if not package_path.is_file():
+            continue
+
+        try:
+            result = subprocess.run(
+                [npm, "install", "--save-dev", "eslint", "@eslint/js", "eslint-plugin-vue", "globals"],
+                cwd=frontend_dir,
+                check=False,
+            )
+            if result.returncode != 0:
+                Terminal.red.print(f"Error: npm failed to install ESLint for {frontend}.")
+                return False
+
+            package = json.loads(package_path.read_text(encoding="utf-8"))
+            package.setdefault("scripts", {})["lint"] = "eslint ."
+            package_path.write_text(
+                json.dumps(package, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            (frontend_dir / "eslint.config.js").write_text(config, encoding="utf-8")
+        except (OSError, ValueError) as exc:
+            Terminal.red.print(f"Error: could not configure ESLint for {frontend}: {exc}")
+            return False
+
+        if result.returncode != 0:
+            Terminal.red.print(f"Error: npm failed to install ESLint for {frontend}.")
+            return False
+
+        Terminal.green.print(f"ESLint configured for frontend/{frontend}.")
+
     return True
 
 def _resolve_args(args: list[str] | None) -> tuple[str | None, str | None, str | None]:
@@ -552,15 +555,20 @@ def run(args: list[str] | None = None) -> int:
         if database not in DATABASES:
             Terminal.red.print(f"Error: unknown database '{database}' (expected one of {', '.join(DATABASES)}).")
             return 1
-        if template in ("mvp", "extension") and database == "none":
-            Terminal.red.print(
-                f"Error: the '{template}' template requires a database adapter "
-                f"(choose one of {', '.join(MVP_DATABASE_CONFIGS)})."
-            )
-            return 1
 
         if not _run_generator(template, out_dir, dir_name, pkg, database):
             return 1
+
+        install_eslint = False
+        if template in ("mvp", "extension"):
+            install_eslint = _select_optional(
+                "install ESLint for the frontends?",
+                ["No", "Yes"],
+                "No",
+            ) == "Yes"
+        if install_eslint and not configure_eslint(out_dir):
+            return 1
+
         Terminal.cyan.print(f"Created project in '{out_dir}'. Run: cd {dir_name} && renus run dev")
         return 0
     except KeyboardInterrupt:

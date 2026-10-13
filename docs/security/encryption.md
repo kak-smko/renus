@@ -1,6 +1,6 @@
 # Encryption
 
-Renus supports optional application-provided encryption for HTTP bodies. The `user/crypt.py` example provides a concrete cryptor named `Crypto`; Renus only supplies the request/response integration.
+Renus supports optional application-provided encryption for HTTP bodies. The `kit/user/crypt.py` example provides a concrete cryptor named `Crypto`; Renus only supplies the request/response integration.
 
 The integration expects a cryptor class or callable with these methods:
 
@@ -12,7 +12,7 @@ The integration expects a cryptor class or callable with these methods:
 Configure the cryptor once during application startup, before the server begins handling requests:
 
 ```python
-from extension.codenus.user.crypt import Crypto
+from extension.codenus.kit.user.crypt import Crypto
 from renus.request import Request
 from renus.response import JsonResponse,TextResponse
 
@@ -47,17 +47,17 @@ Request.cryptor = Crypto
 `Crypto` does not use one hard-coded application-wide AES key. Its constructor starts with `secure_key`, then, when the request has `auth_params`, reads the hexadecimal per-session key from `auth_params["shared_key"]`:
 
 ```python
-from user.crypt import Crypto
+from extension.codenus.kit.user.crypt import Crypto
 
 
 crypto = Crypto(request=request)
-# Equivalent source of the key inside user/crypt.py:
+# Equivalent source of the key inside kit/user/crypt.py:
 # crypto.shared_key = bytes.fromhex(
 #     request.auth_params.get("shared_key", "")
 # )
 ```
 
-In the `user/*` flow, authentication middleware sets `request.auth_params` after it validates the bearer token. The token was created with a `shared_key` value during the client key-exchange flow. The order is therefore:
+In the `kit/*` flow, authentication middleware sets `request.auth_params` after it validates the bearer token. The token was created with a `shared_key` value during the client key-exchange flow. The order is therefore:
 
 1. The client establishes a shared key with the server.
 2. The server stores that key in the issued token's parameters.
@@ -67,9 +67,9 @@ In the `user/*` flow, authentication middleware sets `request.auth_params` after
 
 A route that runs before authentication has no `request.auth_params["shared_key"]`. In the current `Crypto` implementation, encryption then raises `ValueError("shared_key_not_set")`. Do not expect the login or initial key-exchange response to use this per-session body encryption before the shared key exists.
 
-## How `user.crypt.Crypto` works
+## How `kit.user.crypt.Crypto` works
 
-The `Crypto` implementation in `user/crypt.py` uses:
+The `Crypto` implementation in `kit/user/crypt.py` uses:
 
 - elliptic-curve `SECP256R1` for the key-agreement helper methods;
 - AES-GCM for authenticated encryption;
@@ -88,7 +88,7 @@ class Crypto:
             )
 ```
 
-In the `user/crypt.py` implementation, `generate_server_keys()` creates a server private/public key pair. `set_client_public_key(...)` loads the server private key from `Config("app").get("private_key")`, performs ECDH with the client's public key, and derives `shared_key`. That key-establishment flow is application code; Renus does not call these methods automatically.
+In the `kit/user/crypt.py` implementation, `generate_server_keys()` creates a server private/public key pair. `set_client_public_key(...)` loads the server private key from `Config("app").get("private_key")`, performs ECDH with the client's public key, and derives `shared_key`. That key-establishment flow is application code; Renus does not call these methods automatically.
 
 A missing shared key causes `Crypto.encrypt()` and `Crypto.decrypt()` to raise `ValueError("shared_key_not_set")`.
 
@@ -124,7 +124,7 @@ The original media type is in `real-type`; the wire body is binary encrypted dat
 
 ### Current `Crypto` wire-format caveat
 
-`user/crypt.py` also defines `encrypt_text()`, which base64-encodes the encrypted bytes, and `decrypt_text()`, which base64-decodes before decrypting. However, Renus's response path calls `encrypt(body)`, not `encrypt_text(body)`, while its request path calls `decrypt_text(text)`. Therefore the current `Crypto` class does not provide a direct response-to-request round trip without an adapter or a matching client/server wire-format change:
+`kit/user/crypt.py` also defines `encrypt_text()`, which base64-encodes the encrypted bytes, and `decrypt_text()`, which base64-decodes before decrypting. However, Renus's response path calls `encrypt(body)`, not `encrypt_text(body)`, while its request path calls `decrypt_text(text)`. Therefore the current `Crypto` class does not provide a direct response-to-request round trip without an adapter or a matching client/server wire-format change:
 
 - response output: raw `IV + ciphertext + tag` bytes;
 - request input expected by `decrypt_text()`: base64 text containing `IV + ciphertext + tag`.

@@ -77,11 +77,11 @@ router = Router()
 router.include(admin_router)
 '''
 
-route_user_temp = '''from renus.router import Router
+route_kit_temp = '''from renus.router import Router
 from renus.config import Config
 from app.{name}.controller import {name_camel}Controller
-from app.extension.codenus.user.middleware import AuthMiddleware
-from app.extension.codenus.user.middleware import PermissionMiddleware
+from app.extension.codenus.kit.middlewares.auth import AuthMiddleware
+from app.extension.codenus.kit.middlewares.permission import PermissionMiddleware
 
 admin_router = Router(
     subdomain=Config("app").get("admin_subdomain", "admin"),

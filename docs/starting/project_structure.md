@@ -61,8 +61,8 @@ install into `extension/` and can add routes, extend models, provide middleware,
 contribute background jobs. For example:
 
 ```bash
-renus extension codenus/user      # User authentication and management
-renus extension codenus/translate # Internationalization support
+renus extension codenus/kit      # kit starter
+renus extension codenus/tracker
 ```
 
 ### Frontend (`frontend/`)

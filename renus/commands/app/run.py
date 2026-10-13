@@ -7,7 +7,7 @@ from renus.commands.app.temp import (
     controller_temp,
     model_temp,
     route_temp,
-    route_user_temp,
+    route_kit_temp,
     vue_temp,
 )
 from renus.rich import Terminal
@@ -17,12 +17,15 @@ __all__ = ["DESCRIPTION", "add_routes", "add_temp", "to_camel_case", "to_plural"
 
 DESCRIPTION = "Create New Package."
 
-def _is_user_extension_installed(base_dir: str = "./") -> bool:
-    check_paths = [
-        os.path.join(base_dir, "app", "extension", "codenus", "user"),
-        os.path.join(base_dir, "extension", "codenus", "user"),
-        os.path.join(base_dir, "app", "extension", "codenus", "user", "middleware.py"),
-    ]
+def _is_kit_extension_installed(base_dir: str = "./") -> bool:
+    check_paths = (
+        os.path.join(
+            base_dir, "app", "extension", "codenus", "kit", "middlewares", "auth.py"
+        ),
+        os.path.join(
+            base_dir, "extension", "codenus", "kit", "middlewares", "auth.py"
+        ),
+    )
     return any(os.path.exists(p) for p in check_paths)
 
 def add_temp(
@@ -67,8 +70,8 @@ def add_temp(
     with open(os.path.join(view_dir, f"{name}.vue"), "w", encoding="utf-8") as f:
         f.write(vue_code)
 
-    use_user_ext = _is_user_extension_installed(base_dir=base_dir)
-    selected_route_temp = route_user_temp if use_user_ext else route_temp
+    use_kit_ext = _is_kit_extension_installed(base_dir=base_dir)
+    selected_route_temp = route_kit_temp if use_kit_ext else route_temp
 
     route_code = selected_route_temp.replace("{name}", pname + name)
     route_code = route_code.replace("{names}", names)
