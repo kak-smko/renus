@@ -2,7 +2,7 @@ name: Release
 
 # Builds wheels and an sdist, then publishes them to PyPI on version tags.
 # Wheels are built for Linux (x86_64 + aarch64), macOS (x86_64 + arm64),
-# and Windows (AMD64) across cp310, cp311 and cp312 (Renus supports >=3.10).
+# and Windows (AMD64) for CPython 3.11 and 3.12 (Renus supports >=3.11).
 on:
   push:
     tags:
@@ -24,7 +24,7 @@ jobs:
           - os: macos-latest
           - os: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up QEMU (for Linux aarch64 wheels)
         if: runner.os == 'Linux'
@@ -35,11 +35,12 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.22.0
         env:
-          # Build every supported Python on Linux/macOS; Windows default already
-          # covers cp310/cp311/cp312. Include arm64 for Apple Silicon + aarch64
-          # for manylinux/linux aarch64.
+          # Build the Python versions supported by the package metadata. Include
+          # arm64 for Apple Silicon + aarch64 for manylinux/linux aarch64.
+          CIBW_BUILD: cp311-* cp312-*
           CIBW_ARCHS_LINUX: auto aarch64
           CIBW_ARCHS_MACOS: x86_64 arm64
+          CIBW_ARCHS_WINDOWS: AMD64
           # Test the installed wheels before upload.
           CIBW_TEST_COMMAND: "python -c \"import renus; print('renus', renus.__version__)\""
 
@@ -53,9 +54,9 @@ jobs:
     name: Build source distribution
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -77,6 +78,8 @@ jobs:
     # Trusted publishing requires a "pypi" environment with the trusted
     # publisher configured in the PyPI project settings.
     environment: pypi
+    permissions:
+      id-token: write
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/download-artifact@v4
