@@ -1,0 +1,236 @@
+{
+  "name": "Renus",
+  "menu": [
+    {
+      "name": "Getting Started",
+      "children": [
+        {
+          "name": "Installation",
+          "path":"docs/starting/installation.md"
+        },
+        {
+          "name": "Quick Start",
+           "path":"docs/starting/quick_start.md"
+        },
+        {
+          "name": "Project Structure",
+          "path":"docs/starting/project_structure.md"
+        }
+      ]
+    },
+    {
+      "name": "Development",
+      "children": [
+        {
+          "name": "Application",
+          "path": "docs/development/app.md"
+        },
+        {
+          "name": "Routing",
+          "path": "docs/development/routing.md"
+        },
+        {
+          "name": "Request",
+          "path": "docs/development/request.md"
+        },
+        {
+          "name": "Response",
+          "path": "docs/development/response.md"
+        },
+        {
+          "name": "Middlewares",
+          "path": "docs/development/middlewares.md"
+        },
+        {
+          "name": "WebSockets",
+          "path": "docs/development/websockets.md"
+        },
+        {
+          "name": "Lifespan & Background Tasks",
+          "path": "docs/development/lifespan_tasks.md"
+        },
+        {
+          "name": "Caching",
+          "path": "docs/development/caching.md"
+        },
+        {
+          "name": "Logging",
+          "path": "docs/development/logging.md"
+        },
+        {
+          "name": "Rich Terminal",
+          "path": "docs/development/rich.md"
+        },
+        {
+          "name": "Scheduling",
+          "path": "docs/development/scheduling.md"
+        }
+      ]
+    },
+    {
+      "name": "Database",
+      "children": [
+        {
+          "name": "overview",
+          "path": "docs/database/overview.md"
+        },
+        {
+          "name": "Models",
+          "path": "docs/database/models.md"
+        },
+        {
+          "name": "Fields",
+          "path": "docs/database/fields.md"
+        },
+        {
+          "name": "ID",
+          "path": "docs/database/id.md"
+        },
+        {
+          "name": "Database & Repositories",
+          "path": "docs/database/repositories.md"
+        },
+        {
+          "name": "Adapters",
+          "path": "docs/database/adapters.md"
+        },
+        {
+          "name": "Mutations",
+          "path": "docs/database/mutations.md"
+        },
+        {
+          "name": "Queries",
+          "path": "docs/database/queries.md"
+        },
+        {
+          "name": "Transactions & Unit of Work",
+          "path": "docs/database/transactions.md"
+        },
+        {
+          "name": "Migrations",
+          "path": "docs/database/migrations.md"
+        },
+        {
+          "name": "Backup & Restore",
+          "path": "docs/database/backup.md"
+        }
+      ]
+    },
+    {
+      "name": "Security",
+      "children": [
+        {
+          "name": "Validation",
+          "path": "docs/security/validation.md"
+        },
+        {
+          "name": "XSS Protection",
+          "path": "docs/security/xss.md"
+        },
+        {
+          "name": "Encryption",
+          "path": "docs/security/encryption.md"
+        },
+        {
+          "name": "Random & Secrets",
+          "path": "docs/security/random_secrets.md"
+        }
+      ]
+    },
+    {
+      "name": "CLI",
+      "children": [
+        {
+          "name": "Running the Server",
+          "path": "docs/cli/run.md"
+        },
+        {
+          "name": "Project Scaffolding",
+          "path": "docs/cli/create.md"
+        },
+        {
+          "name": "Database Commands",
+          "path": "docs/cli/db.md"
+        },
+        {
+          "name": "Extensions",
+          "path": "docs/cli/extensions.md"
+        },
+        {
+          "name": "App",
+          "path": "docs/cli/app.md"
+        }
+      ]
+    },
+    {
+      "name": "Configuration",
+      "children": [
+        {
+          "name": "Config Module",
+          "path": "docs/configuration/config.md"
+        },
+        {
+          "name": "Database Configuration",
+          "path": "docs/configuration/database.md"
+        }
+      ]
+    },
+    {
+      "name": "Examples",
+      "children": [
+        {
+          "name": "First HTTP App",
+          "path": "docs/examples/first_http_app.md"
+        },
+        {
+          "name": "WebSocket Echo",
+          "path": "docs/examples/websocket_echo.md"
+        },
+        {
+          "name": "Database CRUD",
+          "path": "docs/examples/database_crud.md"
+        },
+        {
+          "name": "Routing & Path Parameters",
+          "path": "docs/examples/routing_path_parameters.md"
+        },
+        {
+          "name": "Requests & Responses",
+          "path": "docs/examples/requests_responses.md"
+        },
+        {
+          "name": "Middleware",
+          "path": "docs/examples/middleware.md"
+        },
+        {
+          "name": "Lifespan & Background Tasks",
+          "path": "docs/examples/lifespan_background_tasks.md"
+        },
+        {
+          "name": "Caching",
+          "path": "docs/examples/caching.md"
+        },
+        {
+          "name": "Scheduled Tasks",
+          "path": "docs/examples/scheduled_tasks.md"
+        },
+        {
+          "name": "Database Queries",
+          "path": "docs/examples/database_queries.md"
+        },
+        {
+          "name": "Database Migrations",
+          "path": "docs/examples/database_migrations.md"
+        },
+        {
+          "name": "Database Backup & Restore",
+          "path": "docs/examples/database_backup_restore.md"
+        },
+        {
+          "name": "Validation",
+          "path": "docs/examples/validation.md"
+        }
+      ]
+    }
+  ]
+}
