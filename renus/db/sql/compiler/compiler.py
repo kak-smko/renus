@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from renus.db.query.ast import (
+    LIKE_ESCAPE,
     Condition,
     HavingCondition,
     Logical,
@@ -440,12 +441,14 @@ class SQLCompiler:
                 return f"{col} IS NOT NULL", []
             return f"{col} <> {self.dialect.placeholder}", [val]
 
+        if op == Operator.LIKE:
+            return f"{col} LIKE {self.dialect.placeholder} ESCAPE '{LIKE_ESCAPE}'", [val]
+        
         op_map = {
             Operator.GT: ">",
             Operator.GE: ">=",
             Operator.LT: "<",
             Operator.LE: "<=",
-            Operator.LIKE: "LIKE",
             Operator.REGEX: "REGEXP",
         }
         if op in op_map:

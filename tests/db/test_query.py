@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+import re
+
+from renus.db.query.ast import escape_like
+from renus.db.mongodb.compiler import like_to_regex
 
 from renus.db import (
     Avg,
@@ -405,3 +409,23 @@ async def test_bound_query_execution():
 
     assert await q.exists() is True
 
+
+
+def test_escape_like_escapes_wildcards_and_escape_char():
+    assert escape_like("100%") == "100!%"
+    assert escape_like("a_b") == "a!_b"
+    assert escape_like("a!b") == "a!!b"
+    assert escape_like("john smith") == "john smith"
+
+
+def test_like_to_regex_treats_wildcards_literally_when_escaped():
+    pattern = f"%{escape_like('a_b')}%"
+    rx = like_to_regex(pattern)
+    assert re.search(rx, "xx a_b yy")
+    assert not re.search(rx, "axb")
+
+
+def test_like_to_regex_percent_literal():
+    rx = like_to_regex(f"%{escape_like('100%')}%")
+    assert re.search(rx, "discount 100% off")
+    assert not re.search(rx, "100 apples")

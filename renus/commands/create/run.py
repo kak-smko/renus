@@ -10,6 +10,7 @@ import tarfile
 import urllib.request
 import zipfile
 from io import BytesIO
+from pathlib import Path
 
 if os.name == "nt":
     import msvcrt
@@ -21,7 +22,7 @@ from renus.rich import Terminal
 
 DESCRIPTION = "Create a new Renus project (create [name] [template] [database])."
 
-TEMPLATES = ("api", "mvp")
+TEMPLATES = ("api", "mvp", "extension")
 DATABASES = ("mongodb", "mysql", "sqlite", "none")
 
 def _is_tty() -> bool:
@@ -138,16 +139,17 @@ def _write(path: str, content: str) -> None:
 
 INIT_TEMPLATE = '"""The {pkg} application package."""\n'
 
-MODEL_TEMPLATE = '''from __future__ import annotations
 
-from renus.db import DatabaseField, Field, Model
+MAIN_TEMPLATE = '''from __future__ import annotations
+
+import os
+
+from renus.app import App
+from renus.db import Database, DatabaseField, Field, Model
+from renus.response import JsonResponse
 
 class Item(Model):
-    """A portable domain model (validation + persistence).
-
-    A natural string primary key keeps the model portable across SQL and
-    MongoDB backends.
-    """
+    """A portable domain model (validation + persistence)."""
 
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str = Field(max_len=120)
@@ -156,97 +158,49 @@ class Item(Model):
     class Meta:
         soft_delete = True
         timestamps = True
-'''.lstrip()
-
-CONTROLLER_TEMPLATE = '''from renus.request import Request
-from renus.response import JsonResponse
-
-from {pkg}.models import Item
-
-class ItemController:
-    def __init__(self, request: Request) -> None:
-        self.request = request
-
-    @property
-    def repo(self):
-        """Repository bound to the request-scoped database."""
-        return self.request.db.repository(Item)
-
-    async def index(self):
-        records = await self.repo.query().all()
-        return JsonResponse([dict(r) for r in records])
-
-    async def store(self):
-        data = await self.request.form()
-        await self.repo.create(Item(**dict(data or {{}})))
-        return JsonResponse({{"msg": "stored"}})
-
-    async def show(self, id):
-        record = await self.repo.query(Item.id == id).first()
-        if record is None:
-            return JsonResponse({{\"msg\": \"not found\"}})
-        return JsonResponse(dict(record))
-
-    async def update(self, id):
-        data = await self.request.form()
-        await self.repo.update(Item.id == id, values=dict(data or {{}}))
-        return JsonResponse({{"msg\": \"updated\"}})
-
-    async def delete(self, id):
-        data = await self.request.form()
-        await self.repo.delete(Item.id == id)
-        return JsonResponse({{"msg": "deleted"}})
-'''.lstrip()
-
-ROUTES_TEMPLATE = '''from renus.router import Router
-
-from {pkg}.controllers import ItemController
-
-router = Router()
-router.get("/items", ItemController, "index")
-router.post("/items", ItemController, "store")
-router.get("/items/{{id}}", ItemController, "show")
-router.put("/items/{{id}}", ItemController, "update")
-router.delete("/items/{{id}}", ItemController, "delete")
-'''.lstrip()
-
-APP_TEMPLATE = '''from __future__ import annotations
-
-from renus.app import App
-from renus.db import Database
-
-from {pkg}.models import Item
-from {pkg}.routes import router
-
-def create_app(adapter) -> App:
-    db = Database(adapter)
-
-    async def on_startup() -> None:
-        await db.connect()
-        await db.create_schema([Item])
-
-    async def on_shutdown() -> None:
-        await db.disconnect()
-
-    app = App(on_startup=[on_startup], on_shutdown=[on_shutdown])
-    app.state["db"] = db
-
-    app.include(router)
-
-    return app
-'''.lstrip()
-
-MAIN_TEMPLATE = '''from __future__ import annotations
-
-import os
-
-from {pkg}.app import create_app
 
 def _adapter():
 {adapter_body}
+db = Database(_adapter())
 
-# Built at import time; each uvicorn worker re-imports it fresh.
-app = create_app(_adapter())
+async def on_startup() -> None:
+    await db.connect()
+    await db.create_schema([Item])
+
+async def on_shutdown() -> None:
+    await db.disconnect()
+
+app = App(on_startup=[on_startup], on_shutdown=[on_shutdown])
+app.state["db"] = db
+
+@app.get("/items")
+async def index(request):
+    records = await request.db.repository(Item).query().all()
+    return JsonResponse([dict(record) for record in records])
+
+@app.post("/items")
+async def store(request):
+    data = await request.form()
+    await request.db.repository(Item).create(Item(**dict(data or {{}})))
+    return JsonResponse({{"msg": "stored"}})
+
+@app.get("/items/{{id}}")
+async def show(request, id):
+    record = await request.db.repository(Item).query(Item.id == id).first()
+    if record is None:
+        return JsonResponse({{"msg": "not found"}})
+    return JsonResponse(dict(record))
+
+@app.put("/items/{{id}}")
+async def update(request, id):
+    data = await request.form()
+    await request.db.repository(Item).update(Item.id == id, values=dict(data or {{}}))
+    return JsonResponse({{"msg": "updated"}})
+
+@app.delete("/items/{{id}}")
+async def delete_item(request, id):
+    await request.db.repository(Item).delete(Item.id == id)
+    return JsonResponse({{"msg": "deleted"}})
 
 def main() -> None:
     app.run("{pkg}.main:app", host="127.0.0.1", port=int(os.environ.get("RENUS_PORT", "8000")))
@@ -255,46 +209,18 @@ if __name__ == "__main__":
     main()
 '''.lstrip()
 
-PING_CONTROLLER_TEMPLATE = '''from renus.request import Request
-from renus.response import JsonResponse
-
-class PingController:
-    def __init__(self, request: Request) -> None:
-        self.request = request
-
-    async def ping(self):
-        return JsonResponse({{"msg": "pong", "method": self.request.method}})
-'''.lstrip()
-
-NODB_ROUTES_TEMPLATE = '''from renus.router import Router
-
-from {pkg}.controllers import PingController
-
-router = Router()
-router.get("/ping", PingController, "ping")
-'''.lstrip()
-
-NODB_APP_TEMPLATE = '''from __future__ import annotations
-
-from renus.app import App
-
-from {pkg}.routes import router
-
-def create_app() -> App:
-    app = App()
-
-    app.include(router)
-
-    return app
-'''.lstrip()
-
 NODB_MAIN_TEMPLATE = '''from __future__ import annotations
 
 import os
 
-from {pkg}.app import create_app
+from renus.app import App
+from renus.response import JsonResponse
 
-app = create_app()
+app = App()
+
+@app.get("/ping")
+async def ping(request):
+    return JsonResponse({{"msg": "pong", "method": request.method}})
 
 def main() -> None:
     app.run("{pkg}.main:app", host="127.0.0.1", port=int(os.environ.get("RENUS_PORT", "8000")))
@@ -366,18 +292,16 @@ def generate_api(root: str, name: str, pkg: str, database: str) -> bool:
     _write(os.path.join(root, "__init__.py"), INIT_TEMPLATE.format(pkg=pkg))
 
     if database == "none":
-        _write(os.path.join(root, "controllers.py"), PING_CONTROLLER_TEMPLATE)
-        _write(os.path.join(root, "routes.py"), NODB_ROUTES_TEMPLATE.format(pkg=pkg))
-        _write(os.path.join(root, "app.py"), NODB_APP_TEMPLATE.format(pkg=pkg))
         _write(os.path.join(root, "main.py"), NODB_MAIN_TEMPLATE.format(pkg=pkg))
         return True
 
-    _write(os.path.join(root, "models.py"), MODEL_TEMPLATE)
-    _write(os.path.join(root, "controllers.py"), CONTROLLER_TEMPLATE.format(pkg=pkg))
-    _write(os.path.join(root, "routes.py"), ROUTES_TEMPLATE.format(pkg=pkg))
-    _write(os.path.join(root, "app.py"), APP_TEMPLATE.format(pkg=pkg))
-    _write(os.path.join(root, "main.py"),
-           MAIN_TEMPLATE.format(pkg=pkg, adapter_body=ADAPTER_BODIES[database].replace("{pkg}", pkg)))
+    _write(
+        os.path.join(root, "main.py"),
+        MAIN_TEMPLATE.format(
+            pkg=pkg,
+            adapter_body=ADAPTER_BODIES[database].replace("{pkg}", pkg),
+        ),
+    )
     return True
 
 MVP_REPO_URL = "https://github.com/kak-smko/codenus"
@@ -468,9 +392,38 @@ def generate_mvp(root: str, name: str, pkg: str, database: str) -> bool:
     Terminal.dim.print("Requires network access and 'git' (or GitHub reachability) — check and retry.")
     return False
 
+
+LOCAL_EXTENSION_COMMAND = Path(__file__).with_name("local_run_template.py").read_text(
+    encoding="utf-8"
+)
+
+
+def generate_extension(root: str, name: str, pkg: str, database: str) -> bool:
+    """Create the MVP scaffold and add its local-extension management command."""
+    if not generate_mvp(root, name, pkg, database):
+        return False
+
+    commands_dir = os.path.join(root, "commands")
+    local_dir = os.path.join(commands_dir, "local")
+    try:
+        os.makedirs(local_dir, exist_ok=True)
+        for init_path in (
+            os.path.join(commands_dir, "__init__.py"),
+            os.path.join(local_dir, "__init__.py"),
+        ):
+            if not os.path.exists(init_path):
+                _write(init_path, "")
+        _write(os.path.join(local_dir, "run.py"), LOCAL_EXTENSION_COMMAND)
+    except OSError as exc:
+        Terminal.red.print(f"Error: could not add the local extension command: {exc}")
+        return False
+
+    return True
+
 GENERATORS = {
     "api": generate_api,
     "mvp": generate_mvp,
+    "extension": generate_extension,
 }
 
 def _run_generator(template: str, root: str, name: str, pkg: str, database: str) -> bool:
@@ -478,7 +431,7 @@ def _run_generator(template: str, root: str, name: str, pkg: str, database: str)
     if generator(root, name, pkg, database) is False:
         return False
 
-    detail = "" if template == "mvp" else f" (database: {database})"
+    detail = "" if template in ("mvp", "extension") else f" (database: {database})"
     Terminal.green.print(f"Project '{name}' created with template '{template}'{detail}.")
     return True
 

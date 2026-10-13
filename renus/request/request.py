@@ -105,7 +105,6 @@ class Request:
     def ip(self) -> typing.Optional[str]:
         """Client IP address, honoring the configured IP header if set."""
         header = Config("app").get("ipHeader", False)
-        header = Config("app").get("ipHeader", False)
         if header:
             return self.headers.get(header)
         return self.client[0] if self.client else None

@@ -14,6 +14,7 @@ from renus.db.mutation.ast import (
     UpdateMany,
 )
 from renus.db.query.ast import (
+    LIKE_ESCAPE,
     Condition,
     HavingCondition,
     Logical,
@@ -29,7 +30,25 @@ from renus.util import to_plural_lower
 
 _ALLOWED_AGGREGATE_FUNCTIONS = frozenset({"count", "sum", "avg", "min", "max"})
 
+def like_to_regex(pattern: str) -> str:
 
+    out: list[str] = []
+    i = 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == LIKE_ESCAPE and i + 1 < len(pattern):
+            out.append(re.escape(pattern[i + 1]))
+            i += 2
+            continue
+        if ch == "%":
+            out.append(".*")
+        elif ch == "_":
+            out.append(".")
+        else:
+            out.append(re.escape(ch))
+        i += 1
+    return "^" + "".join(out) + "$"
+    
 class MongoCompiledQuery:
 
     __slots__ = (
@@ -828,16 +847,7 @@ class MongoCompiler:
         if op == Operator.IS_NOT_NULL:
             return {path: {"$ne": None}}
         if op == Operator.LIKE:
-            raw_str = str(val)
-            pattern = ""
-            for ch in raw_str:
-                if ch == "%":
-                    pattern += ".*"
-                elif ch == "_":
-                    pattern += "."
-                else:
-                    pattern += re.escape(ch)
-            return {path: {"$regex": f"^{pattern}$"}}
+            return {path: {"$regex": like_to_regex(str(val))}}
         if op == Operator.REGEX:
             return {path: {"$regex": str(val)}}
         if op == Operator.BETWEEN:

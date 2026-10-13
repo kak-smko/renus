@@ -25,8 +25,7 @@ class Validate(dict[str, Any]):
     ) -> None:
         super().__init__()
 
-        if not isinstance(form, dict):
-            raise TypeError("form must be a dict")
+        form=dict(form)
         if fields is None :
             fields=model.metadata().fields.keys()
 

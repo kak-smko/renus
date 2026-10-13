@@ -142,7 +142,7 @@ class TestCLIRunner:
 class TestCreateProject:
 
     def test_constants(self):
-        assert TEMPLATES == ("api", "mvp")
+        assert TEMPLATES == ("api", "mvp", "extension")
         assert DATABASES == ("mongodb", "mysql", "sqlite", "none")
 
     def test_sanitize_and_package_name(self):
@@ -160,46 +160,53 @@ class TestCreateProject:
         assert rc == 0
         project_root = tmp_path / name
         assert (project_root / "README.md").exists()
-        
         assert (project_root / "__init__.py").exists()
-        assert (project_root / "app.py").exists()
         assert (project_root / "main.py").exists()
-        if database == "none":
-            assert not (project_root / "models.py").exists()
+        assert not (project_root / "controllers.py").exists()
+        assert not (project_root / "routes.py").exists()
+        import ast
+        ast.parse((project_root / "main.py").read_text())
 
-    def test_generate_api_sqlite_has_adapter(self, tmp_path, monkeypatch):
+    def test_generate_api_sqlite_has_adapter_and_decorated_routes(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         rc = create_run(["webapi", "api", "sqlite"])
         assert rc == 0
         main = (tmp_path / "webapi" / "main.py").read_text()
         assert "SQLiteAdapter" in main
-        assert "create_app" in main
+        assert '@app.get("/items")' in main
+        assert '@app.get("/items/{id}")' in main
+        assert 'from webapi.' not in main
 
     def test_generate_none_has_no_database(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         rc = create_run(["nodb", "api", "none"])
         assert rc == 0
-        main = (tmp_path / "nodb" / "main.py").read_text()
-        app = (tmp_path / "nodb" / "app.py").read_text()
-      
-        assert "from nodb.routes import router" in app
-        assert "app.include(router)" in app
-        
-        routes_source = (tmp_path / "nodb" / "routes.py").read_text()
-        assert "PingController" in routes_source
-        assert 'router.get("/ping", PingController, "ping")' in routes_source
-        
+        project_root = tmp_path / "nodb"
+        main = (project_root / "main.py").read_text()
+
+        assert "from renus.db" not in main
+        assert '@app.get("/ping")' in main
+        assert not (project_root / "app.py").exists()
+        assert not (project_root / "models.py").exists()
+        assert not (project_root / "controllers.py").exists()
+        assert not (project_root / "routes.py").exists()
 
     @pytest.mark.parametrize("database", ["sqlite", "mongodb", "mysql"])
-    def test_generated_database_app_mounts_router(self, tmp_path, monkeypatch, database):
+    def test_generated_database_api_uses_one_main_file(self, tmp_path, monkeypatch, database):
         monkeypatch.chdir(tmp_path)
-        assert create_run([f"mounted_{database}", "api", database]) == 0
-        app_source = (tmp_path / f"mounted_{database}" / "app.py").read_text()
-        routes_source = (tmp_path / f"mounted_{database}" / "routes.py").read_text()
-        assert f"from mounted_{database}.routes import router" in app_source
-        assert "app.include(router)" in app_source
-        assert "router = Router()" in routes_source
-        assert 'router.get("/items", ItemController, "index")' in routes_source
+        project_root = tmp_path / f"single_{database}"
+        assert create_run([f"single_{database}", "api", database]) == 0
+        main = (project_root / "main.py").read_text()
+        assert "app = App(" in main
+        assert "class Item(Model):" in main
+        assert '@app.get("/items")' in main
+        assert '@app.post("/items")' in main
+        assert '@app.put("/items/{id}")' in main
+        assert '@app.delete("/items/{id}")' in main
+        assert not (project_root / "app.py").exists()
+        assert not (project_root / "models.py").exists()
+        assert not (project_root / "controllers.py").exists()
+        assert not (project_root / "routes.py").exists()
 
     def test_create_aborts_on_existing_dir(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -234,6 +241,28 @@ class TestCreateProject:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(create_module, "fetch_project", lambda *a, **k: False)
         assert create_run(["nomvp", "mvp", "sqlite"]) == 1
+
+    def test_extension_template_adds_local_command_to_mvp(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        def fake_fetch(dest, repo=create_module.MVP_REPO_URL, branch=create_module.MVP_REPO_BRANCH):
+            Path(dest).mkdir(parents=True, exist_ok=True)
+            Path(dest, "main.py").write_text("# MVP scaffold\\n")
+            return True
+
+        monkeypatch.setattr(create_module, "fetch_project", fake_fetch)
+        assert create_run(["extensionapp", "extension", "sqlite"]) == 0
+
+        project = tmp_path / "extensionapp"
+        command = project / "commands" / "local" / "run.py"
+        command_source = command.read_text(encoding="utf-8")
+        compile(command_source, str(command), "exec")
+        assert (project / "main.py").exists()
+        assert (project / "commands" / "__init__.py").exists()
+        assert (project / "commands" / "local" / "__init__.py").exists()
+        assert "def _create_extension" in command_source
+        assert '"-new-extension": "new-extension"' in command_source
+        assert "def _install_local" in command_source
 
     def test_archive_url_is_derived_from_repo(self):
         assert create_module._archive_url() == (
@@ -327,14 +356,14 @@ class TestAppScaffolding:
 
         ctrl_code = (app_dir / "controller.py").read_text()
 
-        assert "db = self.request.db" in ctrl_code
-        assert self._count_in(ctrl_code, "db.repository(Article)") >= 1
-
-        assert "Article(self.request.inputs).to_dict()" in ctrl_code
-
-        assert "await self.repo.query().all()" in ctrl_code
-        assert "await self.repo.create(Article(**self.__inputs))" in ctrl_code
-        assert "await self.repo.update(Article.id == id, values=values)" in ctrl_code
+        assert "request.db.repository(Article)" in ctrl_code
+        assert "self.repo:Repository[Article]" in ctrl_code
+        assert "table = Table(Article, self.request)" in ctrl_code
+        assert "return JsonResponse(await table.index())" in ctrl_code
+        assert "payload = Article(dict(payload))" in ctrl_code
+        assert "await self.repo.create(payload)" in ctrl_code
+        assert "payload = Validate(Article,dict(payload),None)" in ctrl_code
+        assert "await self.repo.where(Article.id == id).update(payload)" in ctrl_code
         assert "await self.repo.delete(Article.id == id)" in ctrl_code
 
         model_code = (app_dir / "model.py").read_text()

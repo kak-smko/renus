@@ -4,6 +4,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+LIKE_ESCAPE = "!"
+
+
+def escape_like(value: str) -> str:
+    """Escape ``%``, ``_`` and the escape character so ``value`` matches literally in a LIKE pattern."""
+    return "".join(
+        f"{LIKE_ESCAPE}{ch}" if ch in (LIKE_ESCAPE, "%", "_") else ch
+        for ch in value
+    )
 
 class Operator(str, Enum):
     """Comparison and logical operators used in query conditions."""
