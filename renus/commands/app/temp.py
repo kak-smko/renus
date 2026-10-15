@@ -23,7 +23,7 @@ class {name_camel}Controller:
 
     async def update(self, id: ID):
         payload = await self.request.form()
-        payload = Validate({name_camel},dict(payload),None)
+        payload = Validate({name_camel},payload,None)
 
         await self.repo.where({name_camel}.id == id).update(payload)
         return JsonResponse({"msg": "updated"})
@@ -36,6 +36,23 @@ class {name_camel}Controller:
         """
         await self.repo.delete({name_camel}.id == id)
         return JsonResponse({"msg": "deleted"})
+        
+    async def restore(self, id: ID):
+        exist = await self.repo.where({name_camel}.id == id).with_deleted().first()
+        if exist is None:
+            return JsonResponse({"msg": "not_found"}, Status.HTTP_404_NOT_FOUND)
+        if not getattr(exist, "is_deleted", False):
+            return JsonResponse({"msg": "not_deleted"}, Status.HTTP_400_BAD_REQUEST)
+        await self.repo.restore({name_camel}.id == id)
+        return JsonResponse({"msg": "restored"})
+
+    async def remove(self, id: ID):
+        exist = await self.repo.where({name_camel}.id == id).with_deleted().first()
+        if exist is None:
+            return JsonResponse({"msg": "not_found"}, Status.HTTP_404_NOT_FOUND)
+   
+        await self.repo.hard_delete({name_camel}.id == id)
+        return JsonResponse({"msg": "removed"})
 '''
 
 model_temp = '''from __future__ import annotations
@@ -72,6 +89,9 @@ admin_router.get("/{names}", {name_camel}Controller, "index")
 admin_router.post("/{names}", {name_camel}Controller, "store")
 admin_router.put("/{names}/{id:id}", {name_camel}Controller, "update")
 admin_router.delete("/{names}/{id:id}", {name_camel}Controller, "delete")
+admin_router.put("/{names}/restore/{id:id}", {name_camel}Controller, "restore")
+admin_router.delete("/{names}/remove/{id:id}", {name_camel}Controller, "remove")
+
 
 router = Router()
 router.include(admin_router)
@@ -91,7 +111,9 @@ admin_router = Router(
 admin_router.get("/{names}", {name_camel}Controller, "index", middlewares=[PermissionMiddleware("{names}.view")])
 admin_router.post("/{names}", {name_camel}Controller, "store", middlewares=[PermissionMiddleware("{names}.create")])
 admin_router.put("/{names}/{id:id}", {name_camel}Controller, "update", middlewares=[PermissionMiddleware("{names}.edit")])
-admin_router.delete("/{names}/{id:id}", {name_camel}Controller, "delete", middlewares=[PermissionMiddleware("{names}.remove")])
+admin_router.delete("/{names}/{id:id}", {name_camel}Controller, "delete", middlewares=[PermissionMiddleware("{names}.delete")])
+admin_router.put("/{names}/restore/{id:id}", {name_camel}Controller, "restore", middlewares=[PermissionMiddleware("{names}.restore")])
+admin_router.delete("/{names}/remove/{id:id}", {name_camel}Controller, "remove", middlewares=[PermissionMiddleware("{names}.remove")])
 
 user_router = Router(prefix="/user", middlewares=[AuthMiddleware])
 home_router = Router(prefix="/home")
@@ -103,7 +125,7 @@ router.include(home_router)
 
 vue_temp = '''<template>
   <r-container class="container-fluid">
-    <r-table-crud link="admin/{folder}{names}"></r-table-crud>
+    <r-table-crud link="admin/{folder}{names}" soft-delete></r-table-crud>
   </r-container>
 </template>
 

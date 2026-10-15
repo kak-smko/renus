@@ -593,6 +593,95 @@ class TestExtensionCommands:
 
         assert match_version("1.2.3", available) == "1.2.3"
 
+    def test_download_resolves_wildcard_before_requesting_zip(self, tmp_path):
+        archive = BytesIO()
+        with zipfile.ZipFile(archive, "w") as zip_file:
+            zip_file.writestr("install.py", "")
+        responses = iter(
+            [
+                (200, {}, b'["1.0.0"]'),
+                (200, {"version": "1.0.0"}, archive.getvalue()),
+            ]
+        )
+        requested_urls = []
+
+        def fake_http_get(url, timeout=30):
+            requested_urls.append(url)
+            return next(responses)
+
+        with (
+            patch.object(extension_run_module, "http_get", side_effect=fake_http_get),
+            patch.object(extension_run_module, "install_app"),
+        ):
+            result = download(
+                "codenus/kit",
+                "1.*",
+                {},
+                base_dir=str(tmp_path),
+            )
+
+        assert result == "1.0.0"
+        assert requested_urls == [
+            "https://codenus.com/app/versions/codenus/kit",
+            "https://codenus.com/app/codenus/kit/1.0.0",
+        ]
+
+    def test_download_fails_cleanly_when_wildcard_cannot_be_resolved(self, tmp_path):
+        with patch.object(extension_run_module, "get_available_versions", return_value=[]):
+            result = download(
+                "codenus/kit",
+                "1.*",
+                {},
+                base_dir=str(tmp_path),
+            )
+
+        assert result is None
+        assert not (tmp_path / "extension").exists()
+
+    def test_extension_command_returns_failure_when_download_fails(self, tmp_path):
+        with (
+            patch.object(extension_run_module, "load_apps", return_value={}),
+            patch.object(extension_run_module, "load_installed", return_value={}),
+            patch.object(extension_run_module, "download", return_value=None),
+            patch.object(extension_run_module, "write_lock"),
+        ):
+            result = extension_run(["codenus/kit==1.*"], base_dir=str(tmp_path))
+
+        assert result == 1
+
+    def test_http_get_retries_transient_network_failures(self):
+        from urllib.error import URLError
+
+        class FakeResponse:
+            status = 200
+            headers = {"Content-Type": "text/plain"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b"ok"
+
+        with (
+            patch.object(
+                extension_run_module.urllib.request,
+                "urlopen",
+                side_effect=[URLError("temporarily unavailable"), FakeResponse()],
+            ) as mock_urlopen,
+            patch.object(extension_run_module.time, "sleep"),
+        ):
+            status, headers, body = extension_run_module.http_get(
+                "https://example.test/archive.zip"
+            )
+
+        assert mock_urlopen.call_count == 2
+        assert status == 200
+        assert headers == {"content-type": "text/plain"}
+        assert body == b"ok"
+
     def test_manifest_and_lock_json_round_trip(self, tmp_path):
         (tmp_path / "extension.json").write_text(
             '{"apps": {"codenus/kit": "1.2.*"}}', encoding="utf-8"

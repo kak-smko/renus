@@ -6,6 +6,7 @@ import inspect
 import os
 import shutil
 import threading
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -81,17 +82,33 @@ def http_get(url: str, timeout: int = 30) -> tuple[int, dict[str, str], bytes]:
             "Accept": "application/json, */*",
         },
     )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            status_code = resp.status
-            headers = {k.lower(): v for k, v in resp.headers.items()}
-            content = resp.read()
-            return status_code, headers, content
-    except urllib.error.HTTPError as exc:
-        headers = {k.lower(): v for k, v in exc.headers.items()}
-        return exc.code, headers, exc.read()
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Network request failed for '{url}': {exc.reason}") from exc
+    retries = 2
+
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                status_code = resp.status
+                headers = {k.lower(): v for k, v in resp.headers.items()}
+                content = resp.read()
+                if status_code >= 500 and attempt < retries:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                return status_code, headers, content
+        except urllib.error.HTTPError as exc:
+            if exc.code >= 500 and attempt < retries:
+                exc.close()
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            headers = {k.lower(): v for k, v in exc.headers.items()}
+            return exc.code, headers, exc.read()
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            if attempt < retries:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            reason = getattr(exc, "reason", exc)
+            raise RuntimeError(f"Network request failed for '{url}': {reason}") from exc
+
+    raise RuntimeError(f"Network request failed for '{url}' after {retries + 1} attempts")
 
 def parse_version_tuple(v: str) -> tuple[int, ...]:
     cleaned = v.strip().lstrip("v")
@@ -103,7 +120,7 @@ def parse_version_tuple(v: str) -> tuple[int, ...]:
 
 def get_available_versions(app: str) -> list[str]:
     versions: list[str] = []
-    url = f"https://codenus.com/app/{app}/versions"
+    url = f"https://codenus.com/app/versions/{app}"
 
     try:
         status, headers, content = http_get(url)
@@ -164,7 +181,17 @@ def download(
     base_dir: str = "./",
 ) -> str | None:
     available_versions = get_available_versions(app)
+    if version_spec.strip().endswith(".*") and not available_versions:
+        Terminal.red.print(
+            f"Could not resolve version '{version_spec}' for '{app}': no versions available."
+        )
+        return None
     target_version = match_version(version_spec, available_versions)
+    if version_spec.strip().endswith(".*") and "*" in target_version:
+        Terminal.red.print(
+            f"Could not find a version matching '{version_spec}' for '{app}'."
+        )
+        return None
 
     current_installed = installed.get(app)
     effective_mode = mode
@@ -189,7 +216,9 @@ def download(
         return None
 
     if status_code != 200:
-        Terminal.red.print(f"Download error: HTTP {status_code}")
+        detail = content.decode("utf-8", errors="replace").strip()
+        suffix = f": {detail}" if detail else ""
+        Terminal.red.print(f"Download error: HTTP {status_code}{suffix}")
         return None
 
     resolved_version = headers.get("version", target_version)
@@ -367,10 +396,20 @@ def install_all(
     installed: dict[str, str],
     mode: str = "install",
     base_dir: str = "./",
-) -> None:
+) -> bool:
     targets = installed if mode in ("update", "upgrade") else apps
+    succeeded = True
     for app, ver in targets.items():
-        download(app, "*" if mode in ("update", "upgrade") else ver, installed, mode=mode, base_dir=base_dir)
+        result = download(
+            app,
+            "*" if mode in ("update", "upgrade") else ver,
+            installed,
+            mode=mode,
+            base_dir=base_dir,
+        )
+        if result is None:
+            succeeded = False
+    return succeeded
 
 def run(args: list[str] | None = None, base_dir: str = "./") -> int:
     """Install, update, upgrade, or remove extensions."""
@@ -397,11 +436,12 @@ def run(args: list[str] | None = None, base_dir: str = "./") -> int:
         Terminal.red.print("Error: cannot combine '--remove' with '--update' or '--upgrade'")
         return 1
 
+    succeeded = True
     if not cmd_args:
         if is_remove:
             remove_all(installed, base_dir=base_dir)
         else:
-            install_all(apps, installed, mode=mode, base_dir=base_dir)
+            succeeded = install_all(apps, installed, mode=mode, base_dir=base_dir)
     else:
         target = cmd_args[0]
         version = "*"
@@ -412,9 +452,12 @@ def run(args: list[str] | None = None, base_dir: str = "./") -> int:
 
         if is_remove:
             remove(app_name, installed, base_dir=base_dir)
-        else:
-            download(app_name, version, installed, mode=mode, base_dir=base_dir)
+        elif download(app_name, version, installed, mode=mode, base_dir=base_dir) is None:
+            succeeded = False
 
     write_lock(installed, base_dir=base_dir)
+    if not succeeded:
+        Terminal.red.print("Operation failed.")
+        return 1
     Terminal.green.print("Operation completed.")
     return 0
