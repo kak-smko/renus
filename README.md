@@ -195,6 +195,53 @@ The [benchmark guide](benchmarks/README.md) describes the cross-framework HTTP
 comparison. GitHub Actions runs it weekly; the latest results are published here.
 
 <!-- benchmark-results:start -->
+
+# Cross-Framework Benchmark Results
+
+Real HTTP/1.1 keep-alive load test of `renus` vs other Python web frameworks. Each framework serves the same routes and is hammered single-process with the bundled stdlib load tester.
+
+- Python: 3.12.15
+- Concurrency: 64 keep-alive connections
+- Duration: 60.0s per endpoint
+
+> These are **relative** numbers for a single machine/run. Absolute throughput is machine-dependent; rerun and take the median before drawing conclusions.
+
+## `plain` (`/plain`)
+
+| Framework | req/s | p50 (ms) | p90 (ms) | p99 (ms) | max (ms) |
+|-----------|------:|---------:|---------:|---------:|---------:|
+| pur_uvicorn | 23,779 | 2.68 | 2.80 | 3.35 | 6.92 |
+| renus | 23,763 | 2.68 | 2.77 | 3.82 | 6.66 |
+| blacksheep | 23,419 | 2.72 | 2.82 | 3.38 | 7.33 |
+| robyn | 23,087 | 2.75 | 2.86 | 3.66 | 9.32 |
+| sanic | 22,561 | 2.88 | 3.13 | 3.79 | 9.22 |
+| litestar | 17,497 | 3.69 | 3.88 | 4.78 | 9.08 |
+| fastapi | 13,587 | 4.75 | 4.91 | 6.43 | 11.35 |
+
+## `json` (`/json`)
+
+| Framework | req/s | p50 (ms) | p90 (ms) | p99 (ms) | max (ms) |
+|-----------|------:|---------:|---------:|---------:|---------:|
+| renus | 23,713 | 2.69 | 2.79 | 3.25 | 6.50 |
+| pur_uvicorn | 23,612 | 2.68 | 2.81 | 4.14 | 7.80 |
+| blacksheep | 23,492 | 2.69 | 3.22 | 3.55 | 7.93 |
+| robyn | 23,222 | 2.73 | 2.84 | 3.64 | 7.27 |
+| sanic | 21,803 | 2.99 | 3.21 | 3.90 | 8.92 |
+| litestar | 16,998 | 3.80 | 3.98 | 4.71 | 10.39 |
+| fastapi | 12,647 | 5.12 | 5.29 | 6.02 | 10.53 |
+
+## `user` (`/user/alice`)
+
+| Framework | req/s | p50 (ms) | p90 (ms) | p99 (ms) | max (ms) |
+|-----------|------:|---------:|---------:|---------:|---------:|
+| blacksheep | 23,710 | 2.67 | 3.18 | 3.51 | 8.30 |
+| pur_uvicorn | 23,560 | 2.71 | 2.82 | 3.33 | 7.64 |
+| renus | 23,431 | 2.72 | 2.88 | 3.63 | 7.30 |
+| sanic | 21,538 | 3.01 | 3.27 | 3.99 | 9.10 |
+| robyn | 17,031 | 3.72 | 3.83 | 4.80 | 8.87 |
+| litestar | 15,150 | 4.22 | 4.43 | 6.56 | 12.01 |
+| fastapi | 10,533 | 6.13 | 6.36 | 7.63 | 16.63 |
+
 <!-- benchmark-results:end -->
 
 ## Development
