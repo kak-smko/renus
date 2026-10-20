@@ -35,8 +35,8 @@ DESCRIPTION = """Install/update/remove extensions.
   renus extension --upgrade codenus/kit
   renus extension --remove codenus/kit"""
 
-EXTENSION_CONFIG = "extension.json"
-EXTENSION_LOCK = "extension-lock.json"
+EXTENSION_CONFIG = "extension/extension.json"
+EXTENSION_LOCK = "extension/extension-lock.json"
 
 
 def _run_awaitable(value: Any) -> None:

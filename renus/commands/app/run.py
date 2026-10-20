@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 
 from renus.commands.routing import include_router_in_index
 from renus.commands.app.temp import (
@@ -36,6 +37,7 @@ def add_temp(
     name_db: str,
     folder: list[str],
     base_dir: str = "./",
+    soft_delete: bool = True,
 ) -> None:
     """Generate controller, model, route, and Vue templates for a package."""
     pth = os.path.join(base_dir, "app")
@@ -53,12 +55,37 @@ def add_temp(
     ctrl_code = controller_temp.replace("{name}", pname + name)
     ctrl_code = ctrl_code.replace("{name_camel}", name_camel)
     ctrl_code = ctrl_code.replace("{names_camel}", names_camel)
+    soft_delete_controller = ""
+    if soft_delete:
+        soft_delete_controller = '''
+    async def restore(self, id: ID):
+        exist = await self.repo.where({name_camel}.id == id).with_deleted().first()
+        if exist is None:
+            return JsonResponse({"msg": "not_found"}, Status.HTTP_404_NOT_FOUND)
+        if not getattr(exist, "is_deleted", False):
+            return JsonResponse({"msg": "not_deleted"}, Status.HTTP_400_BAD_REQUEST)
+        await self.repo.restore({name_camel}.id == id)
+        return JsonResponse({"msg": "restored"})
+
+    async def remove(self, id: ID):
+        exist = await self.repo.where({name_camel}.id == id).with_deleted().first()
+        if exist is None:
+            return JsonResponse({"msg": "not_found"}, Status.HTTP_404_NOT_FOUND)
+
+        await self.repo.hard_delete({name_camel}.id == id)
+        return JsonResponse({"msg": "removed"})'''.replace(
+            "{name_camel}", name_camel
+        )
+    ctrl_code = ctrl_code.replace("{soft_delete_controller}", soft_delete_controller)
     with open(os.path.join(pth, "controller.py"), "w", encoding="utf-8") as f:
         f.write(ctrl_code)
 
     model_code = model_temp.replace("{names_camel}", names_camel)
     model_code = model_code.replace("{name_camel}", name_camel)
     model_code = model_code.replace("{name_db}", name_db)
+    model_code = model_code.replace(
+        "{soft_delete_meta}", "        soft_delete = True" if soft_delete else ""
+    )
     with open(os.path.join(pth, "model.py"), "w", encoding="utf-8") as f:
         f.write(model_code)
 
@@ -67,6 +94,9 @@ def add_temp(
     vue_code = vue_temp.replace("{name}", name)
     vue_code = vue_code.replace("{names}", names)
     vue_code = vue_code.replace("{folder}", vname.lstrip("/"))
+    vue_code = vue_code.replace(
+        "{soft_delete_attribute}", " soft-delete" if soft_delete else ""
+    )
     with open(os.path.join(view_dir, f"{name}.vue"), "w", encoding="utf-8") as f:
         f.write(vue_code)
 
@@ -77,6 +107,18 @@ def add_temp(
     route_code = route_code.replace("{names}", names)
     route_code = route_code.replace("{name_camel}", name_camel)
     route_code = route_code.replace("{folder}", vname.rstrip("/"))
+    route_code = route_code.replace(
+        "{soft_delete_routes}",
+        f'admin_router.put("/{names}/restore/{{id:id}}", {name_camel}Controller, "restore")\n'
+        f'admin_router.delete("/{names}/remove/{{id:id}}", {name_camel}Controller, "remove")'
+        if soft_delete else "",
+    )
+    route_code = route_code.replace(
+        "{soft_delete_kit_routes}",
+        f'admin_router.put("/{names}/restore/{{id:id}}", {name_camel}Controller, "restore", middlewares=[PermissionMiddleware("{names}.restore")])\n'
+        f'admin_router.delete("/{names}/remove/{{id:id}}", {name_camel}Controller, "remove", middlewares=[PermissionMiddleware("{names}.remove")])'
+        if soft_delete else "",
+    )
     with open(os.path.join(pth, "route.py"), "w", encoding="utf-8") as f:
         f.write(route_code)
 
@@ -115,14 +157,25 @@ def add_routes(
 
 def run(args: list[str] | None = None, base_dir: str = "./") -> int:
     """Scaffold a new package and register its routes."""
-    if args and len(args) > 0:
-        raw_name = args[0].strip().lower()
-    else:
+    command_args = args or []
+    raw_name = command_args[0].strip().lower() if command_args else ""
+    if not raw_name:
         raw_name = input("name (single lowercase): ").strip().lower()
-
     if not raw_name:
         Terminal.red.print("Error: package name cannot be empty.")
         return 1
+
+    soft_delete_option = next(
+        (arg for arg in command_args[1:] if arg in ("--soft-delete", "--no-soft-delete")),
+        None,
+    )
+    if soft_delete_option is not None:
+        soft_delete = soft_delete_option == "--soft-delete"
+    elif sys.stdin.isatty() and sys.stdout.isatty():
+        answer = input("Enable soft delete? [Y/n]: ").strip().lower()
+        soft_delete = answer not in ("n", "no")
+    else:
+        soft_delete = True
 
     folder = raw_name.split(".")
     name = folder[-1]
@@ -134,7 +187,16 @@ def run(args: list[str] | None = None, base_dir: str = "./") -> int:
     names_camel = to_camel_case(plural_raw)
     name_db = name.replace("_", "-")
 
-    add_temp(name, names, name_camel, names_camel, name_db, folder, base_dir=base_dir)
+    add_temp(
+        name,
+        names,
+        name_camel,
+        names_camel,
+        name_db,
+        folder,
+        base_dir=base_dir,
+        soft_delete=soft_delete,
+    )
     Terminal.green.print("Templates created.")
     add_routes(name, names, name_camel, folder, base_dir=base_dir)
     Terminal.green.print("Routes created.")

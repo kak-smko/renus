@@ -1,7 +1,9 @@
 controller_temp = '''from renus.request import Request
-from renus.response import JsonResponse
+from renus.response import JsonResponse,Status
 from app.extension.codenus.kit.table.service import Table
+from renus.db import Repository
 from renus.db.validation import Validate
+from renus.datastructures import ID
 from app.{name}.model import {name_camel}
 
 class {name_camel}Controller:
@@ -28,53 +30,30 @@ class {name_camel}Controller:
         await self.repo.where({name_camel}.id == id).update(payload)
         return JsonResponse({"msg": "updated"})
 
-    async def delete(self, id):
-        """Delete {name_camel} by primary key.
-        :method: delete
-        :param id: {name_camel} primary key
-        :return: JsonResponse
-        """
+    async def delete(self, id: ID):
         await self.repo.delete({name_camel}.id == id)
         return JsonResponse({"msg": "deleted"})
-        
-    async def restore(self, id: ID):
-        exist = await self.repo.where({name_camel}.id == id).with_deleted().first()
-        if exist is None:
-            return JsonResponse({"msg": "not_found"}, Status.HTTP_404_NOT_FOUND)
-        if not getattr(exist, "is_deleted", False):
-            return JsonResponse({"msg": "not_deleted"}, Status.HTTP_400_BAD_REQUEST)
-        await self.repo.restore({name_camel}.id == id)
-        return JsonResponse({"msg": "restored"})
-
-    async def remove(self, id: ID):
-        exist = await self.repo.where({name_camel}.id == id).with_deleted().first()
-        if exist is None:
-            return JsonResponse({"msg": "not_found"}, Status.HTTP_404_NOT_FOUND)
-   
-        await self.repo.hard_delete({name_camel}.id == id)
-        return JsonResponse({"msg": "removed"})
+{soft_delete_controller}
 '''
 
 model_temp = '''from __future__ import annotations
 
 from renus.db import DatabaseField, Field, Model
+from renus.db.validation import MaxLen
+from renus.datastructures import ID
 
 class {name_camel}(Model):
     """Domain model for {name}.
-
-    Field rules run during :meth:`validate` and on instantiation; metadata is
-    inferred for schema creation (``db.create_schema``). A natural string
-    primary key keeps the model portable across SQL and MongoDB backends.
     """
 
-    id: str = Field(database=DatabaseField(primary_key=True))
+    id: ID = Field(default_factory=ID,database=DatabaseField(primary_key=True,generated=True))
 
     # --- Example fields; customize for your domain. ---
-    name: str = Field(max_len=120)
+    name: str = Field(MaxLen(120))
 
     class Meta:
-        soft_delete = True
         timestamps = True
+{soft_delete_meta}
 '''
 
 route_temp = '''from renus.router import Router
@@ -89,8 +68,7 @@ admin_router.get("/{names}", {name_camel}Controller, "index")
 admin_router.post("/{names}", {name_camel}Controller, "store")
 admin_router.put("/{names}/{id:id}", {name_camel}Controller, "update")
 admin_router.delete("/{names}/{id:id}", {name_camel}Controller, "delete")
-admin_router.put("/{names}/restore/{id:id}", {name_camel}Controller, "restore")
-admin_router.delete("/{names}/remove/{id:id}", {name_camel}Controller, "remove")
+{soft_delete_routes}
 
 
 router = Router()
@@ -112,8 +90,7 @@ admin_router.get("/{names}", {name_camel}Controller, "index", middlewares=[Permi
 admin_router.post("/{names}", {name_camel}Controller, "store", middlewares=[PermissionMiddleware("{names}.create")])
 admin_router.put("/{names}/{id:id}", {name_camel}Controller, "update", middlewares=[PermissionMiddleware("{names}.edit")])
 admin_router.delete("/{names}/{id:id}", {name_camel}Controller, "delete", middlewares=[PermissionMiddleware("{names}.delete")])
-admin_router.put("/{names}/restore/{id:id}", {name_camel}Controller, "restore", middlewares=[PermissionMiddleware("{names}.restore")])
-admin_router.delete("/{names}/remove/{id:id}", {name_camel}Controller, "remove", middlewares=[PermissionMiddleware("{names}.remove")])
+{soft_delete_kit_routes}
 
 user_router = Router(prefix="/user", middlewares=[AuthMiddleware])
 home_router = Router(prefix="/home")
@@ -125,7 +102,7 @@ router.include(home_router)
 
 vue_temp = '''<template>
   <r-container class="container-fluid">
-    <r-table-crud link="admin/{folder}{names}" soft-delete></r-table-crud>
+    <r-table-crud link="admin/{folder}{names}"{soft_delete_attribute}></r-table-crud>
   </r-container>
 </template>
 

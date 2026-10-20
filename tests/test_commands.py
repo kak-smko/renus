@@ -408,19 +408,51 @@ class TestAppScaffolding:
         assert "return JsonResponse(await table.index())" in ctrl_code
         assert "payload = Article(dict(payload))" in ctrl_code
         assert "await self.repo.create(payload)" in ctrl_code
-        assert "payload = Validate(Article,dict(payload),None)" in ctrl_code
+        assert "payload = Validate(Article,payload,None)" in ctrl_code
         assert "await self.repo.where(Article.id == id).update(payload)" in ctrl_code
         assert "await self.repo.delete(Article.id == id)" in ctrl_code
+        assert "async def restore(self, id: ID):" in ctrl_code
+        assert "async def remove(self, id: ID):" in ctrl_code
 
         model_code = (app_dir / "model.py").read_text()
 
         assert "class Article(Model):" in model_code
         assert "from renus.db import DatabaseField, Field, Model" in model_code
-        assert "id: str = Field(database=DatabaseField(primary_key=True))" in model_code
+        assert "id: ID = Field(default_factory=ID,database=DatabaseField(primary_key=True,generated=True))" in model_code
         assert "class Meta:" in model_code
         assert "timestamps = True" in model_code
         assert 'soft_delete = True' in model_code
 
+        route_code = (app_dir / "route.py").read_text()
+        assert '"restore")' in route_code
+        assert '"remove")' in route_code
+        vue_code = (tmp_path / "frontend" / "admin" / "src" / "views" / "article.vue").read_text()
+        assert ' soft-delete' in vue_code
+
+    def test_add_temp_without_soft_delete(self, tmp_path):
+        add_temp(
+            name="note",
+            names="notes",
+            name_camel="Note",
+            names_camel="Notes",
+            name_db="notes",
+            folder=[],
+            base_dir=str(tmp_path),
+            soft_delete=False,
+        )
+
+        app_dir = tmp_path / "app" / "note"
+        controller_code = (app_dir / "controller.py").read_text()
+        model_code = (app_dir / "model.py").read_text()
+        route_code = (app_dir / "route.py").read_text()
+        vue_code = (tmp_path / "frontend" / "admin" / "src" / "views" / "note.vue").read_text()
+
+        assert "async def restore" not in controller_code
+        assert "async def remove" not in controller_code
+        assert "soft_delete = True" not in model_code
+        assert "/restore/" not in route_code
+        assert "/remove/" not in route_code
+        assert "soft-delete" not in vue_code
 
     @staticmethod
     def _count_in(text: str, needle: str) -> int:
@@ -464,9 +496,20 @@ class TestAppScaffolding:
         assert "router.include(user_router)" in kit_route
         assert "router.include(home_router)" in kit_route
 
+    def test_app_run_prompts_for_soft_delete(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("renus.commands.app.run.sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("renus.commands.app.run.sys.stdout.isatty", lambda: True)
+        monkeypatch.setattr("builtins.input", lambda prompt: "n")
+
+        assert app_run(["task"], base_dir=str(tmp_path)) == 0
+        assert "soft_delete = True" not in (tmp_path / "app" / "task" / "model.py").read_text()
+        assert "/restore/" not in (tmp_path / "app" / "task" / "route.py").read_text()
+
     def test_app_run_cli(self, tmp_path):
-        code = app_run(["invoice"], base_dir=str(tmp_path))
+        code = app_run(["invoice", "--no-soft-delete"], base_dir=str(tmp_path))
         assert code == 0
+        assert "soft_delete = True" not in (tmp_path / "app" / "invoice" / "model.py").read_text()
+        assert "/restore/" not in (tmp_path / "app" / "invoice" / "route.py").read_text()
         assert (tmp_path / "app" / "invoice" / "controller.py").exists()
         assert (tmp_path / "app" / "invoice" / "model.py").exists()
         routes_index = (tmp_path / "routes" / "api.py").read_text()
