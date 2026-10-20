@@ -1,11 +1,13 @@
 # Renus
 
-Renus is a lightweight, async-first ASGI framework and toolkit for building
-Python web applications and services. It provides routing, HTTP and WebSocket
-handling, middleware, lifecycle hooks, caching, scheduling, validation, and an
-async database layer while keeping the core dependency footprint small.
+[![Latest release](https://img.shields.io/github/v/release/kak-smko/renus)](https://github.com/kak-smko/renus/releases/latest)
+[![PyPI version](https://img.shields.io/pypi/v/renus)](https://pypi.org/project/renus/)
+[![License](https://img.shields.io/github/license/kak-smko/renus)](https://github.com/kak-smko/renus/blob/master/LICENSE)
 
-- **Current version:** 3.0.0
+**An async-first Python ASGI framework with routing, WebSockets, ORM, caching,
+scheduling, and CLI tools in one small core.**
+
+- **Current version:** 3.0.2
 - **Python:** 3.11+
 - **License:** BSD-3-Clause
 - **Documentation:** [codenus.com/renus](https://codenus.com/renus)
@@ -61,6 +63,12 @@ python -m pip install -e ".[dev]"
 ```
 
 ## Quick start
+
+Install Renus with its Uvicorn server extra:
+
+```bash
+python -m pip install "renus[server]"
+```
 
 Create `main.py`:
 
@@ -180,6 +188,14 @@ The full documentation covers:
 - [Database, models, queries, and migrations](docs/database/overview.md)
 - [Validation and security](docs/security/validation.md)
 - [CLI reference](docs/cli/reference.md)
+
+## Benchmarks
+
+The [benchmark guide](benchmarks/README.md) describes the cross-framework HTTP
+comparison. GitHub Actions runs it weekly; the latest results are published here.
+
+<!-- benchmark-results:start -->
+<!-- benchmark-results:end -->
 
 ## Development
 
