@@ -4,7 +4,7 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Iterable
 from types import TracebackType
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar
 
 from renus.db.core.adapter import (
     AsyncDatabaseAdapter,
@@ -96,8 +96,6 @@ class MongoTransactionContext(TransactionContext):
 class MongoDBAdapter(AsyncDatabaseAdapter):
 
     name: ClassVar[str] = "mongodb"
-
-    nested_documents: ClassVar[bool] = True
 
     def __init__(self, config: dict | None = None) -> None:
         """Initialize the MongoDB adapter.

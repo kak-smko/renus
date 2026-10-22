@@ -7,29 +7,16 @@ from typing import Any
 from renus.db.core.exceptions import IntegrityError
 from renus.db.mutation.ast import (
     DeleteMany,
-    Insert,
     InsertMany,
     Update,
     UpdateMany,
 )
-from renus.db.query.ast import Condition, Include, Path, QueryAST
+from renus.db.query.ast import Condition, Path, QueryAST
 from renus.db.relationships import RelationshipKind
-from renus.db.serialization.core import to_dict
+
 from renus.db.transaction.core import Transaction
 from renus.util import to_plural_lower
 
-
-def _string_value(v: Any) -> str:
-    if not isinstance(v, str):
-        raise TypeError(
-            f"Embedded dict/list values must be strings, got {type(v).__name__}: {v!r}"
-        )
-    return v
-
-def _string_parse(value: Any) -> str | None:
-    if value is None:
-        return None
-    return str(value)
 
 
 def _junction_columns(owner_meta: Any, rel: Any, target_meta: Any) -> tuple[str, str]:
@@ -84,21 +71,10 @@ class RelationshipCoordinator:
         if not meta:
             return False
 
-        is_new = bool(getattr(obj, "is_new", False))
         for rname, rel in meta.relationships.items():
             value = getattr(obj, rname, None)
             if value is None:
                 continue
-
-            if rel.kind in (
-                RelationshipKind.EMBEDDED_ONE,
-                RelationshipKind.EMBEDDED_MANY,
-            ):
-                if self.adapter.nested_documents:
-                    continue
-                if rel.kind == RelationshipKind.EMBEDDED_MANY and is_new and not value:
-                    continue
-                return True
 
             if rel.kind in (
                 RelationshipKind.ONE_TO_MANY,
@@ -130,19 +106,7 @@ class RelationshipCoordinator:
             if val is None:
                 continue
 
-            if rel.kind == RelationshipKind.EMBEDDED_ONE:
-                if self.adapter.nested_documents:
-                    await self._embed_one_in_document(meta, rname, obj)
-                else:
-                    await self._persist_embedded_one(meta, rname, rel, parent_id, val)
-
-            elif rel.kind == RelationshipKind.EMBEDDED_MANY:
-                if self.adapter.nested_documents:
-                    await self._embed_many_in_document(meta, rname, obj)
-                elif not (getattr(obj, "is_new", False) and not val):
-                    await self._persist_embedded_many(meta, rname, rel, parent_id, val)
-
-            elif rel.kind == RelationshipKind.ONE_TO_MANY and (
+            if rel.kind == RelationshipKind.ONE_TO_MANY and (
                 rel.on_save == "cascade"
             ):
                 await self._persist_one_to_many(meta, rel, parent_id, val)
@@ -281,260 +245,6 @@ class RelationshipCoordinator:
                 return None
         return getattr(target_cls, "__db_metadata__", None)
 
-    def _rel_is_raw(self, rel_name: str) -> bool:
-        rel = self.model.__db_metadata__.relationships.get(rel_name)
-
-        return rel is not None and rel.target in (dict, list)
-
-    async def _embed_one_in_document(self, parent_meta: Any, rel_name: str, obj: Any) -> None:
-        pk = parent_meta.primary_key_field
-        parent_id = getattr(obj, pk)
-        child = getattr(obj, rel_name)
-        if self._rel_is_raw(rel_name) and child is not None:
-            for k, v in child.items():
-                _string_value(k)
-                _string_value(v)
-            value = child
-        else:
-            value = to_dict(child)
-        update_ast = Update(
-            source=self.model,
-            values={rel_name: value},
-            filters=(Path(self.model, (pk,)) == parent_id,),
-        )
-        await self.adapter.execute_mutation(update_ast)
-
-    async def _embed_many_in_document(self, parent_meta: Any, rel_name: str, obj: Any) -> None:
-        pk = parent_meta.primary_key_field
-        parent_id = getattr(obj, pk)
-        items = getattr(obj, rel_name)
-        if self._rel_is_raw(rel_name):
-            for item in items:
-                _string_value(item)
-            value = list(items)
-        else:
-            value = [to_dict(item) for item in items]
-        update_ast = Update(
-            source=self.model,
-            values={rel_name: value},
-            filters=(Path(self.model, (pk,)) == parent_id,),
-        )
-        await self.adapter.execute_mutation(update_ast)
-
-    async def _persist_embedded_one(
-        self,
-        parent_meta: Any,
-        rel_name: str,
-        rel: Any,
-        parent_id: Any,
-        child: Any,
-        *,
-        table_prefix: str | None = None,
-    ) -> None:
-        if rel.target is dict:
-            return await self._persist_raw_embedded_one(
-                parent_meta,
-                rel_name,
-                parent_id,
-                child,
-                table_prefix=table_prefix,
-            )
-
-        child_dict = child.to_dict() if hasattr(child, "to_dict") else dict(child)
-
-        child_meta = getattr(child, "__db_metadata__", None)
-        if child_meta is not None:
-            child_dict = {
-                fname: child_dict[fname]
-                for fname in child_meta.fields
-                if fname in child_dict
-            }
-            pk_fmeta = child_meta.fields.get(child_meta.primary_key_field)
-            if pk_fmeta is not None and pk_fmeta.generated:
-                child_dict.pop("id", None)
-
-        child_dict["parent_id"] = parent_id
-        table_name = (
-            f"{table_prefix}_{rel_name}"
-            if table_prefix is not None
-            else f"{parent_meta.table}_{rel_name}"
-        )
-
-        embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
-
-        async with self._atomic():
-            del_ast = DeleteMany(
-                source=embedded_source,
-                filters=(Path(embedded_source, ("parent_id",)) == parent_id,),
-            )
-            await self.adapter.execute_mutation(del_ast)
-
-            ins_ast = Insert(source=embedded_source, values=child_dict)
-            await self.adapter.execute_mutation(ins_ast)
-
-        if child_meta is not None:
-            for nested_name, nested_rel in child_meta.relationships.items():
-                nested_value = getattr(child, nested_name, None)
-                if nested_value is None:
-                    continue
-                if nested_rel.kind == RelationshipKind.EMBEDDED_ONE:
-                    await self._persist_embedded_one(
-                        child_meta,
-                        nested_name,
-                        nested_rel,
-                        parent_id,
-                        nested_value,
-                        table_prefix=table_name,
-                    )
-                elif nested_rel.kind == RelationshipKind.EMBEDDED_MANY:
-                    await self._persist_embedded_many(
-                        child_meta,
-                        nested_name,
-                        nested_rel,
-                        parent_id,
-                        nested_value,
-                        table_prefix=table_name,
-                    )
-
-    async def _persist_embedded_many(
-        self,
-        parent_meta: Any,
-        rel_name: str,
-        rel: Any,
-        parent_id: Any,
-        items: Iterable[Any],
-        *,
-        table_prefix: str | None = None,
-    ) -> None:
-        if rel.target is list:
-            return await self._persist_raw_embedded_many(
-                parent_meta,
-                rel_name,
-                parent_id,
-                items,
-                table_prefix=table_prefix,
-            )
-
-        table_name = (
-            f"{table_prefix}_{rel_name}"
-            if table_prefix is not None
-            else f"{parent_meta.table}_{rel_name}"
-        )
-        embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
-
-        records: list[dict[str, Any]] = []
-        for idx, item in enumerate(items):
-            d = item.to_dict() if hasattr(item, "to_dict") else dict(item)
-            item_meta = getattr(item, "__db_metadata__", None)
-            if item_meta is not None:
-                d = {fname: d[fname] for fname in item_meta.fields if fname in d}
-                pk_fmeta = item_meta.fields.get(item_meta.primary_key_field)
-                if pk_fmeta is not None and pk_fmeta.generated:
-                    d.pop("id", None)
-            d["parent_id"] = parent_id
-            records.append(d)
-
-        required=len(records)>0
-        async with self._atomic(required):
-            del_ast = DeleteMany(
-                source=embedded_source,
-                filters=(Path(embedded_source, ("parent_id",)) == parent_id,),
-            )
-            await self.adapter.execute_mutation(del_ast)
-
-            if required:
-                ins_many = InsertMany(source=embedded_source, records=records)
-                await self.adapter.execute_mutation(ins_many)
-
-        for item in items:
-            item_meta = getattr(item, "__db_metadata__", None)
-            if item_meta is None:
-                continue
-            for nested_name, nested_rel in item_meta.relationships.items():
-                nested_value = getattr(item, nested_name, None)
-                if nested_value is None:
-                    continue
-                if nested_rel.kind == RelationshipKind.EMBEDDED_ONE:
-                    await self._persist_embedded_one(
-                        item_meta,
-                        nested_name,
-                        nested_rel,
-                        parent_id,
-                        nested_value,
-                        table_prefix=table_name,
-                    )
-                elif nested_rel.kind == RelationshipKind.EMBEDDED_MANY:
-                    await self._persist_embedded_many(
-                        item_meta,
-                        nested_name,
-                        nested_rel,
-                        parent_id,
-                        nested_value,
-                        table_prefix=table_name,
-                    )
-
-    async def _persist_raw_embedded_one(
-        self,
-        parent_meta: Any,
-        rel_name: str,
-        parent_id: Any,
-        data: dict[str, Any] | None,
-        *,
-        table_prefix: str | None = None,
-    ) -> None:
-        table_name = (
-            f"{table_prefix}_{rel_name}"
-            if table_prefix is not None
-            else f"{parent_meta.table}_{rel_name}"
-        )
-        embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
-        required= data is not None and len(data.items())>0
-        async with self._atomic(required):
-            del_ast = DeleteMany(
-                source=embedded_source,
-                filters=(Path(embedded_source, ("parent_id",)) == parent_id,),
-            )
-            await self.adapter.execute_mutation(del_ast)
-
-            if required:
-                records = [
-                    {"parent_id": parent_id, "key": _string_value(k), "value": _string_value(v)}
-                    for k, v in data.items()
-                ]
-                ins = InsertMany(source=embedded_source, records=records)
-                await self.adapter.execute_mutation(ins)
-
-    async def _persist_raw_embedded_many(
-        self,
-        parent_meta: Any,
-        rel_name: str,
-        parent_id: Any,
-        items: Iterable[Any],
-        *,
-        table_prefix: str | None = None,
-    ) -> None:
-        table_name = (
-            f"{table_prefix}_{rel_name}"
-            if table_prefix is not None
-            else f"{parent_meta.table}_{rel_name}"
-        )
-        embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
-
-        records = [
-            {"parent_id": parent_id, "pos": idx, "value": _string_value(item)}
-            for idx, item in enumerate(items)
-        ]
-
-        async with self._atomic(len(records)>0):
-            del_ast = DeleteMany(
-                source=embedded_source,
-                filters=(Path(embedded_source, ("parent_id",)) == parent_id,),
-            )
-            await self.adapter.execute_mutation(del_ast)
-
-            if len(records)>0:
-                ins = InsertMany(source=embedded_source, records=records)
-                await self.adapter.execute_mutation(ins)
 
     async def _persist_one_to_one(
         self,
@@ -616,18 +326,7 @@ class RelationshipCoordinator:
             return
 
         for rname, rel in meta.relationships.items():
-            if rel.is_embedded:
-                if self.adapter.nested_documents:
-                    continue
-                table_name = f"{meta.table}_{rname}"
-                embedded_source = type(table_name, (), {"__db_metadata__": None, "table": table_name})
-                del_ast = DeleteMany(
-                    source=embedded_source,
-                    filters=(Path(embedded_source, ("parent_id",)).in_(parent_ids),),
-                )
-                await self.adapter.execute_mutation(del_ast)
-
-            elif rel.kind == RelationshipKind.MANY_TO_MANY:
+            if rel.kind == RelationshipKind.MANY_TO_MANY:
                 if not rel.through:
                     continue
                 target_meta = self._mtm_target_meta(rel)
@@ -696,8 +395,6 @@ class RelationshipCoordinator:
             return
 
         for rname, rel in meta.relationships.items():
-            if rel.is_embedded:
-                continue
             if rel.kind == RelationshipKind.MANY_TO_MANY:
                 if not rel.through:
                     continue

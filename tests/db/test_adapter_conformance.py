@@ -29,9 +29,6 @@ from renus.db import (
     Database,
     DatabaseField,
     DuplicateKeyError,
-
-    Embedded,
-    EmbeddedMany,
     Field,
     Include,
     IntegrityError,
@@ -176,7 +173,7 @@ class UnannotatedEmbeddedChild(Model):
 
 class UnannotatedEmbeddedOwner(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
-    data = EmbeddedMany(UnannotatedEmbeddedChild)
+    data: list[UnannotatedEmbeddedChild] = Field(default_factory=list)
 
 
 _row_count_models: dict[str, type] = {}
@@ -1295,7 +1292,7 @@ async def test_include_relationship(kind):
         loaded = await repo.query(User.username == "home").all()
         assert len(loaded) == 1
         user = loaded[0]
-        assert user.profile is None
+        assert user.profile.city == "Oslo"
         assert user.posts == []
     finally:
         await cleanup(db)
@@ -1574,14 +1571,13 @@ async def test_many_to_many_duplicate_link_reconciliation(kind):
 
 
 # ---------------------------------------------------------------------------
-# Relationships: Embedded, EmbeddedMany, OneToOne, OneToMany,
-# ManyToOne, ManyToMany.
+# Nested model field validation and relationship behavior.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_unannotated_embedded_many_is_validated_before_save(kind):
+async def test_nested_model_list_field_is_validated_before_save(kind):
     db = await database_for(kind, [UnannotatedEmbeddedOwner])
     try:
         repo = db.repository(UnannotatedEmbeddedOwner)
@@ -1607,7 +1603,7 @@ async def test_unannotated_embedded_many_is_validated_before_save(kind):
         assert isinstance(created.data[0], UnannotatedEmbeddedChild)
         assert created.data[0].id == 1
 
-        loaded = await repo.query().include(UnannotatedEmbeddedOwner.data).first()
+        loaded = await repo.query().first()
         assert loaded is not None
         assert isinstance(loaded.data[0], UnannotatedEmbeddedChild)
         assert loaded.data[0].name == "valid"
@@ -1764,45 +1760,6 @@ async def test_nested_relationship_validation(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_embedded_relationship(kind):
-    db = await database_for(kind, [Item])
-    try:
-        repo = db.repository(Item)
-
-        nested = db.adapter("primary").nested_documents
-        tables = ["items"] + ([] if nested else ["items_address"])
-
-        await repo.create(
-            Item(
-                id="e1",
-                name="widget",
-                address=Profile(street="one", city="two"),
-            )
-        )
-        before = await _row_counts(db, *tables)
-        expected_before = {"items": 1}
-        if not nested:
-            expected_before["items_address"] = 1
-        assert before == expected_before, before
-
-        loaded = (await repo.query().include(Item.address).all())[0]
-        assert loaded.name == "widget"
-        assert loaded.address.street == "one"
-        assert loaded.address.city == "two"
-
-        assert [row.id for row in await repo.query(Item.address.street == "one").all()] == ["e1"]
-        assert [row.id for row in await repo.query(Item.address.city.in_("two")).all()] == ["e1"]
-
-        await repo.delete(loaded)
-        after = await _row_counts(db, *tables)
-        assert after == {t: 0 for t in tables}, after
-        assert await repo.count() == 0
-    finally:
-        await cleanup(db)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ADAPTERS)
 async def test_relationship_target_projections(kind):
     """Project scalar fields from every supported relationship target type."""
     db = await database_for(
@@ -1938,18 +1895,6 @@ async def test_relationship_target_projections(kind):
         await cleanup(db)
 
 
-def _deep_embedded_tables(model: type, prefix: str | None = None) -> list[str]:
-    """Return all flat-table names created by embedded relationships."""
-    meta = model.metadata()
-    tables: list[str] = []
-    for rel_name, rel in meta.relationships.items():
-        if not rel.is_embedded or rel.target in (dict, list):
-            continue
-        table = f"{prefix}_{rel_name}" if prefix else f"{meta.table}_{rel_name}"
-        tables.append(table)
-        tables.extend(_deep_embedded_tables(rel.target, table))
-    return tables
-
 
 def _deep_embedded_value(prefix: str = "") -> DeepEmbedded1:
     """Build all seven embedded levels, applying ``prefix`` to every name."""
@@ -1984,7 +1929,7 @@ def _deep_many_value(prefix: str = "") -> list[DeepMany1]:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_seven_level_embedded_and_embedded_many_relationships(kind):
+async def test_seven_level_nested_model_fields_roundtrip(kind):
     db = await database_for(kind, [DeepRoot])
     try:
         root_repo = db.repository(DeepRoot)
@@ -2010,70 +1955,35 @@ async def test_seven_level_embedded_and_embedded_many_relationships(kind):
         ]
         await root_repo.create_many(roots)
 
-        nested = db.adapter("primary").nested_documents
-        embedded_tables = _deep_embedded_tables(DeepRoot)
-        related_tables = [] if nested else embedded_tables
-
-        if not nested:
-            assert related_tables == [
-                "deeproots_embedded",
-                "deeproots_embedded_child",
-                "deeproots_embedded_child_child",
-                "deeproots_embedded_child_child_child",
-                "deeproots_embedded_child_child_child_child",
-                "deeproots_embedded_child_child_child_child_child",
-                "deeproots_embedded_child_child_child_child_child_child",
-                "deeproots_many",
-                "deeproots_many_children",
-                "deeproots_many_children_children",
-                "deeproots_many_children_children_children",
-                "deeproots_many_children_children_children_children",
-                "deeproots_many_children_children_children_children_children",
-                "deeproots_many_children_children_children_children_children_children",
-            ]
-
-        tables = ["deeproots", *related_tables]
-        assert await _row_counts(db, *tables) == {table: 3 for table in tables}
-        for table in related_tables:
-            rows = await db.adapter("primary").execute_query(
-                QueryAST(
-                    source=_row_count_model(table),
-                    filters=(
-                        Path(_row_count_model(table), ("parent_id",)).in_(
-                            ["deep-1", "deep-2", "deep-3"]
-                        ),
-                    ),
-                )
-            )
-            assert len(rows) == 3
-            assert {dict(row)["parent_id"] for row in rows} == {
-                "deep-1",
-                "deep-2",
-                "deep-3",
-            }
+        assert await _row_counts(db, "deeproots") == {"deeproots": 3}
+        loaded = await root_repo.where(DeepRoot.id == "deep-2").first()
+        assert loaded is not None
+        current = loaded.embedded
+        for _ in range(6):
+            assert current is not None
+            current = current.child
+        assert current is not None
+        assert current.value == "root2-embedded-7"
+        assert loaded.many[0].children[0].children[0].name == "root2-deep-many-3"
     finally:
         await cleanup(db)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_embedded_many_relationship(kind):
+async def test_nested_model_list_field(kind):
     db = await database_for(kind, [Item])
     try:
         repo = db.repository(Item)
-        nested = db.adapter("primary").nested_documents
-        tables = ["items"] + ([] if nested else ["items_tags"])
+        tables = ["items"]
 
         await repo.create_many(
             [Item(id="m1", name="kit", tags=[Tag(name="a"), Tag(name="b")])]
         )
         before = await _row_counts(db, *tables)
-        expected_before = {"items": 1}
-        if not nested:
-            expected_before["items_tags"] = 2
-        assert before == expected_before, before
+        assert before == {"items": 1}, before
 
-        loaded = (await repo.query().include(Item.tags).all())[0]
+        loaded = (await repo.query().all())[0]
         assert sorted(t.name for t in loaded.tags) == ["a", "b"]
 
         assert [row.id for row in await repo.query(Item.tags.name == "a").all()] == ["m1"]
@@ -3615,7 +3525,7 @@ async def test_in_transaction_error(kind):
         )
         with pytest.raises(ValueError, match="Simulated transfer failure"):
             async with db.transaction():
-                u1 = await repo.query(User.profile.city == "Rasht").update(
+                await repo.query(User.profile.city == "Rasht").update(
                     {"name": "Ali"}
                 )
                 u1 = await repo.query(User.profile.city == "Rasht").first()
@@ -3647,16 +3557,15 @@ async def test_in_transaction_read(kind):
         await repo.create(
             _u("persist", "persist", age=1, profile=Profile(city="Rasht", street="ten"))
         )
-        expected_calls_before_transaction = 0 if adapter.nested_documents else 1
-        assert transaction_calls == [None] * expected_calls_before_transaction
+        assert transaction_calls == []
         async with db.transaction():
-            assert transaction_calls == [None] * (expected_calls_before_transaction + 1)
+            assert transaction_calls == [None]
             u1 = await repo.query(User.profile.city == "Rasht").update({"name": "Ali"})
             u1 = await repo.query(User.profile.city == "Rasht").first()
             assert u1.name == "Ali"
 
         assert adapter._in_active_transaction() is False
-        assert transaction_calls == [None] * (expected_calls_before_transaction + 1)
+        assert transaction_calls == [None]
     finally:
         await cleanup(db)
 
@@ -3787,16 +3696,7 @@ async def test_backup_and_restore_roundtrip_all_tables(kind, tmp_path):
         assert counts["users"] == 2
         assert counts["posts"] == 1
         ls = ["users.json", "posts.json"]
-        if not db.adapter("primary").nested_documents:
-            embedded_tables = {
-                "users_profile": 2,
-                "users_profile_contact": 1,
-                "users_profile_version": 1,
-                "users_profile_contact_version": 1,
-            }
-            ls.extend(f"{table}.json" for table in embedded_tables)
-            for table, expected_count in embedded_tables.items():
-                assert counts[table] == expected_count
+
         for name in ls:
             assert os.path.exists(os.path.join(backup_path, name)), (
                 f"missing backup {name}"
@@ -3809,11 +3709,7 @@ async def test_backup_and_restore_roundtrip_all_tables(kind, tmp_path):
         restored = await db.restore(path=backup_path)
         assert restored["users"] == 2
         assert restored["posts"] == 1
-        if not db.adapter("primary").nested_documents:
-            assert restored["users_profile"] == 2
-            assert restored["users_profile_contact"] == 1
-            assert restored["users_profile_version"] == 1
-            assert restored["users_profile_contact_version"] == 1
+
 
         usernames = {u.username for u in await repo.query().all()}
         assert usernames == {"b1", "b2"}
@@ -4682,7 +4578,7 @@ async def test_relationship_create_starts_transaction_only_for_multiple_tables(k
     class RelatedRecord(Model):
         id: str = Field(database=DatabaseField(primary_key=True))
         name: str
-        profile: Profile = Embedded(Profile)
+        profile: Profile
 
     adapter = adapter_for(kind)
     db = Database(adapter)
@@ -4704,8 +4600,7 @@ async def test_relationship_create_starts_transaction_only_for_multiple_tables(k
                 profile=Profile(city="Tehran", street="one"),
             )
         )
-        expected_calls = 0 if adapter.nested_documents else 1
-        assert len(transaction_calls) == expected_calls
+        assert transaction_calls == []
     finally:
         await cleanup(db)
 
@@ -4764,7 +4659,7 @@ async def test_scalar_type_roundtrips_and_sql_text_length(kind):
 class TableWithEmbedded(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
-    settings = Embedded(dict, loading="joined")
+    settings: dict[str, str]
 
 
 @pytest.mark.asyncio
@@ -4848,12 +4743,8 @@ async def test_search_matches_values_in_embedded_dictionary_paths(kind):
         await cleanup(database)
 
 
+
 class TableUser(Model):
-    id: str = Field(database=DatabaseField(primary_key=True))
-    name: str
-    roles =EmbeddedMany(list)
-    
-class TableUser2(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
     roles :list[ID]
@@ -4861,31 +4752,18 @@ class TableUser2(Model):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_list_id(kind):
-    database = await database_for(kind, [TableUser,TableUser2])
+    database = await database_for(kind, [TableUser])
     
     try:
-        repository = database.repository(TableUser)
-        role_id=ID(1)
-        with pytest.raises(TypeError,
-            match=r"Embedded dict/list values must be strings, got ID:"):
-            await repository.create(
-            TableUser(
-                id="1",
-                name="first",
-                roles=[role_id]
-            )
-        )
 
-        repository = database.repository(TableUser2)
-        with pytest.raises(TypeError,
-            match=r"Embedded dict/list values must be strings, got ID:"):
-            await repository.create(
-            TableUser2(
-                id="1",
-                name="first",
-                roles=[role_id]
-            )
-        )
+        role_id=ID(1)
+        repository = database.repository(TableUser)
+        user = TableUser(id="1", name="first", roles=[role_id])
+        await repository.create(user)
+        result = await repository.where(TableUser.id == "1").first()
+        assert result.roles == [role_id]
+        result = await repository.where(TableUser.roles.in_(role_id)).first()
+        assert result.roles == [role_id]
         
     finally:
         await cleanup(database)
@@ -4898,23 +4776,84 @@ async def test_list_str(kind):
         id: int
         items: list
 
-    order = Order(
-        id=100,
-        items=["q","r",3],
-    )
+
     database = await database_for(kind, [Order])
     
     try:
         repository = database.repository(Order)
-        with pytest.raises(TypeError,
-            match=r"Embedded dict/list values must be strings, got int: 3"):
-            await repository.create(
-                order
-        )
+        Order(id=100, items=["q", "r", 3])
+        await repository.create(Order(id=100, items=["q", "r"]))
+        result = await repository.where(Order.id == 100).first()
+        assert result.items == ["q", "r"]
 
         
     finally:
         await cleanup(database)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_list_int(kind):
+    class NumberList(Model):
+        id: int
+        values: list[int]
+
+    database = await database_for(kind, [NumberList])
+    try:
+        with pytest.raises(ValidationError):
+            NumberList(id=100, values=["q", "r", 3])
+        repository = database.repository(NumberList)
+        await repository.create(NumberList(id=101, values=[1, 2, 3]))
+        result = await repository.where(NumberList.id == 101).first()
+        assert result.values == [1, 2, 3]
+        assert all(type(value) is int for value in result.values)
+    finally:
+        await cleanup(database)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_object_id(kind):
+    previous_config = Config._cache.get("database")
+    Config._cache["database"] = SimpleNamespace(ID=ObjectId)
+    database = None
+    try:
+        class User(Model):
+            id: ID
+            name: str
+
+        database = await database_for(kind, [User])
+        user_id = ID(ObjectId())
+        repository = database.repository(User)
+        await repository.create(User(id=user_id, name="smko"))
+        result = await repository.where(User.id == user_id).first()
+        assert result.id == user_id
+        assert isinstance(result.id.value, ObjectId)
+        assert result.name == "smko"
+
+        adapter = database.adapter("primary")
+        metadata = User.__db_metadata__
+        if kind == "mongodb":
+            document = await adapter._mongo_db[metadata.table].find_one(
+                {"_id": user_id.value}
+            )
+            assert document is not None
+            assert isinstance(document["_id"], ObjectId)
+        elif kind == "sqlite":
+            primary_key = metadata.fields[metadata.primary_key_field]
+            row = adapter._sqlite_db.execute(
+                f'SELECT "{primary_key.column_name}" FROM "{metadata.table}"'
+            ).fetchone()
+            assert row is not None
+            assert isinstance(row[primary_key.column_name], str)
+            assert row[primary_key.column_name] == str(user_id.value)
+    finally:
+        if database is not None:
+            await cleanup(database)
+        if previous_config is None:
+            Config._cache.pop("database", None)
+        else:
+            Config._cache["database"] = previous_config
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
@@ -4943,5 +4882,154 @@ async def test_list_item(kind):
         assert len(results.items)==2
         assert results.items[0].name=="Apple"
         
+    finally:
+        await cleanup(database)
+
+    
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_nested(kind):
+    class TableUser(Model):
+        id: str = Field(database=DatabaseField(primary_key=True))
+        setting :dict[str,int]
+        
+    database = await database_for(kind, [TableUser])
+    
+    try:
+        repository = database.repository(TableUser)
+       
+        await repository.create(TableUser(id="2", setting={"one":10,"two":20}))
+        await repository.create(TableUser(id="1", setting={"one":1,"two":2}))
+        result = await repository.where(TableUser.setting.one == 1).first()
+        assert result.id == "1"
+        result = await repository.where(TableUser.setting.one == 10).first()
+        assert result.id == "2"
+        with pytest.raises(ValidationError):
+            TableUser(id="3", setting={"one":"1","two":2})
+
+        with pytest.raises(ValidationError):
+            TableUser(id="3", setting={1:1,"two":2})
+            
+    finally:
+        await cleanup(database)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_nested_deep(kind):
+    class TableUser(Model):
+        id: str = Field(database=DatabaseField(primary_key=True))
+        setting :dict
+
+    database = await database_for(kind, [TableUser])
+
+    try:
+        repository = database.repository(TableUser)
+
+        await repository.create(TableUser(id="1", setting={
+            "one":{"d":"alpha"},
+            "two":2}))
+        await repository.create(TableUser(id="2", setting={
+            "one":{"d":"bravo", "c":["test", "test2"]},
+            "two":2}))
+        await repository.create(TableUser(id="3", setting={
+            "one":{"d":"charlie", "c":["other"]},
+            "two":3}))
+        await repository.create(TableUser(id="4", setting={
+            "one":{"d":None},
+            "two":4}))
+
+        async def matching_ids(condition):
+            return [
+                row.id
+                for row in await repository.where(condition)
+                .order_by(TableUser.id.asc())
+                .all()
+            ]
+
+        value = TableUser.setting.one.d
+        assert await matching_ids(value == "bravo") == ["2"]
+        assert await matching_ids(value != "bravo") == ["1", "3", "4"]
+        assert await matching_ids(value > "bravo") == ["3"]
+        assert await matching_ids(value >= "bravo") == ["2", "3"]
+        assert await matching_ids(value < "bravo") == ["1"]
+        assert await matching_ids(value <= "bravo") == ["1", "2"]
+        assert await matching_ids(value.in_(["alpha", "charlie"])) == ["1", "3"]
+        assert await matching_ids(value.not_in(["alpha", "charlie"])) == ["2", "4"]
+        assert await matching_ids(value.is_null()) == ["4"]
+        assert await matching_ids(value.is_not_null()) == ["1", "2", "3"]
+        assert await matching_ids(value.like("%ha%")) == ["1", "3"]
+        assert await matching_ids(value.regex(r"^b.*o$")) == ["2"]
+        assert await matching_ids(value.between("bravo", "charlie")) == ["2", "3"]
+        assert await matching_ids((value >= "bravo") & (value < "delta")) == [
+            "2", "3"
+        ]
+        assert await matching_ids((value == "alpha") | (value == "charlie")) == [
+            "1", "3"
+        ]
+        assert await matching_ids(~(value == "bravo")) == ["1", "3", "4"]
+        assert await matching_ids(TableUser.setting.one.missing.is_null()) == [
+            "1", "2", "3", "4"
+        ]
+
+        array_value = TableUser.setting.one.c
+        assert await matching_ids(array_value.in_("test")) == ["2"]
+        assert await matching_ids(array_value.in_(["test2", "other"])) == [
+            "2", "3"
+        ]
+        assert await matching_ids(array_value.not_in("test")) == ["1", "3", "4"]
+        assert await repository.where(value >= "bravo").count() == 2
+        assert await repository.where(value == "charlie").exists()
+
+    finally:
+        await cleanup(database)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_nested_deep_list(kind):
+    class TableUser(Model):
+        id: str = Field(database=DatabaseField(primary_key=True))
+        setting: dict
+
+    database = await database_for(kind, [TableUser])
+
+    try:
+        repository = database.repository(TableUser)
+        await repository.create_many(
+            [
+                TableUser(
+                    id="1",
+                    setting={"outer": {"middle": {"items": ["alpha", "beta"]}}},
+                ),
+                TableUser(
+                    id="2",
+                    setting={"outer": {"middle": {"items": ["gamma"]}}},
+                ),
+                TableUser(
+                    id="3",
+                    setting={"outer": {"middle": {"items": []}}},
+                ),
+                TableUser(id="4", setting={"outer": {"middle": {}}}),
+            ]
+        )
+
+        async def matching_ids(condition):
+            return [
+                row.id
+                for row in await repository.where(condition)
+                .order_by(TableUser.id.asc())
+                .all()
+            ]
+
+        items = TableUser.setting.outer.middle.items
+        assert await matching_ids(items.in_("alpha")) == ["1"]
+        assert await matching_ids(items.in_(["beta", "gamma"])) == ["1", "2"]
+        assert await matching_ids(items.not_in("alpha")) == ["2", "3", "4"]
+        assert await matching_ids(items.is_null()) == ["4"]
+        assert await matching_ids(items.is_not_null()) == ["1", "2", "3"]
+        assert await matching_ids(getattr(items, "0") == "alpha") == [
+            "1"
+        ]
     finally:
         await cleanup(database)

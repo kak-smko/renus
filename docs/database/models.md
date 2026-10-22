@@ -6,7 +6,7 @@ A Renus model is a Python class that describes application data. A model defines
 - validation and default values;
 - database columns and indexes;
 - primary keys and generated identities;
-- embedded data and relationships;
+- nested model fields and relationships;
 - timestamps, soft deletion, and lifecycle state.
 
 Models are declared with `Model`, `Field`, and `DatabaseField` from `renus.db`.
@@ -289,7 +289,7 @@ payload = {"username": "alice", "email": "alice@example.com", "role": "member"}
 user = User(payload)
 ```
 
-## 6. Nested models and embedded data
+## 6. Nested model and JSON fields
 
 A model field annotated with another `Model` accepts either an instance of that model or a dictionary that Renus converts into an instance:
 
@@ -318,10 +318,15 @@ customer = Customer(
 assert isinstance(customer.address, Address)
 ```
 
-A model annotation is an embedded relationship when declared explicitly with `Embedded` or `EmbeddedMany`:
+Nested values are regular model fields, not relationships. Annotate a field with another model, a list of models, a dictionary, or a list, and Renus validates the value and converts nested model dictionaries into model instances:
 
 ```python
-from renus.db import Embedded, EmbeddedMany, Model
+from renus.db import Field, Model
+
+
+class Address(Model):
+    street: str
+    city: str
 
 
 class OrderItem(Model):
@@ -331,22 +336,12 @@ class OrderItem(Model):
 
 class Order(Model):
     number: str
-    shipping_address: Address = Embedded(Address)
-    items: list[OrderItem] = EmbeddedMany(OrderItem)
+    shipping_address: Address
+    items: list[OrderItem] = Field(default_factory=list)
+    metadata: dict[str, str] = Field(default_factory=dict)
 ```
 
-`Embedded` stores one related model inline. `EmbeddedMany` stores a collection inline. Both embedded relationship types cascade save, update, and delete behavior by default.
-
-Plain `dict` and `list` annotations are also recognized as embedded data:
-
-```python
-class Document(Model):
-    title: str
-    metadata: dict
-    tags: list
-```
-
-Use an explicit relationship when the target is another model and you need its relationship metadata. A raw `dict` or `list` annotation is treated as embedded data. Relationship targets must be model classes;
+Nested fields are stored in a JSON column by SQL adapters and as native nested values by MongoDB. Their contents are persisted with the owner, so saving or deleting a nested model does not create related database rows or trigger relationship cascades. Nested model fields are always available on a loaded model; `.include()` is only for loading actual relationships.
 
 ## 7. Relationships between models
 
@@ -356,13 +351,12 @@ Relationship declarations are descriptors. They also become query paths when acc
 
 | Declaration | Value on the owner | Use it for |
 | --- | --- | --- |
-| `Embedded(Target)` | One target | Inline one nested model |
-| `EmbeddedMany(Target)` | List of targets | Inline nested models |
+
 | `OneToOne(Target)` | One target | One related record |
 | `OneToMany(Target)` | List of targets | Parent-to-children collection |
 | `ManyToOne(Target)` | One target | Child-to-parent reference |
 | `ManyToMany(Target)` | List of targets | Collection connected through an intermediate model or table |
-| `Reference(Target)` | One target by default | A general non-embedded reference |
+| `Reference(Target)` | One target by default | A general reference |
 
 ### One-to-one and one-to-many
 
@@ -470,7 +464,7 @@ posts: list[Post] = OneToMany(
 )
 ```
 
-The default loading strategy is `"lazy"`. The default save action is `"no action"` for reference relationships. Embedded relationships use cascading behavior by default.
+The default loading strategy is `"lazy"`. The default save action is `"no action"` for reference relationships.
 
 ## 8. Primary keys and identities
 
@@ -760,7 +754,7 @@ assert schema["properties"]["display_name"]["minLength"] == 1
 
 The root schema is an object with `title`, `properties`, and `additionalProperties: true`. Non-nullable fields without defaults are listed in `required`. Nullable annotations allow `null`. Non-nullable fields without defaults are listed in `required`; a validation rule marked as required can also add a property to that list. Declared defaults are included after conversion to JSON-compatible values. Built-in Python types map to JSON Schema types (for example, `int` to `integer` and `datetime` to a `string` with `date-time` format). A field's `Field` description and validation-rule schema fragments are included when present. Custom validation rules contribute only the fragment returned by their `json_schema()` method; rules that return `{}` add no schema constraints.
 
-Nested model fields and model collections are represented recursively. Relationships are included as properties, including relationships declared without a Python annotation such as `items = EmbeddedMany(Item)`. Recursive model references use `$defs` and `$ref` to avoid infinitely nested schemas. Non-collection relationship properties allow `null`; collection relationships are represented as arrays.
+Nested model fields and model collections are represented recursively. Relationships are represented as properties from their relationship metadata. Recursive model references use `$defs` and `$ref` to avoid infinitely nested schemas. Non-collection relationship properties allow `null`; collection relationships are represented as arrays.
 
 The schema documents validation shape, but it cannot capture arbitrary Python validation logic or custom runtime types unless a rule provides a JSON Schema fragment. Inspect or extend the rule's `json_schema()` implementation when the generated schema needs additional constraints.
 
@@ -864,7 +858,7 @@ This example combines the main model features:
 ```python
 from renus.db import (
     DatabaseField,
-    Embedded,
+
     Field,
     Model,
     OneToMany,
@@ -895,7 +889,7 @@ class User(Model):
         database=DatabaseField(unique=True),
     )
     email: str = Field(Email())
-    address: Address = Embedded(Address)
+    address: Address
     posts: list[Post] = OneToMany(
         Post,
         foreign_key="user_id",

@@ -172,19 +172,6 @@ class MongoDialect:
                 elif fname in data:
                     val = data[fname]
                     data[fname] = self.decode_value(val, fmeta)
-            rels = getattr(field_meta, "relationships", {})
-            for rname, rmeta in rels.items():
-                if rname in data and getattr(rmeta, "is_embedded", False) and getattr(rmeta, "target", None):
-                    target_meta = getattr(rmeta.target, "__db_metadata__", None)
-                    if target_meta:
-                        rval = data[rname]
-                        if getattr(rmeta, "is_collection", False) and isinstance(rval, list):
-                            data[rname] = [
-                                self.decode_value(item, target_meta) if isinstance(item, dict) else item
-                                for item in rval
-                            ]
-                        elif isinstance(rval, dict):
-                            data[rname] = self.decode_value(rval, target_meta)
             return data
 
         target_type = getattr(field_meta, "inferred_type", field_meta)
@@ -253,13 +240,23 @@ class MongoDialect:
         if target_type is bytes and isinstance(native, (bytes, bytearray)):
             return bytes(native)
 
-        target_model = getattr(field_meta, "target", None)
+        python_type = getattr(field_meta, "python_type", None)
+        origin = getattr(python_type, "__origin__", None)
+        args = getattr(python_type, "__args__", ())
+        target_model = getattr(field_meta, "model_cls", None)
+        if target_model is None:
+            target_model = python_type if isinstance(python_type, type) else None
+        if origin is list and args and isinstance(args[0], type):
+            target_model = args[0]
         if target_model and hasattr(target_model, "__db_metadata__"):
             target_meta = getattr(target_model, "__db_metadata__")
             if isinstance(native, dict):
                 return self.decode_value(native, target_meta)
             if isinstance(native, list):
-                return [self.decode_value(item, target_meta) if isinstance(item, dict) else item for item in native]
+                return [
+                    self.decode_value(item, target_meta) if isinstance(item, dict) else item
+                    for item in native
+                ]
 
         return convert.decode_value(native, field_meta)
 

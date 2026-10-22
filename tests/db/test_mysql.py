@@ -115,7 +115,6 @@ def test_mysql_compiler_mutations():
 def test_mysql_adapter_capabilities():
     adapter = MySQLAdapter()
     assert adapter.name == "mysql"
-    assert adapter.nested_documents is False
 
 def test_mysql_adapter_connection_defaults():
     from renus.db.mysql.adapter import (

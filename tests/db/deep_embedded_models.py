@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from renus.db import DatabaseField, Embedded, EmbeddedMany, Field, Model
+from renus.db import DatabaseField, Field, Model
 
 
 class DeepMany7(Model):
@@ -9,32 +9,32 @@ class DeepMany7(Model):
 
 class DeepMany6(Model):
     name:str
-    children: list[DeepMany7] = EmbeddedMany(DeepMany7)
+    children: list[DeepMany7] = Field(default_factory=list)
 
 
 class DeepMany5(Model):
     name:str
-    children: list[DeepMany6] = EmbeddedMany(DeepMany6)
+    children: list[DeepMany6] = Field(default_factory=list)
 
 
 class DeepMany4(Model):
     name:str
-    children: list[DeepMany5] = EmbeddedMany(DeepMany5)
+    children: list[DeepMany5] = Field(default_factory=list)
 
 
 class DeepMany3(Model):
     name:str
-    children: list[DeepMany4] = EmbeddedMany(DeepMany4)
+    children: list[DeepMany4] = Field(default_factory=list)
 
 
 class DeepMany2(Model):
     name:str
-    children: list[DeepMany3] = EmbeddedMany(DeepMany3)
+    children: list[DeepMany3] = Field(default_factory=list)
 
 
 class DeepMany1(Model):
     name:str
-    children: list[DeepMany2] = EmbeddedMany(DeepMany2)
+    children: list[DeepMany2] = Field(default_factory=list)
 
 
 class DeepEmbedded7(Model):
@@ -44,36 +44,36 @@ class DeepEmbedded7(Model):
 
 class DeepEmbedded6(Model):
     name:str
-    child: DeepEmbedded7 = Embedded(DeepEmbedded7)
+    child: DeepEmbedded7 | None = None
 
 
 class DeepEmbedded5(Model):
     name:str
-    child: DeepEmbedded6 = Embedded(DeepEmbedded6)
+    child: DeepEmbedded6 | None = None
 
 
 class DeepEmbedded4(Model):
     name:str
-    child: DeepEmbedded5 = Embedded(DeepEmbedded5)
+    child: DeepEmbedded5 | None = None
 
 
 class DeepEmbedded3(Model):
     name:str
-    child: DeepEmbedded4 = Embedded(DeepEmbedded4)
+    child: DeepEmbedded4 | None = None
 
 
 class DeepEmbedded2(Model):
     name:str
-    child: DeepEmbedded3 = Embedded(DeepEmbedded3)
+    child: DeepEmbedded3 | None = None
 
 
 class DeepEmbedded1(Model):
     name:str
-    child: DeepEmbedded2 = Embedded(DeepEmbedded2)
+    child: DeepEmbedded2 | None = None
 
 
 class DeepRoot(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name:str
-    embedded: DeepEmbedded1 = Embedded(DeepEmbedded1)
-    many: list[DeepMany1] = EmbeddedMany(DeepMany1)
+    embedded: DeepEmbedded1 | None = None
+    many: list[DeepMany1] = Field(default_factory=list)

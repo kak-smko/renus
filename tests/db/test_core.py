@@ -183,7 +183,7 @@ def test_concrete_adapter_instantiates():
     adapter = ConcreteAdapter()
     assert isinstance(adapter, AsyncDatabaseAdapter)
     assert adapter.name == "fake"
-    assert adapter.nested_documents is False
+
 
 @pytest.mark.asyncio
 async def test_adapter_create_schema_unsupported_by_default():
@@ -205,9 +205,4 @@ async def test_adapter_execute_mutation():
     result = await adapter.execute_mutation(object())
     assert result.rows_affected == 1
 
-def test_adapter_nested_documents_class_attribute_override():
 
-    class WithNested(ConcreteAdapter):
-        nested_documents = True
-
-    assert WithNested.nested_documents is True

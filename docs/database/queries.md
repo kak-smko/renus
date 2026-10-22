@@ -76,7 +76,7 @@ query = users.where(User.posts.any(Post.published == True))
 
 Relationship predicates are compiled and evaluated by the selected adapter; 
 
-SQL adapters also support scalar paths through non-embedded relationships:
+SQL adapters also support scalar paths through relationships:
 
 ```python
 employees = await employee_repo.where(
@@ -335,9 +335,9 @@ hard_deleted = await users.where(User.role == "expired").hard_delete()
 
 ## 14. Backend behavior
 
-The query builder produces a backend-neutral query structure. SQL adapters compile it to parameterized SQL; MongoDB compiles it to filters, projections, sort specifications, and aggregation pipelines. Relationship predicates are part of this compilation: SQL uses `EXISTS` joins, including many-to-many through tables, while MongoDB uses `$lookup` stages for non-embedded relationships.
+The query builder produces a backend-neutral query structure. SQL adapters compile it to parameterized SQL; MongoDB compiles it to filters, projections, sort specifications, and aggregation pipelines. Relationship predicates are part of this compilation: SQL uses `EXISTS` joins, including many-to-many through tables, while MongoDB uses `$lookup` stages.
 
-Embedded data is also backend-specific. SQL adapters query normalized auxiliary tables, including nested embedded paths; MongoDB queries nested documents and arrays with `$elemMatch` where needed. Nested projections return the selected leaf field under its field name on both backends.
+Nested JSON/model fields are stored within the owner record. SQL adapters use JSON path expressions, while MongoDB uses document paths and `$elemMatch` for arrays. Nested projections return the selected leaf field under its field name on both backends.
 
 The same public query API is intended to work across the built-in adapters, but backend support can vary for advanced operations. In particular, cursor comparisons use `>` against the selected field. See [`/docs/database/adapters.md`](adapters.md) when choosing a backend.
 

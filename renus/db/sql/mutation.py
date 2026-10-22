@@ -50,12 +50,16 @@ class SQLMutationCompiler:
 
         raise NotImplementedError(f"Unsupported mutation type: {type(m).__name__}")
 
+    def _encode_field_value(self, meta: Any, name: str, value: Any) -> Any:
+        field_meta = meta.fields.get(name) if meta is not None else None
+        return self.dialect.encode_value(value, field_meta)
+
     def _compile_insert(self, table: str, m: Insert, meta: Any = None) -> SQLCompiled:
         cols = list(m.values.keys())
         col_names = ", ".join(self.dialect.quote(c) for c in cols)
         val_placeholders = self.dialect.placeholders(len(cols))
         sql = f"INSERT INTO {table} ({col_names}) VALUES ({val_placeholders})"
-        params = [m.values[c] for c in cols]
+        params = [self._encode_field_value(meta, c, m.values[c]) for c in cols]
         return SQLCompiled(sql, tuple(params), meta=meta)
 
     def _compile_insert_many(self, table: str, m: InsertMany, meta: Any = None) -> SQLCompiled:
@@ -72,7 +76,7 @@ class SQLMutationCompiler:
         params: list[Any] = []
         for rec in m.records:
             for c in cols:
-                params.append(rec.get(c))
+                params.append(self._encode_field_value(meta, c, rec.get(c)))
 
         return SQLCompiled(sql, tuple(params), meta=meta)
 
@@ -80,7 +84,10 @@ class SQLMutationCompiler:
         set_clauses = [
             f"{self.dialect.quote(k)} = {self.dialect.placeholder}" for k in m.values
         ]
-        params: list[Any] = list(m.values.values())
+        params: list[Any] = [
+            self._encode_field_value(meta, name, value)
+            for name, value in m.values.items()
+        ]
 
         where_clauses: list[str] = []
         for cond in m.filters:

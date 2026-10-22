@@ -178,7 +178,7 @@ Configuration keys:
 | `retries` | `3` | Connection attempts |
 | `retry_delay` | `0.5` | Initial retry delay in seconds; retries use backoff |
 
-MongoDB uses native async PyMongo access. The adapter stores models in collections and supports nested documents natively (`nested_documents = True`). When an integer auto-increment field is requested, it allocates values through the internal `__counters__` collection. A model's `id` primary key maps to MongoDB's `_id` storage field;
+MongoDB uses native async PyMongo access and stores model fields in collections, including nested model and JSON fields as native BSON values. When an integer auto-increment field is requested, it allocates values through the internal `__counters__` collection. A model's `id` primary key maps to MongoDB's `_id` storage field;
 
 
 ## 5. Common adapter lifecycle
@@ -278,7 +278,7 @@ Repositories create model-neutral query and mutation structures. SQL adapters us
 - SQL placeholders (`?` for SQLite and `%s` for MySQL);
 - quoted SQL identifiers versus document paths;
 
-- embedded model storage in SQL auxiliary tables versus nested MongoDB documents.
+- SQL JSON column storage versus native nested MongoDB values.
 
 Use the repository and query APIs for portable application code. Use adapter-specific features only when the selected backend is intentional.
 

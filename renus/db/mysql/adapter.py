@@ -90,12 +90,6 @@ class MySQLAdapter(SQLAdapter):
 
     name: ClassVar[str] = "mysql"
 
-    nested_documents: ClassVar[bool] = False
-
-    _raw_embedded_key_type: ClassVar[str] = "VARCHAR(255)"
-    _raw_embedded_pos_type: ClassVar[str] = "INT"
-    _raw_embedded_table_options: ClassVar[str] = " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
-
     _index_if_not_exists: ClassVar[str] = ""
 
     _table_options: ClassVar[str] = " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"

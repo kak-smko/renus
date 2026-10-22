@@ -42,6 +42,117 @@ def find_model_subclass(name: str, model_base: type | None = None) -> type | Non
     return _search(model_base)
 
 
+def _split_type_arguments(value: str, delimiter: str = ",") -> list[str]:
+    """Split an annotation at top-level delimiters, preserving nested types."""
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(value):
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+        elif char == delimiter and depth == 0:
+            parts.append(value[start:index].strip())
+            start = index + 1
+    parts.append(value[start:].strip())
+    return parts
+
+
+def _resolve_type_annotation(annotation: Any, model_base: type | None = None) -> Any:
+    """Resolve the common built-in generic forms used by postponed annotations."""
+    if not isinstance(annotation, str):
+        return annotation
+
+    raw = annotation.strip()
+    if "|" in raw:
+        parts = _split_type_arguments(raw, "|")
+        resolved = tuple(
+            type(None) if part in ("None", "NoneType") else _resolve_type_annotation(part, model_base)
+            for part in parts
+        )
+        return Union[resolved]
+
+    primitives = {
+        "Any": Any,
+        "object": object,
+        "str": str,
+        "int": int,
+        "float": float,
+        "bool": bool,
+        "None": type(None),
+        "NoneType": type(None),
+    }
+    if raw in primitives:
+        return primitives[raw]
+
+    open_bracket = raw.find("[")
+    if open_bracket > 0 and raw.endswith("]"):
+        name = raw[:open_bracket].strip().rsplit(".", 1)[-1]
+        arguments = [
+            _resolve_type_annotation(part, model_base)
+            for part in _split_type_arguments(raw[open_bracket + 1:-1])
+        ]
+        origin = {"list": list, "List": list, "dict": dict, "Dict": dict}.get(name)
+        if origin is not None:
+            try:
+                return types.GenericAlias(origin, tuple(arguments))
+            except TypeError:
+                return origin
+
+    model = find_model_subclass(raw, model_base)
+    return model if model is not None else object
+
+
+def _typed_value_errors(value: Any, expected_type: Any) -> list[Any]:
+    """Return type errors for a value and a possibly nested generic type."""
+    origin = get_origin(expected_type)
+    arguments = get_args(expected_type)
+
+    if origin in (Union, types.UnionType):
+        if any(not _typed_value_errors(value, option) for option in arguments):
+            return []
+        expected = " | ".join(getattr(option, "__name__", str(option)) for option in arguments)
+        return [["type_error", [expected, type(value).__name__]]]
+
+    if origin is dict:
+        if not isinstance(value, dict):
+            return [["type_error", ["dict", type(value).__name__]]]
+        if len(arguments) < 2:
+            return []
+        errors: list[Any] = []
+        for key, item in value.items():
+            errors.extend(_typed_value_errors(key, arguments[0]))
+            errors.extend(_typed_value_errors(item, arguments[1]))
+        return errors
+
+    if origin is list:
+        if not isinstance(value, list):
+            return [["type_error", ["list", type(value).__name__]]]
+        if not arguments:
+            return []
+        errors = []
+        for item in value:
+            errors.extend(_typed_value_errors(item, arguments[0]))
+        return errors
+
+    if expected_type in (Any, object):
+        return []
+    if expected_type is int:
+        matches = isinstance(value, int) and not isinstance(value, bool)
+    elif expected_type is float:
+        matches = isinstance(value, (int, float)) and not isinstance(value, bool)
+    elif isinstance(expected_type, type):
+        matches = isinstance(value, expected_type)
+    else:
+        matches = True
+
+    if matches:
+        return []
+    expected = getattr(expected_type, "__name__", str(expected_type))
+    return [["type_error", [expected, type(value).__name__]]]
+
+
 def format_rule_error(field: str, err: Any) -> str:
     if isinstance(err, str):
         if err == "required_error":
@@ -230,7 +341,9 @@ class FieldInfo:
                 sub = cls._resolve_model_name(inner, model_base)
                 if sub is not None:
                     return is_nullable, (list,), False, True, sub
-                return is_nullable, (list,), False, False, None
+                return is_nullable, (_resolve_type_annotation(raw, model_base),), False, False, None
+            if raw.startswith("dict[") and raw.endswith("]"):
+                return is_nullable, (_resolve_type_annotation(raw, model_base),), False, False, None
 
             sub = cls._resolve_model_name(raw, model_base)
             if sub is not None:
@@ -274,7 +387,7 @@ class FieldInfo:
                 else:
                     types_to_check.append(arg)
         elif origin is list:
-            types_to_check.append(list)
+            types_to_check.append(annotation)
             if args:
                 elem_type = args[0]
                 if isinstance(elem_type, type) and hasattr(elem_type, "_is_model_class"):
@@ -285,6 +398,9 @@ class FieldInfo:
                     if sub is not None:
                         is_model_list = True
                         model_cls = sub
+
+        elif origin is dict:
+            types_to_check.append(annotation)
         else:
             types_to_check.append(annotation)
 
@@ -369,7 +485,9 @@ class FieldInfo:
         if self.is_model and self.model_cls is not None:
             if isinstance(value, dict):
                 try:
-                    value = self.model_cls(value)
+                    from renus.db.serialization.core import from_dict
+
+                    value = from_dict(self.model_cls, value)
                 except ValidationError as e:
                     for sub_errs in e.errors.values():
                         if isinstance(sub_errs, list):
@@ -387,7 +505,9 @@ class FieldInfo:
                 for idx, item in enumerate(value):
                     if isinstance(item, dict):
                         try:
-                            new_list.append(self.model_cls(item))
+                            from renus.db.serialization.core import from_dict
+
+                            new_list.append(from_dict(self.model_cls, item))
                         except ValidationError as e:
                             for sub_errs in e.errors.values():
                                 if isinstance(sub_errs, list):
@@ -423,12 +543,22 @@ class FieldInfo:
                     if isinstance(value, bool):
                         matched = True
                         break
-                elif target_type is list:
+                elif target_type is list or get_origin(target_type) is list:
                     if isinstance(value, list):
+                        item_types = get_args(target_type)
+                        if item_types:
+                            item_type = item_types[0]
+                            converted_items = []
+                            for item in value:
+                                
+                                errors.extend(_typed_value_errors(item, item_type))
+                                converted_items.append(item)
+                            value = converted_items
                         matched = True
                         break
-                elif target_type is dict:
+                elif target_type is dict or get_origin(target_type) is dict:
                     if isinstance(value, dict):
+                        errors.extend(_typed_value_errors(value, target_type))
                         matched = True
                         break
                 elif target_type is date:

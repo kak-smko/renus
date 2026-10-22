@@ -224,7 +224,7 @@ class SQLCompiler:
         }
         for name, rel in meta.relationships.items():
             loading = getattr(rel.loading, "value", rel.loading)
-            if loading == "joined" or (rel.is_embedded and rel.target in (dict, list)):
+            if loading == "joined":
                 requested.setdefault((name,), Include(Path(ast.source, (name,))))
 
         def add(
@@ -240,10 +240,7 @@ class SQLCompiler:
                 return
             for name, rel in model_meta.relationships.items():
                 include = requested.get(child_path := (*path, name))
-                if include is None and not (
-                    getattr(rel.loading, "value", rel.loading) == "joined"
-                    or (rel.is_embedded and rel.target in (dict, list))
-                ):
+                if include is None and getattr(rel.loading, "value", rel.loading) != "joined":
                     continue
                 alias_number += 1
                 alias = f"r{alias_number}"
@@ -257,57 +254,48 @@ class SQLCompiler:
                 )
                 owner_pk_ref = f"{owner_ref}.{self.dialect.quote(owner_column)}"
 
-                if rel.is_embedded:
-                    embedded_table = self.dialect.quote(
-                        f"{meta.table}_{'_'.join(child_path)}"
+                if target_meta is None:
+                    continue
+                target_table = self.dialect.quote(target_meta.table)
+                target_pk = self.dialect.quote(
+                    self._field_name(target, target_meta.primary_key_field)
+                )
+                kind = getattr(rel.kind, "value", rel.kind)
+                if kind == "many_to_one":
+                    local = self.dialect.quote(
+                        self._field_name(model, rel.foreign_key or f"{name}_id")
                     )
                     join = (
-                        f"LEFT JOIN {embedded_table} AS {self.dialect.quote(alias)} "
-                        f"ON {self.dialect.quote(alias)}.{self.dialect.quote('parent_id')} = {owner_pk_ref}"
+                        f"LEFT JOIN {target_table} AS {self.dialect.quote(alias)} "
+                        f"ON {self.dialect.quote(alias)}.{target_pk} = {owner_ref}.{local}"
+                    )
+                elif kind == "many_to_many":
+                    through_alias = f"j{alias_number}"
+                    local_col = self.dialect.quote(
+                        rel.local_key or f"{to_plural_lower(model_meta.table)}_id"
+                    )
+                    foreign_col = self.dialect.quote(
+                        rel.foreign_key or f"{to_plural_lower(target_meta.table)}_id"
+                    )
+                    through = self.dialect.quote(str(rel.through))
+                    join = (
+                        f"LEFT JOIN {through} AS {self.dialect.quote(through_alias)} "
+                        f"ON {self.dialect.quote(through_alias)}.{local_col} = {owner_pk_ref} "
+                        f"LEFT JOIN {target_table} AS {self.dialect.quote(alias)} "
+                        f"ON {self.dialect.quote(alias)}.{target_pk} = "
+                        f"{self.dialect.quote(through_alias)}.{foreign_col}"
                     )
                 else:
-                    if target_meta is None:
-                        continue
-                    target_table = self.dialect.quote(target_meta.table)
-                    target_pk = self.dialect.quote(
-                        self._field_name(target, target_meta.primary_key_field)
+                    local = self.dialect.quote(
+                        self._field_name(model, rel.local_key or model_meta.primary_key_field)
                     )
-                    kind = getattr(rel.kind, "value", rel.kind)
-                    if kind == "many_to_one":
-                        local = self.dialect.quote(
-                            self._field_name(model, rel.foreign_key or f"{name}_id")
-                        )
-                        join = (
-                            f"LEFT JOIN {target_table} AS {self.dialect.quote(alias)} "
-                            f"ON {self.dialect.quote(alias)}.{target_pk} = {owner_ref}.{local}"
-                        )
-                    elif kind == "many_to_many":
-                        through_alias = f"j{alias_number}"
-                        local_col = self.dialect.quote(
-                            rel.local_key or f"{to_plural_lower(model_meta.table)}_id"
-                        )
-                        foreign_col = self.dialect.quote(
-                            rel.foreign_key or f"{to_plural_lower(target_meta.table)}_id"
-                        )
-                        through = self.dialect.quote(str(rel.through))
-                        join = (
-                            f"LEFT JOIN {through} AS {self.dialect.quote(through_alias)} "
-                            f"ON {self.dialect.quote(through_alias)}.{local_col} = {owner_pk_ref} "
-                            f"LEFT JOIN {target_table} AS {self.dialect.quote(alias)} "
-                            f"ON {self.dialect.quote(alias)}.{target_pk} = "
-                            f"{self.dialect.quote(through_alias)}.{foreign_col}"
-                        )
-                    else:
-                        local = self.dialect.quote(
-                            self._field_name(model, rel.local_key or model_meta.primary_key_field)
-                        )
-                        foreign = self.dialect.quote(
-                            self._field_name(target, rel.foreign_key or f"{to_plural_lower(model_meta.table)}_id")
-                        )
-                        join = (
-                            f"LEFT JOIN {target_table} AS {self.dialect.quote(alias)} "
-                            f"ON {self.dialect.quote(alias)}.{foreign} = {owner_ref}.{local}"
-                        )
+                    foreign = self.dialect.quote(
+                        self._field_name(target, rel.foreign_key or f"{to_plural_lower(model_meta.table)}_id")
+                    )
+                    join = (
+                        f"LEFT JOIN {target_table} AS {self.dialect.quote(alias)} "
+                        f"ON {self.dialect.quote(alias)}.{foreign} = {owner_ref}.{local}"
+                    )
 
                 join_params: list[Any] = []
                 if include is not None and include.filter is not None and target is not None:
@@ -334,10 +322,6 @@ class SQLCompiler:
                     ),
                     "meta": target_meta,
                     "path": child_path,
-                    "raw_kind": (
-                        "dict" if rel.target is dict else "list" if rel.target is list else None
-                    ),
-                    "embedded": bool(rel.is_embedded),
                     "prefix": child_prefix,
                 }
                 result.append(spec)
@@ -350,13 +334,13 @@ class SQLCompiler:
                         self.dialect.quote(alias),
                         child_path,
                         child_prefix,
-                        "parent_id" if rel.is_embedded else target_meta.primary_key_field,
+                        target_meta.primary_key_field,
                     )
 
         add(ast.source, self.dialect.quote("r0"), (), "", meta.primary_key_field)
         return result
 
-    def _path(self, p: Path) -> str:
+    def _path(self, p: Path, table_ref: str | None = None) -> str:
         if len(p.parts) == 1:
             meta = getattr(p.model, "__db_metadata__", None)
             col = p.parts[0]
@@ -365,27 +349,29 @@ class SQLCompiler:
                 if fmeta:
                     col = fmeta.column_name
             quoted = self.dialect.quote(col)
-            if self._root_ref and p.model is self._root_model:
-                return f"{self.dialect.quote(self._root_ref)}.{quoted}"
-            return quoted
+            owner_ref = table_ref
+            root_ref = getattr(self, "_root_ref", None)
+            if owner_ref is None and root_ref and p.model is getattr(self, "_root_model", None):
+                owner_ref = self.dialect.quote(root_ref)
+            return f"{owner_ref}.{quoted}" if owner_ref else quoted
 
         meta = getattr(p.model, "__db_metadata__", None)
-        if meta:
-            rel_name = p.parts[0]
-            rel = meta.relationships.get(rel_name)
-            if rel and rel.is_embedded:
-
-                parent_table = self.dialect.quote(meta.table)
-                parent_pk = self.dialect.quote(meta.primary_key_field)
-                embedded_table = self.dialect.quote(
-                    f"{meta.table}_{'_'.join(p.parts[:-1])}"
-                )
-                target_field = self.dialect.quote(p.parts[-1])
-                parent_fk = self.dialect.quote("parent_id")
-                return (
-                    f"(SELECT e.{target_field} FROM {embedded_table} e "
-                    f"WHERE e.{parent_fk} = {parent_table}.{parent_pk})"
-                )
+        if meta and p.parts[0] in meta.fields:
+            base = self.dialect.quote(self._field_name(p.model, p.parts[0]))
+            owner_ref = table_ref
+            root_ref = getattr(self, "_root_ref", None)
+            if owner_ref is None and root_ref and p.model is getattr(self, "_root_model", None):
+                owner_ref = self.dialect.quote(root_ref)
+            if owner_ref:
+                base = f"{owner_ref}.{base}"
+            json_path = "$" + "".join(
+                f"[{int(part)}]" if part.isdigit() else f".{part}"
+                for part in p.parts[1:]
+            )
+            dialect_name = type(self.dialect).__name__.lower()
+            if "mysql" in dialect_name:
+                return f"JSON_UNQUOTE(JSON_EXTRACT({base}, '{json_path}'))"
+            return f"json_extract({base}, '{json_path}')"
 
         return self.dialect.quote(".".join(p.parts))
 
@@ -399,10 +385,57 @@ class SQLCompiler:
         if isinstance(c, RelationAny):
             return self._relation_any_condition(c, table_ref=table_ref)
 
+        if c.path is not None and len(c.path.parts) > 1:
+            owner_meta = getattr(c.path.model, "__db_metadata__", None)
+            field_meta = owner_meta.fields.get(c.path.parts[0]) if owner_meta else None
+            if field_meta is not None and field_meta.storage_type is list:
+                element_model = field_meta.model_cls
+                element_path = Path(element_model, c.path.parts[1:]) if element_model else None
+                if element_path is not None:
+                    return self._json_collection_any_condition(
+                        RelationAny(
+                            Path(c.path.model, (c.path.parts[0],)),
+                            Condition(c.operator, element_path, c.value),
+                        ),
+                        field_meta,
+                        table_ref=table_ref,
+                    )
+
+        if (
+            c.path is not None
+            and len(c.path.parts) == 1
+            and (field_meta := getattr(c.path.model, "__db_metadata__", None)) is not None
+            and (list_field := field_meta.fields.get(c.path.parts[0])) is not None
+            and list_field.storage_type is list
+        ):
+            item_path = Path(c.path.model, ())
+            return self._json_collection_any_condition(
+                RelationAny(c.path, Condition(c.operator, item_path, c.value)),
+                list_field,
+                table_ref=table_ref,
+            )
+
         if isinstance(c, Logical):
             if c.operator == Operator.NOT:
-                s, p = self._condition(c.children[0], table_ref=table_ref, model=model)
-                return f"NOT ({s})", p
+                child = c.children[0]
+                sql, params = self._condition(child, table_ref=table_ref, model=model)
+                if child.path is not None:
+                    child_meta = getattr(child.path.model, "__db_metadata__", None)
+                    child_field = (
+                        child_meta.fields.get(child.path.parts[0])
+                        if child_meta and child.path.parts
+                        else None
+                    )
+                    if (
+                        child_field is not None
+                        and child_field.storage_type in (dict, list)
+                        and len(child.path.parts) > 1
+                    ):
+                        return (
+                            f"(NOT ({sql}) OR {self._column(child.path, table_ref)} IS NULL)",
+                            params,
+                        )
+                return f"NOT ({sql})", params
 
             parts = [
                 self._condition(child, table_ref=table_ref, model=model)
@@ -422,14 +455,6 @@ class SQLCompiler:
         op = c.operator
         val = c.value
 
-        if c.path is not None and op not in (
-            Operator.AND,
-            Operator.OR,
-            Operator.NOT,
-        ):
-            raw_cond = self._raw_dict_condition(c, op, table_ref=table_ref)
-            if raw_cond is not None:
-                return raw_cond
 
         if op == Operator.EQ:
             if val is None:
@@ -439,6 +464,15 @@ class SQLCompiler:
         if op == Operator.NE:
             if val is None:
                 return f"{col} IS NOT NULL", []
+            nested_json_path = bool(
+                c.path
+                and len(c.path.parts) > 1
+                and getattr(c.path.model, "__db_metadata__", None)
+                and c.path.parts[0] in c.path.model.__db_metadata__.fields
+                and c.path.model.__db_metadata__.fields[c.path.parts[0]].storage_type in (dict, list)
+            )
+            if nested_json_path:
+                return f"({col} <> {self.dialect.placeholder} OR {col} IS NULL)", [val]
             return f"{col} <> {self.dialect.placeholder}", [val]
 
         if op == Operator.LIKE:
@@ -469,8 +503,15 @@ class SQLCompiler:
             not_prefix = "NOT " if op == Operator.NOT_IN else ""
             if not vals:
                 return ("1=0" if op == Operator.IN else "1=1"), []
+            if c.path is not None:
+                nested_json = self._nested_json_membership_condition(
+                    c.path, op, vals, col, table_ref
+                )
+                if nested_json is not None:
+                    return nested_json
             placeholders = self.dialect.placeholders(len(vals))
-            return f"{col} {not_prefix}IN ({placeholders})", vals
+            expression = f"{col} {not_prefix}IN ({placeholders})"
+            return expression, vals
 
         if op == Operator.BETWEEN:
             lower, upper = val
@@ -504,7 +545,7 @@ class SQLCompiler:
         if path is None:
             return ""
         if len(path.parts) != 1:
-            return self._path(path)
+            return self._path(path, table_ref)
         col = self.dialect.quote(self._field_name(path.model, path.parts[0]))
         return f"{table_ref}.{col}" if table_ref else col
 
@@ -512,7 +553,71 @@ class SQLCompiler:
         if len(path.parts) < 2:
             return False
         meta = getattr(path.model, "__db_metadata__", None)
-        return bool(meta and path.parts[0] in meta.relationships and not meta.relationships[path.parts[0]].is_embedded)
+        return bool(meta and path.parts[0] in meta.relationships)
+
+    def _nested_json_membership_condition(
+        self,
+        path: Path,
+        operator: Operator,
+        values: list[Any],
+        column: str,
+        table_ref: str | None,
+    ) -> tuple[str, list[Any]] | None:
+        """Compile IN predicates against scalar or array-valued JSON paths."""
+        if len(path.parts) < 2:
+            return None
+        meta = getattr(path.model, "__db_metadata__", None)
+        field_meta = meta.fields.get(path.parts[0]) if meta else None
+        if field_meta is None or field_meta.storage_type not in (dict, list):
+            return None
+
+        base = self.dialect.quote(self._field_name(path.model, path.parts[0]))
+        owner_ref = table_ref
+        root_ref = getattr(self, "_root_ref", None)
+        if owner_ref is None and root_ref and path.model is getattr(self, "_root_model", None):
+            owner_ref = self.dialect.quote(root_ref)
+        if owner_ref:
+            base = f"{owner_ref}.{base}"
+        json_path = "$" + "".join(
+            f"[{int(part)}]" if part.isdigit() else f".{part}"
+            for part in path.parts[1:]
+        )
+        path_literal = "'" + json_path.replace("'", "''") + "'"
+        placeholders = self.dialect.placeholders(len(values))
+        dialect_name = type(self.dialect).__name__.lower()
+
+        if "mysql" in dialect_name:
+            json_value = f"JSON_EXTRACT({base}, {path_literal})"
+            json_type = f"JSON_TYPE({json_value})"
+            scalar_value = f"COALESCE({json_type} <> 'ARRAY', TRUE)"
+            candidates = [
+                "JSON_CONTAINS("
+                f"{json_value}, JSON_EXTRACT(JSON_ARRAY({self.dialect.placeholder}), '$[0]'))"
+                for _ in values
+            ]
+            array_match = (
+                f"COALESCE(({json_type} = 'ARRAY' AND "
+                f"({' OR '.join(candidates)})), FALSE)"
+            )
+        else:
+            json_type = f"json_type({base}, {path_literal})"
+            scalar_value = f"COALESCE({json_type} <> 'array', 1)"
+            value_expr = f"json_array_item.{self.dialect.quote('value')}"
+            array_match = (
+                f"COALESCE(({json_type} = 'array' AND EXISTS ("
+                f"SELECT 1 FROM json_each({base}, {path_literal}) AS json_array_item "
+                f"WHERE {value_expr} IN ({placeholders}))), 0)"
+            )
+
+        scalar_match = f"({scalar_value} AND {column} IN ({placeholders}))"
+        if operator == Operator.IN:
+            return f"({array_match} OR {scalar_match})", [*values, *values]
+
+        scalar_not_match = (
+            f"(NOT {scalar_value} OR {column} NOT IN ({placeholders}) "
+            f"OR {column} IS NULL)"
+        )
+        return f"(NOT {array_match} AND {scalar_not_match})", [*values, *values]
 
     def _relationship_join(
         self,
@@ -561,10 +666,110 @@ class SQLCompiler:
         predicates = [*joins, inner_sql]
         return f"EXISTS (SELECT 1 FROM {from_sql} WHERE {' AND '.join(predicates)})", params
 
+    def _json_collection_any_condition(
+        self,
+        relation_any: RelationAny,
+        field_meta: Any,
+        *,
+        table_ref: str | None,
+    ) -> tuple[str, list[Any]]:
+        owner_model = relation_any.relation.model
+        owner_meta = owner_model.__db_metadata__
+        owner_ref = table_ref or self.dialect.quote(owner_meta.table)
+        field_name = self.dialect.quote(field_meta.column_name)
+        field_expr = f"{owner_ref}.{field_name}"
+        dialect_name = type(self.dialect).__name__.lower()
+        if "mysql" in dialect_name:
+            from_sql = (
+                f"JSON_TABLE({field_expr}, '$[*]' COLUMNS "
+                f"({self.dialect.quote('value')} JSON PATH '$')) AS json_item"
+            )
+            item_value = f"json_item.{self.dialect.quote('value')}"
+        else:
+            from_sql = f"json_each({field_expr}) AS json_item"
+            item_value = f"json_item.{self.dialect.quote('value')}"
+
+        def compile_condition(condition: Condition) -> tuple[str, list[Any]]:
+            def encode(value: Any) -> Any:
+                return self.dialect.encode_value(value)
+
+            if isinstance(condition, Logical):
+                if condition.operator == Operator.NOT:
+                    sql, params = compile_condition(condition.children[0])
+                    return f"NOT ({sql})", params
+                parts = [compile_condition(child) for child in condition.children]
+                joiner = " AND " if condition.operator == Operator.AND else " OR "
+                return (
+                    f"({joiner.join(sql for sql, _ in parts)})",
+                    [param for _, params in parts for param in params],
+                )
+            if isinstance(condition, RelationAny) or condition.path is None:
+                raise ValueError("Nested any() predicates in JSON collection fields are not supported")
+
+            json_path = "$" + "".join(f".{part}" for part in condition.path.parts)
+            value_expr = item_value if not condition.path.parts else (
+                f"JSON_UNQUOTE(JSON_EXTRACT({item_value}, '{json_path}'))"
+                if "mysql" in dialect_name
+                else f"json_extract({item_value}, '{json_path}')"
+            )
+            operator = condition.operator
+            value = condition.value
+            if operator == Operator.EQ and value is None:
+                return f"{value_expr} IS NULL", []
+            if operator == Operator.NE and value is None:
+                return f"{value_expr} IS NOT NULL", []
+            operator_sql = {
+                Operator.EQ: "=",
+                Operator.NE: "<>",
+                Operator.GT: ">",
+                Operator.GE: ">=",
+                Operator.LT: "<",
+                Operator.LE: "<=",
+                Operator.LIKE: "LIKE",
+                Operator.REGEX: "REGEXP",
+            }.get(operator)
+            if operator_sql is not None:
+                expression = f"{value_expr} {operator_sql} {self.dialect.placeholder}"
+                if operator == Operator.NE and value is not None:
+                    expression = f"({expression} OR {value_expr} IS NULL)"
+                return expression, [encode(value)]
+            if operator in (Operator.IN, Operator.NOT_IN):
+                values = list(value) if isinstance(value, (list, tuple, set)) else [value]
+                if not values:
+                    return ("1=0" if operator == Operator.IN else "1=1"), []
+                prefix = "NOT " if operator == Operator.NOT_IN else ""
+                expression = (
+                    f"{value_expr} {prefix}IN ({self.dialect.placeholders(len(values))})"
+                )
+                if operator == Operator.NOT_IN:
+                    expression = f"({expression} OR {value_expr} IS NULL)"
+                return expression, [encode(item) for item in values]
+
+            if operator == Operator.BETWEEN:
+                lower, upper = value
+                return (
+                    f"{value_expr} BETWEEN {self.dialect.placeholder} AND {self.dialect.placeholder}",
+                    [encode(lower), encode(upper)],
+                )
+            if operator == Operator.IS_NULL:
+                return f"{value_expr} IS NULL", []
+            if operator == Operator.IS_NOT_NULL:
+                return f"{value_expr} IS NOT NULL", []
+            raise ValueError(f"Unsupported JSON collection condition operator: {operator}")
+
+        condition_sql, params = compile_condition(relation_any.condition)
+        return f"EXISTS (SELECT 1 FROM {from_sql} WHERE {condition_sql})", params
+
     def _relation_any_condition(self, c: RelationAny, *, table_ref: str | None) -> tuple[str, list[Any]]:
-        embedded = self._embedded_relation_any(c, table_ref=table_ref)
-        if embedded is not None:
-            return embedded
+        owner_meta = getattr(c.relation.model, "__db_metadata__", None)
+        if owner_meta and c.relation.parts:
+            field_meta = owner_meta.fields.get(c.relation.parts[0])
+            if field_meta is not None and field_meta.storage_type is list:
+                return self._json_collection_any_condition(
+                    c,
+                    field_meta,
+                    table_ref=table_ref,
+                )
 
         relation = c.relation
         owner_model = relation.model
@@ -576,257 +781,6 @@ class SQLCompiler:
         sub_sql, params = self._condition(c.condition, table_ref=alias, model=target_model)
         return f"EXISTS (SELECT 1 FROM {from_sql} WHERE {' AND '.join([*joins, sub_sql])})", params
 
-    def _embedded_relation_any(
-        self,
-        c: RelationAny,
-        *,
-        table_ref: str | None,
-    ) -> tuple[str, list[Any]] | None:
-        """Compile a nested ``any()`` chain over normalized embedded tables."""
-        owner_model = c.relation.model
-        owner_meta = getattr(owner_model, "__db_metadata__", None)
-        if owner_meta is None or not c.relation.parts:
-            return None
-
-        relation_names: list[str] = []
-        current_model = owner_model
-        current = c
-        while isinstance(current, RelationAny):
-            relation_name = current.relation.parts[0]
-            current_meta = getattr(current_model, "__db_metadata__", None)
-            rel = current_meta.relationships.get(relation_name) if current_meta else None
-            if rel is None or not rel.is_embedded:
-                return None
-            relation_names.append(relation_name)
-            target = rel.target if isinstance(rel.target, type) else None
-            if target is None:
-                return None
-            current_model = target
-            if not isinstance(current.condition, RelationAny):
-                terminal = current.condition
-                break
-            current = current.condition
-        else:
-            return None
-
-        root_ref = table_ref or self.dialect.quote(owner_meta.table)
-        table_name = self.dialect.quote(
-            f"{owner_meta.table}_{'_'.join(relation_names)}"
-        )
-        parent_pk = self.dialect.quote(owner_meta.primary_key_field)
-        terminal_sql, params = self._condition(terminal, table_ref="e", model=current_model)
-        return (
-            f"EXISTS (SELECT 1 FROM {table_name} e WHERE "
-            f"e.{self.dialect.quote('parent_id')} = {root_ref}.{parent_pk} "
-            f"AND {terminal_sql})",
-            params,
-        )
-
-    def _raw_dict_condition(
-        self,
-        c: Condition,
-        op: Operator,
-        *,
-        table_ref: str | None = None,
-    ) -> tuple[str, list[Any]] | None:
-        if c.path is None:
-            return None
-        paths = c.path.parts
-        meta = getattr(c.path.model, "__db_metadata__", None)
-        if meta is None:
-            return None
-        rel = meta.relationships.get(paths[0])
-        if rel is None or not rel.is_embedded:
-            return None
-
-        parent_table = table_ref or self.dialect.quote(meta.table)
-        parent_pk = self.dialect.quote(
-            self._field_name(c.path.model, meta.primary_key_field)
-        )
-        parent_key = f"{parent_table}.{parent_pk}"
-        e_table = self.dialect.quote(
-            f"{meta.table}_{'_'.join(paths[:-1])}"
-        )
-        pid = self.dialect.quote("parent_id")
-        rest = paths[1:]
-
-        if rel.target is dict:
-            if not rest:
-                return None
-            key_col = self.dialect.quote("key")
-            fixed_key = (f"e.{key_col} = {self.dialect.placeholder}", [rest[0]])
-            return self._embed_sub_exists(
-                e_table,
-                pid,
-                parent_key,
-                self.dialect.quote("value"),
-                op,
-                c.value,
-                fixed_key=fixed_key,
-                string_values=True,
-            )
-
-        if rel.target is list:
-            return self._embed_sub_exists(
-                e_table,
-                pid,
-                parent_key,
-                self.dialect.quote("value"),
-                op,
-                c.value,
-                string_values=True,
-            )
-
-        child_meta = getattr(rel.target, "__db_metadata__", None) \
-            if isinstance(rel.target, type) else None
-        for relation_name in rest[:-1]:
-            if child_meta is None:
-                return None
-            nested_rel = child_meta.relationships.get(relation_name)
-            if nested_rel is None or not nested_rel.is_embedded:
-                return None
-            child_meta = getattr(nested_rel.target, "__db_metadata__", None) \
-                if isinstance(nested_rel.target, type) else None
-        if child_meta is None:
-            return None
-        col_name = rest[-1] if rest else ""
-        fmeta = child_meta.fields.get(col_name)
-        col = self.dialect.quote(fmeta.column_name if fmeta else col_name)
-        return self._embed_sub_exists(
-            e_table, pid, parent_key, col, op, c.value,
-        )
-
-    def _embed_sub_exists(
-        self,
-        e_table: str,
-        pid: str,
-        parent_key: str,
-        col: str,
-        op: Operator,
-        value: Any,
-        *,
-        fixed_key: tuple[str, list[Any]] | None = None,
-        string_values: bool = False,
-    ) -> tuple[str, list[Any]] | None:
-        def enc(v: Any) -> Any:
-            return str(v) if string_values else v
-
-        if op == Operator.IS_NULL:
-            inner = f"e.{pid} = {parent_key}"
-            params: list[Any] = []
-            if fixed_key:
-                inner += f" AND {fixed_key[0]}"
-                params.extend(fixed_key[1])
-            inner += f" AND e.{col} IS NOT NULL"
-            return f"NOT EXISTS (SELECT 1 FROM {e_table} e WHERE {inner})", params
-
-        if op == Operator.IS_NOT_NULL:
-            inner = f"e.{pid} = {parent_key}"
-            params = []
-            if fixed_key:
-                inner += f" AND {fixed_key[0]}"
-                params.extend(fixed_key[1])
-            inner += f" AND e.{col} IS NOT NULL"
-            return f"EXISTS (SELECT 1 FROM {e_table} e WHERE {inner})", params
-
-        if op == Operator.EQ and value is None:
-            return self._embed_sub_exists(
-                e_table,
-                pid,
-                parent_key,
-                col,
-                Operator.IS_NULL,
-                None,
-                fixed_key=fixed_key,
-                string_values=string_values,
-            )
-
-        if op == Operator.NE and value is None:
-            return self._embed_sub_exists(
-                e_table,
-                pid,
-                parent_key,
-                col,
-                Operator.IS_NOT_NULL,
-                None,
-                fixed_key=fixed_key,
-                string_values=string_values,
-            )
-
-        if op == Operator.NE:
-            inner = f"e.{pid} = {parent_key}"
-            params: list[Any] = []
-            if fixed_key:
-                inner += f" AND {fixed_key[0]}"
-                params.extend(fixed_key[1])
-            inner += f" AND e.{col} = {self.dialect.placeholder}"
-            params.append(enc(value))
-            return f"NOT EXISTS (SELECT 1 FROM {e_table} e WHERE {inner})", params
-
-        if op == Operator.EQ and isinstance(value, list) and string_values:
-            clauses: list[str] = []
-            params: list[Any] = []
-            for v in value:
-                clauses.append(
-                    f"EXISTS (SELECT 1 FROM {e_table} e WHERE e.{pid} = "
-                    f"{parent_key} AND e.{col} = "
-                    f"{self.dialect.placeholder})"
-                )
-                params.append(enc(v))
-            return f"( { ' AND '.join(clauses) } )", params
-
-        if op in (Operator.IN, Operator.NOT_IN):
-            vals = (
-                list(value)
-                if isinstance(value, (list, tuple, set))
-                else ([] if value is None else [value])
-            )
-            if not vals:
-                return ("1=0" if op == Operator.IN else "1=1"), []
-            placeholders = self.dialect.placeholders(len(vals))
-            expr = f"e.{col} IN ({placeholders})"
-            if op == Operator.NOT_IN:
-                inner = f"e.{pid} = {parent_key}"
-                params: list[Any] = []
-                if fixed_key:
-                    inner += f" AND {fixed_key[0]}"
-                    params.extend(fixed_key[1])
-                params.extend(enc(v) for v in vals)
-                return f"NOT EXISTS (SELECT 1 FROM {e_table} e WHERE {inner} AND {expr})", params
-        else:
-            op_str = {
-                Operator.EQ: "=",
-                Operator.NE: "<>",
-                Operator.GT: ">",
-                Operator.GE: ">=",
-                Operator.LT: "<",
-                Operator.LE: "<=",
-                Operator.LIKE: "LIKE",
-                Operator.REGEX: "REGEXP",
-            }.get(op)
-            if op == Operator.BETWEEN:
-                try:
-                    lower, upper = value
-                except (TypeError, ValueError):
-                    raise ValueError("BETWEEN requires a lower and upper value") from None
-                expr = (
-                    f"e.{col} BETWEEN {self.dialect.placeholder} "
-                    f"AND {self.dialect.placeholder}"
-                )
-                vals = [lower, upper]
-            elif op_str is not None:
-                expr = f"e.{col} {op_str} {self.dialect.placeholder}"
-                vals = [value]
-            else:
-                return None
-
-        inner = f"e.{pid} = {parent_key}"
-        params = []
-        if fixed_key:
-            inner += f" AND {fixed_key[0]}"
-            params.extend(fixed_key[1])
-        params.extend(enc(v) for v in vals)
-        return f"EXISTS (SELECT 1 FROM {e_table} e WHERE {inner} AND {expr})", params
 
     def _having_condition(self, h: Any) -> tuple[str, list[Any]]:
         if isinstance(h, HavingCondition) and h.operator in (Operator.AND, Operator.OR):

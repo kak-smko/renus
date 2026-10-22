@@ -9,7 +9,7 @@ from renus.db import (
     DatabaseError,
     DatabaseField,
     DuplicateKeyError,
-    Embedded,
+
     Field,
     Insert,
     Max,
@@ -51,7 +51,7 @@ class Employee(Model):
     age: int
     salary: float
     active: bool = True
-    address: GeoAddress = Embedded(GeoAddress)
+    address: GeoAddress
 
     class Meta:
         timestamps = True
@@ -97,7 +97,6 @@ def test_sqlite_compiler_select_query():
 @pytest.mark.asyncio
 async def test_sqlite_adapter_lifecycle_and_capabilities():
     adapter = SQLiteAdapter({"database": ":memory:"})
-    assert adapter.nested_documents is False
 
     assert await adapter.health_check() is False
     await adapter.connect()
@@ -299,7 +298,7 @@ async def test_sqlite_raw_sql_via_native_connection():
     await db.disconnect()
 
 @pytest.mark.asyncio
-async def test_inferred_embedded_many_sqlite_roundtrip():
+async def test_nested_model_list_sqlite_roundtrip():
     db = Database(SQLiteAdapter({"database": ":memory:"}))
     await db.connect()
     try:
@@ -310,7 +309,7 @@ async def test_inferred_embedded_many_sqlite_roundtrip():
         )
         assert created.id == 1
 
-        loaded = await repo.query().include(InferredOrder.items).first()
+        loaded = await repo.query().first()
         assert loaded is not None
         assert len(loaded.items) == 1
         assert isinstance(loaded.items[0], InferredOrderItem)
@@ -342,11 +341,6 @@ async def test_native_physical_schema_and_stored_rows():
     indexes = raw('PRAGMA index_list("employees");')
     assert any(i["unique"] == 1 for i in indexes)
 
-    sub_tables = raw(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ? ESCAPE '\\';",
-        ("employees\\_address",),
-    )
-    assert len(sub_tables) == 1
 
     emp_repo = db.repository(Employee)
     await emp_repo.create(
@@ -363,11 +357,6 @@ async def test_native_physical_schema_and_stored_rows():
     assert emp["name"] == "Zoe"
     assert emp["salary"] == 92000.0
     assert emp["active"] == 1
-    assert "address" not in emp
-
-    addr = raw('SELECT * FROM "employees_address";')[0]
-    assert addr["parent_id"] == emp["id"]
-    assert addr["street"] == "1 Main"
-    assert addr["city"] == "Oslo"
+    assert emp["address"] == '{"street": "1 Main", "city": "Oslo"}'
 
     await db.disconnect()

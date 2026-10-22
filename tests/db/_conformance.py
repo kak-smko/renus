@@ -41,8 +41,6 @@ import pytest
 from renus.db import (
     Database,
     DatabaseField,
-    Embedded,
-    EmbeddedMany,
     Field,
     ManyToMany,
     ManyToOne,
@@ -84,14 +82,14 @@ class Version(Model):
     name:str="1"
 
 class Contact(Model):
-    phone:str
-    version:Version=Embedded(Version)
+    phone: str
+    version: Version | None = None
     
 class Profile(Model):
     street: str
     city: str
-    contact:Contact=Embedded(Contact)
-    version:Version=Embedded(Version)
+    contact: Contact | None = None
+    version: Version | None = None
 
 class Post(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
@@ -105,7 +103,7 @@ class User(Model):
     name: str | None = None
     age: int =Field(Max(120),default=0)
     active: bool = True
-    profile: Profile = Embedded(Profile)
+    profile: Profile | None = Field(default=None)
     posts: list[Post] = OneToMany(
         Post, foreign_key="user_id", on_save="cascade", on_delete="cascade"
     )
@@ -125,8 +123,7 @@ class SoftUser(Model):
 
 
 # ---------------------------------------------------------------------------
-# Relationship models: Embedded, EmbeddedMany, OneToOne, ManyToOne, OneToMany,
-# ManyToMany, and Reference.
+# Relationship models: OneToOne, ManyToOne, OneToMany, ManyToMany, and Reference.
 # ---------------------------------------------------------------------------
 
 class Tag(Model):
@@ -160,8 +157,8 @@ class Citizen(Model):
 class Item(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     name: str
-    address: Profile = Embedded(Profile)
-    tags: list[Tag] = EmbeddedMany(Tag)
+    address: Profile | None = None
+    tags: list[Tag] = Field(default_factory=list)
 
 
 class Employee(Model):

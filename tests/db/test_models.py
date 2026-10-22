@@ -9,9 +9,7 @@ import pytest
 from renus.db import (
 
     DatabaseField,
-    Embedded,
-    EmbeddedMany,
-    EmbeddedOne,
+
     Field,
     FieldMetadata,
     IdentityKind,
@@ -75,13 +73,11 @@ def test_type_annotation_schema_inference():
     assert meta.fields["duration"].storage_type is timedelta
     assert meta.fields["token"].storage_type is UUID
 
-    assert "metadata_doc" not in meta.fields
-    assert "tags" not in meta.fields
-    assert meta.relationships["metadata_doc"].kind == RelationshipKind.EMBEDDED_ONE
-    assert meta.relationships["metadata_doc"].is_embedded
-    assert meta.relationships["tags"].kind == RelationshipKind.EMBEDDED_MANY
-    assert meta.relationships["tags"].is_embedded
-    assert meta.relationships["tags"].is_collection
+    assert "metadata_doc" in meta.fields
+    assert "tags" in meta.fields
+    assert meta.fields["metadata_doc"].storage_type is dict
+    assert meta.fields["tags"].storage_type is list
+    assert not meta.relationships
 
 def test_custom_storage_type_override():
     class CustomTypeModel(Model):
@@ -339,8 +335,8 @@ class Customer(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     name: str
 
-    address: Address = Embedded(Address)
-    items: list[OrderItem] = EmbeddedMany(OrderItem)
+    address: Address
+    items: list[OrderItem] = Field(default_factory=list)
 
     profile: Profile = OneToOne(Profile, foreign_key="user_id")
     posts: list[Post] = OneToMany(Post, foreign_key="user_id")
@@ -353,18 +349,9 @@ class InferredEmbeddedOrder(Model):
 
 def test_relationship_metadata():
     meta = Customer.metadata()
-    assert len(meta.relationships) == 5
-
-    r_address = meta.relationships["address"]
-    assert r_address.kind == RelationshipKind.EMBEDDED_ONE
-    assert r_address.is_embedded is True
-    assert not r_address.is_collection
-    assert isinstance(r_address, RelationshipMetadata)
-
-    r_items = meta.relationships["items"]
-    assert r_items.kind == RelationshipKind.EMBEDDED_MANY
-    assert r_items.is_embedded is True
-    assert r_items.is_collection is True
+    assert len(meta.relationships) == 3
+    assert "address" in meta.fields
+    assert "items" in meta.fields
 
     r_profile = meta.relationships["profile"]
     assert r_profile.kind == RelationshipKind.ONE_TO_ONE
@@ -378,9 +365,7 @@ def test_relationship_metadata():
     assert r_roles.kind == RelationshipKind.MANY_TO_MANY
     assert r_roles.through == "customer_roles"
 
-def test_reference_and_many_to_one_and_embedded_one():
-    assert EmbeddedOne is Embedded
-
+def test_reference_and_many_to_one_relationships():
     class Department(Model):
         id: int = Field(database=DatabaseField(primary_key=True))
         name: str
@@ -390,7 +375,6 @@ def test_reference_and_many_to_one_and_embedded_one():
         dept_id: int
         department: Department = ManyToOne(Department, foreign_key="dept_id")
         ref_doc: Department = Reference(Department, foreign_key="dept_id")
-        badge: Department = EmbeddedOne(Department)
 
     meta = Employee.metadata()
     assert isinstance(meta.identity, IdentityMetadata)
@@ -403,14 +387,10 @@ def test_reference_and_many_to_one_and_embedded_one():
     r_ref = meta.relationships["ref_doc"]
     assert r_ref.kind == RelationshipKind.REFERENCE
 
-    r_badge = meta.relationships["badge"]
-    assert r_badge.kind == RelationshipKind.EMBEDDED_ONE
-    assert r_badge.is_embedded is True
 
-def test_annotated_model_lists_are_inferred_as_embedded_many():
-    relationship = InferredEmbeddedOrder.metadata().relationships["items"]
-    assert relationship.kind == RelationshipKind.EMBEDDED_MANY
-    assert relationship.target is OrderItem
+def test_annotated_model_lists_are_regular_fields():
+    assert "items" in InferredEmbeddedOrder.metadata().fields
+    assert "items" not in InferredEmbeddedOrder.metadata().relationships
     assert InferredEmbeddedOrder._model_fields["items"].model_cls is OrderItem
 
     order = InferredEmbeddedOrder(

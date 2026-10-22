@@ -320,7 +320,7 @@ Model rules:
 - Use `Field(default_factory=list)`/similar for per-instance mutable defaults.
 - `Model.validate(payload)` accepts a dictionary or JSON string/bytes and raises `ValidationError` with structured `.errors`.
 - Built-in rules live in `renus.db.validation.rules`: `Required`, `MinLen`, `MaxLen`, `Email`, `In`, `Regex`, `Min`, `Max`, `Each`, and others. Validation is not authorization.
-- Relationships include `Embedded`, `EmbeddedMany`, `OneToOne`, `OneToMany`, `ManyToOne`, `ManyToMany`, and `Reference`; inspect relationship metadata and tests before designing complex joins.
+- Relationships include `OneToOne`, `OneToMany`, `ManyToOne`, `ManyToMany`, and `Reference`; inspect relationship metadata and tests before designing complex joins.
 
 Database setup with SQLite:
 

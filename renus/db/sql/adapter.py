@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any, ClassVar
+from typing import Any
 
 from renus.db.core.adapter import AsyncDatabaseAdapter
 from renus.db.core.backup import DEFAULT_PAGE_SIZE, BackupFileWriter, load_rows_pages
@@ -70,38 +70,6 @@ class SQLAdapter(AsyncDatabaseAdapter):
             for spec in compiled.joined:
                 target_meta = spec["meta"]
                 prefix = spec["prefix"]
-                if target_meta is None:
-                    child_data = {
-                        key.removeprefix(f"__renus_joined__{prefix}__"): value
-                        for key, value in row.items()
-                        if key.startswith(f"__renus_joined__{prefix}__")
-                        and "__" not in key.removeprefix(f"__renus_joined__{prefix}__")
-                    }
-                    if not any(value is not None for value in child_data.values()):
-                        continue
-                    value: Any
-                    if spec.get("raw_kind") == "dict":
-                        value = {str(child_data["key"]): child_data.get("value")}
-                    else:
-                        value = child_data.get("value")
-                    parent = root
-                    if len(spec["path"]) > 1:
-                        parent = self._joined_parent(
-                            root,
-                            spec["path"][:-1],
-                            row,
-                            compiled.joined,
-                        )
-                        if parent is None:
-                            continue
-                    self._put_joined_value(
-                        parent,
-                        (spec["path"][-1],),
-                        value,
-                        spec["collection"],
-                        raw_kind=spec.get("raw_kind"),
-                    )
-                    continue
 
                 child_data = {
                     key.removeprefix(f"__renus_joined__{prefix}__"): value
@@ -112,10 +80,7 @@ class SQLAdapter(AsyncDatabaseAdapter):
                 if not child_data or not any(value is not None for value in child_data.values()):
                     continue
                 child = self.decode_row(child_data, target_meta)
-                if (
-                    child.get(target_meta.primary_key_field) is None
-                    and not spec.get("embedded")
-                ):
+                if child.get(target_meta.primary_key_field) is None:
                     continue
                 child_id = child.get(target_meta.primary_key_field)
                 parent = root
@@ -191,8 +156,6 @@ class SQLAdapter(AsyncDatabaseAdapter):
         path: tuple[str, ...],
         value: Any,
         collection: bool,
-        *,
-        raw_kind: str | None = None,
     ) -> None:
         parent = root
         for part in path[:-1]:
@@ -202,73 +165,13 @@ class SQLAdapter(AsyncDatabaseAdapter):
                 parent[part] = nested
             parent = nested
         name = path[-1]
-        if raw_kind == "dict":
-            current = parent.setdefault(name, {})
-            current.update(value)
-        elif raw_kind == "list":
-            current = parent.setdefault(name, [])
-            if value not in current:
-                current.append(value)
-        elif collection:
+        if collection:
             current = parent.setdefault(name, [])
             if not any(item == value for item in current):
                 current.append(value)
         else:
             parent.setdefault(name, value)
 
-    _raw_embedded_key_type: ClassVar[str] = "TEXT"
-
-    _raw_embedded_pos_type: ClassVar[str] = "INTEGER"
-
-    _raw_embedded_table_options: ClassVar[str] = ""
-
-    def _raw_embedded_table_sql(
-        self,
-        meta: Any,
-        rel_name: str,
-        rel: Any,
-        *,
-        table_prefix: str | None = None,
-        parent_pk_type: str | None = None,
-    ) -> str:
-        table_name = f"{table_prefix}_{rel_name}" if table_prefix else f"{meta.table}_{rel_name}"
-        quoted_table = self.dialect.quote(table_name)
-        parent_table = self.dialect.quote(meta.table)
-        parent_pk = self.dialect.quote(meta.primary_key_field)
-        pk_fmeta = meta.fields.get(meta.primary_key_field)
-        pk_type = parent_pk_type or (
-            self.dialect.type_to_sql(pk_fmeta).split()[0]
-            if pk_fmeta is not None
-            else "INTEGER"
-        )
-        pid = self.dialect.quote("parent_id")
-        if rel.target is dict:
-            key_col = self.dialect.quote("key")
-            value_col = self.dialect.quote("value")
-            cols = [
-                f"{pid} {pk_type} NOT NULL",
-                f"{key_col} {self._raw_embedded_key_type} NOT NULL",
-                f"{value_col} TEXT NULL",
-                f"PRIMARY KEY ({pid}, {key_col})",
-            ]
-        else:
-            pos_col = self.dialect.quote("pos")
-            value_col = self.dialect.quote("value")
-            cols = [
-                f"{pid} {pk_type} NOT NULL",
-                f"{pos_col} {self._raw_embedded_pos_type} NOT NULL",
-                f"{value_col} TEXT NULL",
-                f"PRIMARY KEY ({pid}, {pos_col})",
-            ]
-        if table_prefix is None:
-            cols.append(
-                f"FOREIGN KEY ({pid}) REFERENCES {parent_table}({parent_pk}) "
-                f"ON DELETE CASCADE"
-            )
-        return (
-            f"CREATE TABLE {self._ddl_if_not_exists} {quoted_table} "
-            f"({', '.join(cols)}){self._raw_embedded_table_options};"
-        )
 
     _ddl_if_not_exists: ClassVar[str] = "IF NOT EXISTS"
 
@@ -343,54 +246,6 @@ class SQLAdapter(AsyncDatabaseAdapter):
             f"{self.dialect.quote(idx_name)} ON {quoted_table} ({quoted_cols});"
         )
 
-    def _embedded_table_sql(
-        self,
-        meta: Any,
-        rel_name: str,
-        rel: Any,
-        *,
-        table_prefix: str | None = None,
-        parent_table_name: str | None = None,
-        parent_pk_type: str | None = None,
-    ) -> str:
-        embedded_name = f"{table_prefix}_{rel_name}" if table_prefix else f"{meta.table}_{rel_name}"
-        embedded_table = self.dialect.quote(embedded_name)
-        parent_table = self.dialect.quote(parent_table_name or meta.table)
-        parent_pk = self.dialect.quote("parent_id" if parent_table_name else meta.primary_key_field)
-
-        child_meta = getattr(rel.target, "__db_metadata__", None)
-        if child_meta is None:
-            raise ValueError(
-                f"Embedded relationship '{rel_name}' targets a model without metadata"
-            )
-
-        if parent_pk_type is None:
-            parent_pk_type = "INTEGER"
-            pk_fmeta = meta.fields.get(meta.primary_key_field)
-            if pk_fmeta is not None:
-                parent_pk_type = self.dialect.type_to_sql(pk_fmeta).split()[0]
-
-        child_cols = [
-            f"{self.dialect.quote('parent_id')} {parent_pk_type} NOT NULL"
-        ]
-        for cfmeta in child_meta.fields.values():
-            if cfmeta.primary_key and cfmeta.generated:
-                continue
-            ccol_name = self.dialect.quote(cfmeta.column_name)
-            ctype_def = self.dialect.type_to_sql(cfmeta)
-            cnull = " NULL" if cfmeta.nullable else " NOT NULL"
-            child_cols.append(f"{ccol_name} {ctype_def}{cnull}")
-
-        if parent_table_name is None:
-            child_cols.append(
-                f"FOREIGN KEY ({self.dialect.quote('parent_id')}) "
-                f"REFERENCES {parent_table}({parent_pk}) ON DELETE CASCADE"
-            )
-
-        return (
-            f"CREATE TABLE {self._ddl_if_not_exists} {embedded_table} "
-            f"({', '.join(child_cols)}){self._table_options};"
-        )
 
     def _junction_table_sql(self, meta: Any, rel: Any, target_meta: Any | None = None) -> str:
         """Return DDL for a many-to-many junction (``through``) table."""
@@ -439,57 +294,9 @@ class SQLAdapter(AsyncDatabaseAdapter):
             f"({', '.join(cols)}){self._table_options};"
         )
 
-    async def _create_embedded_schema(
-        self,
-        meta: Any,
-        rel_name: str,
-        rel: Any,
-        *,
-        table_prefix: str | None = None,
-        parent_table_name: str | None = None,
-        parent_pk_type: str | None = None,
-    ) -> None:
-        if not rel.is_embedded:
-            return
-        if rel.target is dict or rel.target is list:
-            await self._execute_ddl(
-                self._raw_embedded_table_sql(
-                    meta,
-                    rel_name,
-                    rel,
-                    table_prefix=table_prefix,
-                    parent_pk_type=parent_pk_type,
-                )
-            )
-            return
-
-        child_meta = getattr(rel.target, "__db_metadata__", None)
-        if child_meta is None:
-            return
-
-        table_name = f"{table_prefix}_{rel_name}" if table_prefix else f"{meta.table}_{rel_name}"
-        await self._execute_ddl(
-            self._embedded_table_sql(
-                meta,
-                rel_name,
-                rel,
-                table_prefix=table_prefix,
-                parent_table_name=parent_table_name,
-                parent_pk_type=parent_pk_type,
-            )
-        )
-        for nested_name, nested_rel in child_meta.relationships.items():
-            await self._create_embedded_schema(
-                child_meta,
-                nested_name,
-                nested_rel,
-                table_prefix=table_name,
-                parent_table_name=table_name,
-                parent_pk_type=parent_pk_type or "INTEGER",
-            )
 
     async def create_schema(self, models: Any) -> None:
-        """Create tables, indexes, and embedded tables for the given models."""
+        """Create tables, indexes, and relationship tables for the given models."""
         await self._open_schema_session()
         try:
             model_list = list(models)
@@ -502,12 +309,6 @@ class SQLAdapter(AsyncDatabaseAdapter):
                 for idx in meta.indexes:
                     await self._execute_index_ddl(self._index_sql(meta, idx))
 
-            for model in model_list:
-                meta = getattr(model, "__db_metadata__", None)
-                if not meta:
-                    continue
-                for rel_name, rel in meta.relationships.items():
-                    await self._create_embedded_schema(meta, rel_name, rel)
 
             created_tables = {
                 getattr(model, "__db_metadata__", None).table

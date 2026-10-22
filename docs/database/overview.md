@@ -122,7 +122,7 @@ A model's table defaults to the lowercase plural of its class name, so `User` ma
 - `foreign_key`, `on_delete`, and `on_update`
 - `generated`, `immutable`, and `comment`
 
-Relationships such as `Embedded`, `EmbeddedMany`, `OneToOne`, `OneToMany`, `ManyToOne`, `ManyToMany`, and `Reference` are also available from `renus.db`. See [Models & Fields](models.md) for model metadata, field validation, identities, and relationships.
+Relationships such as `OneToOne`, `OneToMany`, `ManyToOne`, `ManyToMany`, and `Reference` are also available from `renus.db`. Nested model and JSON fields are declared with regular type annotations. See [Models & Fields](models.md) for model metadata, field validation, identities, and relationships.
 
 ## Creating the schema
 

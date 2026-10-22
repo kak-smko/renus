@@ -33,7 +33,6 @@ from tests.db._fakes import DDLFakeMixin
 class MockCustomAdapter(DDLFakeMixin, AsyncDatabaseAdapter):
 
     name: ClassVar[str] = "custom_test_backend"
-    nested_documents=True
 
     def __init__(self, config: Any = None) -> None:
         self.config = config

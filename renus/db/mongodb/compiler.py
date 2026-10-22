@@ -23,7 +23,6 @@ from renus.db.query.ast import (
     QueryAST,
     RelationAny,
 )
-from renus.db.relationships import RelationshipKind
 from renus.datastructures.id import ID
 from renus.db.mongodb.dialect import MongoDialect
 from renus.util import to_plural_lower
@@ -145,15 +144,16 @@ class MongoCompiler:
                     continue
                 relation_name = relation_filter.relation.parts[0]
                 relation_meta = meta.relationships.get(relation_name) if meta else None
-                target_cls = relation_meta.target if relation_meta else None
+                if relation_meta is None:
+                    continue
+                target_cls = relation_meta.target
                 target_meta = getattr(target_cls, "__db_metadata__", None)
-                if relation_meta is None or target_meta is None:
+                if target_meta is None:
                     raise NotImplementedError(
                         "RelationAny requires a mapped relationship target"
                     )
 
-                if relation_meta.is_embedded:
-                    continue
+
                 lookup_name = f"__renus_relation_any_{len(relation_any_lookups)}"
                 relation_any_lookups[id(relation_filter)] = lookup_name
 
@@ -211,7 +211,6 @@ class MongoCompiler:
 
         filter_doc = self._combine_filter_parts(filter_parts)
         joined_stages, joined_names = self._joined_lookups_recursive(ast)
-        lazy_embedded_paths = self._lazy_embedded_paths(ast)
 
         if ast.aggregates:
             pipeline: list[dict[str, Any]] = [*relation_any_stages]
@@ -310,8 +309,7 @@ class MongoCompiler:
                 pipeline.append({"$skip": ast.offset})
             if ast.limit is not None:
                 pipeline.append({"$limit": ast.limit})
-            if lazy_embedded_paths:
-                pipeline.append({"$unset": list(lazy_embedded_paths)})
+
             if ast.projection:
                 pipeline.append({"$project": {
                     "_id": 0,
@@ -329,8 +327,7 @@ class MongoCompiler:
             projection_doc = {self._path_str(p): 1 for p in ast.projection.paths}
             if "_id" not in projection_doc:
                 projection_doc["_id"] = 0
-        elif lazy_embedded_paths:
-            projection_doc = {path: 0 for path in lazy_embedded_paths}
+
 
         sort_spec: list[tuple[str, int]] = []
         for o in ast.ordering:
@@ -404,39 +401,6 @@ class MongoCompiler:
             joined=tuple(joined_names),
         )
 
-    def _lazy_embedded_paths(self, ast: QueryAST) -> tuple[str, ...]:
-        """Return embedded model fields that should stay unloaded.
-
-        MongoDB stores embedded relationships in the owner document, so a lazy
-        relationship must be excluded at the database boundary rather than
-        fetched and discarded while hydrating the model. Explicit includes take
-        precedence over the relationship's loading strategy.
-        """
-        if ast.projection:
-            return ()
-
-        meta = getattr(ast.source, "__db_metadata__", None)
-        if meta is None:
-            return ()
-
-        included = {
-            include.path.parts[0]
-            for include in ast.includes
-            if include.path.parts
-        }
-        paths: list[str] = []
-        for name, relationship in meta.relationships.items():
-            loading_value = getattr(relationship, "loading", "lazy")
-            loading = getattr(loading_value, "value", loading_value)
-            target = getattr(relationship, "target", None)
-            if (
-                getattr(relationship, "is_embedded", False)
-                and target not in (dict, list)
-                and loading == "lazy"
-                and name not in included
-            ):
-                paths.append(name)
-        return tuple(paths)
 
     def _joined_lookups(self, ast: QueryAST) -> tuple[list[dict[str, Any]], list[str]]:
         """Compile automatic and explicit relationship includes into one pipeline."""
@@ -456,7 +420,7 @@ class MongoCompiler:
         requested = expanded
         for name, rel in root_meta.relationships.items():
             loading = getattr(rel.loading, "value", rel.loading)
-            if loading == "joined" or (rel.is_embedded and rel.target in (dict, list)):
+            if loading == "joined":
                 requested.setdefault((name,), None)
 
         stages: list[dict[str, Any]] = []
@@ -470,7 +434,7 @@ class MongoCompiler:
                 continue
             name = path[0]
             rel = root_meta.relationships.get(name)
-            if rel is None or rel.is_embedded:
+            if rel is None:
                 continue
             target = rel.target if isinstance(rel.target, type) else None
             target_meta = getattr(target, "__db_metadata__", None)
@@ -531,7 +495,7 @@ class MongoCompiler:
                         nested_rel = target_meta.relationships.get(nested_name)
                         nested_target = getattr(nested_rel, "target", None) if nested_rel else None
                         nested_meta = getattr(nested_target, "__db_metadata__", None)
-                        if nested_rel is None or nested_meta is None or nested_rel.is_embedded:
+                        if nested_rel is None or nested_meta is None:
                             continue
 
                         nested_local = nested_rel.foreign_key or f"{nested_name}_id"
@@ -608,13 +572,13 @@ class MongoCompiler:
                     direct.setdefault(remainder[0], include)
             for name, rel in owner_meta.relationships.items():
                 loading = getattr(rel.loading, "value", rel.loading)
-                if loading == "joined" or (rel.is_embedded and rel.target in (dict, list)):
+                if loading == "joined":
                     direct.setdefault(name, None)
 
             stages: list[dict[str, Any]] = []
             for name, include in direct.items():
                 rel = owner_meta.relationships.get(name)
-                if rel is None or rel.is_embedded:
+                if rel is None:
                     continue
                 target = rel.target if isinstance(rel.target, type) else None
                 target_meta = getattr(target, "__db_metadata__", None)
@@ -748,19 +712,6 @@ class MongoCompiler:
             return {}
         return {alias: {operator: condition.value}}
 
-    def _is_raw_list_path(self, c: Condition) -> bool:
-        p = c.path
-        if p is None or not p.parts:
-            return False
-        meta = getattr(p.model, "__db_metadata__", None)
-        if not meta:
-            return False
-        rel = meta.relationships.get(p.parts[0])
-        return (
-            rel is not None
-            and rel.kind == RelationshipKind.EMBEDDED_MANY
-            and rel.target is list
-        )
 
     def _relation_any_nodes(self, c: Condition) -> tuple[RelationAny, ...]:
         if isinstance(c, RelationAny):
@@ -787,14 +738,21 @@ class MongoCompiler:
                         )
                     }
                 }
-            relation_meta = getattr(c.relation.model, "__db_metadata__", None)
-            relation = (
-                relation_meta.relationships.get(c.relation.parts[0])
-                if relation_meta and c.relation.parts
+            owner_meta = getattr(c.relation.model, "__db_metadata__", None)
+            field_meta = (
+                owner_meta.fields.get(c.relation.parts[0])
+                if owner_meta and c.relation.parts
                 else None
             )
-            if relation is not None and relation.is_embedded:
-                return self._compile_embedded_any(c, relation_any_lookups)
+            if field_meta is not None and field_meta.storage_type is list:
+                return {
+                    self._path_str(c.relation): {
+                        "$elemMatch": self._compile_condition(
+                            c.condition,
+                            relation_any_lookups,
+                        )
+                    }
+                }
             rel_path = self._path_str(c.relation)
             sub_filter = self._compile_condition(c.condition, relation_any_lookups)
             return {rel_path: {"$elemMatch": sub_filter}}
@@ -818,11 +776,6 @@ class MongoCompiler:
         op = c.operator
         val = c.value
 
-        if self._is_raw_list_path(c):
-            if op == Operator.EQ and isinstance(val, list):
-                return {path: {"$all": [self.dialect.encode_value(v) for v in val]}}
-            if op == Operator.IN and not isinstance(val, (list, tuple, set)):
-                return {path: self.dialect.encode_value(val)}
 
         if op == Operator.EQ:
             return {path: self.dialect.encode_value(val)}
@@ -836,12 +789,18 @@ class MongoCompiler:
             return {path: {"$lt": self.dialect.encode_value(val)}}
         if op == Operator.LE:
             return {path: {"$lte": self.dialect.encode_value(val)}}
-        if op == Operator.IN:
-            if not isinstance(val, (list, tuple, set)):
-                return {path: self.dialect.encode_value(val)}
-            return {path: {"$in": [self.dialect.encode_value(v) for v in val]}}
-        if op == Operator.NOT_IN:
-            return {path: {"$nin": [self.dialect.encode_value(v) for v in val]}}
+        if op in (Operator.IN, Operator.NOT_IN):
+            values = (
+                list(val)
+                if isinstance(val, (list, tuple, set))
+                else ([] if val is None else [val])
+            )
+            mongo_operator = "$in" if op == Operator.IN else "$nin"
+            return {
+                path: {
+                    mongo_operator: [self.dialect.encode_value(value) for value in values]
+                }
+            }
         if op == Operator.IS_NULL:
             return {path: None}
         if op == Operator.IS_NOT_NULL:
@@ -876,21 +835,6 @@ class MongoCompiler:
                 result[f"{prefix}.{key}"] = value
         return result
 
-    def _compile_embedded_any(
-        self,
-        c: RelationAny,
-        relation_any_lookups: dict[int, str] | None,
-    ) -> dict[str, Any]:
-        relation_meta = getattr(c.relation.model, "__db_metadata__", None)
-        relation_name = c.relation.parts[0]
-        relation = relation_meta.relationships[relation_name]
-        if isinstance(c.condition, RelationAny):
-            nested = self._compile_embedded_any(c.condition, relation_any_lookups)
-        else:
-            nested = self._compile_condition(c.condition, relation_any_lookups)
-        if relation.is_collection:
-            return {relation_name: {"$elemMatch": nested}}
-        return self._prefix_mongo_condition(nested, relation_name)
 
     def compile_mutation(self, m: MutationAST) -> tuple[str, str, dict[str, Any], Any]:
         """Compile a mutation AST into a collection, operation, and arguments."""

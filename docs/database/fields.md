@@ -163,6 +163,9 @@ Do not use a mutable object as a shared static default:
 # Prefer this: a new list is created for every instance.
 labels: list[str] = Field(default_factory=list)
 
+# Nested model collections are JSON fields, not relationships.
+addresses: list[Address] = Field(default_factory=list)
+
 # Avoid using one shared mutable list as a class-level default.
 ```
 

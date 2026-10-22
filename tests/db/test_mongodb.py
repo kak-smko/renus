@@ -8,9 +8,9 @@ from renus.db import (
     Avg,
     Count,
     DatabaseField,
-    Embedded,
+
     Field,
-    EmbeddedMany,
+
     Max,
     Min,
     MongoDBAdapter,
@@ -47,8 +47,8 @@ class AccountDoc(Model):
     username: str = Field(database=DatabaseField(unique=True))
     age: int
     active: bool = True
-    profile: Location = Embedded(Location)
-    items: list[OrderItem] = EmbeddedMany(OrderItem)
+    profile: Location
+    items: list[OrderItem]
 
     class Meta:
         timestamps = True
@@ -89,21 +89,20 @@ def test_mongo_filter_rejects_operator_dicts_in_values():
     with pytest.raises(DatabaseError):
         compiler.compile_query(q_ast)
 
-def test_mongo_raw_list_path_encodes_values():
+def test_mongo_json_list_path_encodes_values():
     from renus.db import DatabaseError, Path
 
     compiler = MongoCompiler()
     repo = Repository(MongoDBAdapter(), TagDoc)
 
-    # Embedded-many-of-primitives bypasses the normal operator compilation,
-    # so values there must still go through encode_value.
+    # Values in a list field still pass through the normal value encoder.
     q_ast = repo.query(Path(TagDoc, ("tags",)) == [{"$ne": None}]).ast
     with pytest.raises(DatabaseError):
         compiler.compile_query(q_ast)
 
     q_ok = repo.query(Path(TagDoc, ("tags",)) == ["a", "b"]).ast
     compiled = compiler.compile_query(q_ok)
-    assert compiled.filter["tags"] == {"$all": ["a", "b"]}
+    assert compiled.filter["tags"] == ["a", "b"]
 
 def test_mongo_compiler_logical_combinations():
     compiler = MongoCompiler()
@@ -123,18 +122,6 @@ def test_mongo_compiler_logical_combinations():
     q_not = repo.query(~c1).with_deleted().ast
     compiled_not = compiler.compile_query(q_not)
     assert "$nor" in compiled_not.filter
-
-def test_mongo_compiler_excludes_unloaded_embedded_models():
-    compiler = MongoCompiler()
-    repo = Repository(MongoDBAdapter(), AccountDoc)
-
-    compiled = compiler.compile_query(repo.query().ast)
-    assert compiled.projection == {"profile": 0, "items": 0}
-
-    included = compiler.compile_query(
-        repo.query().include(AccountDoc.profile).ast
-    )
-    assert included.projection == {"items": 0}
 
 
 def test_mongo_compiler_nested_paths_and_elemmatch():
@@ -254,7 +241,6 @@ def test_mongo_compiler_mutations():
 def test_mongodb_adapter_capabilities():
     adapter = MongoDBAdapter()
     assert adapter.name == "mongodb"
-    assert adapter.nested_documents is True
 
 def test_mongodb_adapter_connection_defaults():
     from renus.db.mongodb.adapter import (

@@ -2,15 +2,13 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Any
-from collections.abc import Mapping
 
 from renus.db.query.ast import Path
 
 
 class RelationshipKind(str, Enum):
 
-    EMBEDDED_ONE = "embedded_one"
-    EMBEDDED_MANY = "embedded_many"
+
     ONE_TO_ONE = "one_to_one"
     ONE_TO_MANY = "one_to_many"
     MANY_TO_ONE = "many_to_one"
@@ -115,7 +113,6 @@ class Relationship:
         local_key: str | None = None,
         foreign_key: str | None = None,
         through: type | str | None = None,
-        is_embedded: bool = False,
         is_collection: bool = False,
         rules: tuple[Any, ...] = (),
         **extra: Any,
@@ -150,8 +147,6 @@ class Relationship:
             to the target's primary key.
         through:
             The intermediate model used for many-to-many relationships.
-        is_embedded:
-            Whether the target is stored inline with the owner.
         is_collection:
             Whether the relationship resolves to multiple records.
 
@@ -176,7 +171,6 @@ class Relationship:
         self.local_key = local_key
         self.foreign_key = foreign_key
         self.through = through
-        self.is_embedded = is_embedded
         self.is_collection = is_collection
         self.rules = tuple(rules)
         self.extra = extra
@@ -221,79 +215,6 @@ class Relationship:
         if self._name is not None:
             instance.__dict__[self._name] = value
 
-class EmbeddedOne(Relationship):
-
-    def __init__(
-        self,
-        target: type,
-        *rules: Any,
-        loading: str | LoadingStrategy = "lazy",
-        **extra: Any,
-    ) -> None:
-        """Declare an embedded single relationship.
-
-        Parameters
-        ----------
-        target:
-            The embedded model class or a reference to it.
-
-        *rules:
-            Positional validation rules applied to the embedded value, using
-            the same rule contract as ``Field``.
-        loading:
-            Strategy used to load the embedded record. One of ``"lazy"``
-            or ``"joined"``. Defaults to ``"lazy"``.
-        """
-        super().__init__(
-            kind=RelationshipKind.EMBEDDED_ONE,
-            target=target,
-            on_save="cascade",
-            on_delete="cascade",
-            on_update="cascade",
-            loading=loading,
-            is_embedded=True,
-            is_collection=False,
-            rules=rules,
-            **extra,
-        )
-
-Embedded = EmbeddedOne
-
-class EmbeddedMany(Relationship):
-
-    def __init__(
-        self,
-        target: type,
-        *rules: Any,
-        loading: str | LoadingStrategy = "lazy",
-        **extra: Any,
-    ) -> None:
-        """Declare an embedded collection relationship.
-
-        Parameters
-        ----------
-        target:
-            The embedded model class or a reference to it.
-
-        *rules:
-            Positional validation rules applied to the embedded collection,
-            using the same rule contract as ``Field``.
-        loading:
-            Strategy used to load the embedded records. One of ``"lazy"``
-            or ``"joined"``. Defaults to ``"lazy"``.
-        """
-        super().__init__(
-            kind=RelationshipKind.EMBEDDED_MANY,
-            target=target,
-            on_save="cascade",
-            on_delete="cascade",
-            on_update="cascade",
-            loading=loading,
-            is_embedded=True,
-            is_collection=True,
-            rules=rules,
-            **extra,
-        )
 
 class Reference(Relationship):
 
@@ -350,7 +271,6 @@ class Reference(Relationship):
             loading=loading,
             local_key=local_key,
             foreign_key=foreign_key,
-            is_embedded=False,
             is_collection=is_collection,
             **extra
         )

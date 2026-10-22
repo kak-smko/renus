@@ -36,6 +36,7 @@ class FieldMetadata:
     immutable: bool = False
     comment: str | None = None
     sensitive: bool = False
+    model_cls: type | None = None
 
     @property
     def has_default(self) -> bool:
@@ -77,7 +78,6 @@ class RelationshipMetadata:
     on_delete: str = "restrict"
     on_update: str = "cascade"
     loading: str = "lazy"
-    is_embedded: bool = False
     is_collection: bool = False
 
     def resolve_target(self) -> type:

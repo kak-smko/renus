@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
 
 import pytest
 
-from renus.db import Embedded, EmbeddedMany, EmbeddedOne, Field, Model, ValidationError
+from renus.db import Field, Model, ValidationError
 from renus.db.validation import (
     Email,
     In,
@@ -87,7 +88,6 @@ def test_user_model_creation_and_dict_conversion():
             "city": "tee",
             "country": "Test",
             "postal_code": None,
-            "id": None,
         },
     }
 
@@ -201,7 +201,6 @@ def test_nested_models_simple():
     assert dict(user)["address"] == {
         "street": "Some Street",
         "city": "Baku",
-        "id": None,
     }
 
 
@@ -262,32 +261,71 @@ def test_nested_list_of_models():
 
     order_dict = dict(order)
     assert order_dict["items"] == [
-        {"name": "Apple", "quantity": 3, "id": None},
-        {"name": "Banana", "quantity": 5, "id": None},
+        {"name": "Apple", "quantity": 3},
+        {"name": "Banana", "quantity": 5},
     ]
 
 
-def test_embedded_relationship_validation_rules():
+def test_typed_nested_containers_validate_keys_and_values():
+    class ContainerModel(Model):
+        settings: dict[str, int]
+        grouped_values: dict[str, list[int]]
+        values: list[int]
+
+    valid = ContainerModel(
+        settings={"one": 1},
+        grouped_values={"numbers": [1, 2]},
+        values=[3, 4],
+    )
+    assert valid.settings == {"one": 1}
+    assert valid.grouped_values == {"numbers": [1, 2]}
+    assert valid.values == [3, 4]
+
+    invalid_cases = (
+        ("settings", {"one": "1"}, ["type_error", ["int", "str"]]),
+        ("settings", {1: 1}, ["type_error", ["str", "int"]]),
+        (
+            "grouped_values",
+            {"numbers": [1, "2"]},
+            ["type_error", ["int", "str"]],
+        ),
+        ("values", [True], ["type_error", ["int", "bool"]]),
+    )
+    for field_name, invalid_value, expected_error in invalid_cases:
+        payload: dict[str, Any] = {
+            "settings": {"one": 1},
+            "grouped_values": {"numbers": [1, 2]},
+            "values": [3, 4],
+        }
+        payload[field_name] = invalid_value
+
+        with pytest.raises(ValidationError) as exc_info:
+            ContainerModel(**payload)
+
+        assert exc_info.value.errors[field_name] == [expected_error]
+
+
+def test_nested_model_field_validation_rules():
     class Contact(Model):
         name: str
         city: str
 
     class Customer(Model):
-        contact: Contact = EmbeddedOne(
-            Contact, MinLen(2), description="Primary contact", widget="contact-card"
+        contact: Contact | None = Field(
+            MinLen(2), default=None, description="Primary contact", widget="contact-card"
         )
-        contacts: list[Contact] = EmbeddedMany(
-            Contact,
+        contacts: list[Contact] = Field(
             MinLen(1),
             MaxLen(2),
+            default_factory=list,
             description="Other contacts",
             widget="contact-list",
         )
 
-    assert Customer.__db_metadata__.relationships["contact"].target is Contact
-    assert Customer.__dict__["contact"].extra["widget"] == "contact-card"
+    assert Customer.__db_metadata__.relationships == {}
+    assert Customer._model_fields["contact"].field.extra["widget"] == "contact-card"
     assert Customer._model_fields["contact"].field.description == "Primary contact"
-    assert Customer.__dict__["contacts"].extra["widget"] == "contact-list"
+    assert Customer._model_fields["contacts"].field.extra["widget"] == "contact-list"
     assert Customer._model_fields["contacts"].field.description == "Other contacts"
 
     customer = Customer(

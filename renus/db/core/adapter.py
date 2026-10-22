@@ -64,7 +64,6 @@ class AsyncDatabaseAdapter(ABC):
     """Abstract async database adapter interface."""
 
     name: ClassVar[str]
-    nested_documents: ClassVar[bool] = False
 
     @abstractmethod
     async def connect(self) -> None:

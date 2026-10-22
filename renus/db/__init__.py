@@ -97,9 +97,6 @@ from renus.db.plugins import (
     unregister_adapter,
 )
 from renus.db.relationships import (
-    Embedded,
-    EmbeddedMany,
-    EmbeddedOne,
     LoadingStrategy,
     ManyToMany,
     ManyToOne,
@@ -141,9 +138,6 @@ __all__ = [
     "Delete",
     "DeleteMany",
     "DuplicateKeyError",
-    "Embedded",
-    "EmbeddedMany",
-    "EmbeddedOne",
     "Event",
     "EventBus",
     "Field",

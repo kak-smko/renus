@@ -29,6 +29,8 @@ class MySQLDialect(SQLDialect):
             max_length = self._max_text_length(field_meta)
             if max_length is not None and max_length <= 255:
                 return f"VARCHAR({max_length})"
+        if st in (dict, list):
+            return "JSON"
         if isinstance(st, type):
             if issubclass(st, bool):
                 return "TINYINT(1)"

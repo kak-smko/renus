@@ -88,8 +88,6 @@ class SQLiteTransactionContext(TransactionContext):
 class SQLiteAdapter(SQLAdapter):
     name: ClassVar[str] = "sqlite"
 
-    nested_documents: ClassVar[bool] = False
-
     def __init__(self, config: dict | None = None) -> None:
         """Initialize the SQLite adapter.
 

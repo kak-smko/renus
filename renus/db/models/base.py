@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from datetime import date, datetime, timezone
-from typing import Any, ClassVar, get_args, get_origin
+from typing import Any, ClassVar
 
 from renus.db.core.exceptions import ValidationError
 from renus.db.core.state import IdentityKind, Lifecycle
@@ -13,58 +13,16 @@ from renus.db.metadata.core import (
     ModelMetadata,
     RelationshipMetadata,
 )
-from renus.db.metadata.inference import analyze_field_type, infer_identity_kind, is_optional_type
+from renus.db.metadata.inference import analyze_field_type, infer_identity_kind
 from renus.db.models.db_field import UNSET, DatabaseField
 from renus.db.models.field import Field, FieldInfo, _UNSET
 from renus.db.validation.base import Rule
 from renus.datastructures.id import ID
 from renus.db.query.ast import Path
-from renus.db.relationships import EmbeddedMany, EmbeddedOne, Relationship
+from renus.db.relationships import Relationship
 
 
 _MODEL_REGISTRY: dict[str, type] = {}
-
-def _mapping_value_kind(annotation: Any) -> str | None:
-    _nullable, base = is_optional_type(annotation)
-    if isinstance(base, str):
-        name = base.strip().lower().split("[", 1)[0].strip()
-        if name == "dict":
-            return "Embedded"
-        if name == "list":
-            return "EmbeddedMany"
-        return None
-    origin = get_origin(base) or base
-    if origin is dict:
-        return "Embedded"
-    if origin is list:
-        return "EmbeddedMany"
-    return None
-
-
-def _embedded_many_target(annotation: Any) -> type | None:
-    """Resolve the model element type from a ``list[Model]`` annotation."""
-    _nullable, base = is_optional_type(annotation)
-    if isinstance(base, str):
-        text = base.strip()
-        if not text.lower().startswith("list[") or not text.endswith("]"):
-            return None
-        element = text[5:-1].strip().strip("\\\"'")
-        _element_nullable, element = is_optional_type(element)
-        if isinstance(element, str):
-            return FieldInfo._resolve_model_name(element.strip().strip("\\\"'"), Model)
-        return None
-
-    if get_origin(base) is not list:
-        return None
-    args = get_args(base)
-    if not args:
-        return None
-    _element_nullable, element = is_optional_type(args[0])
-    if isinstance(element, type) and getattr(element, "_is_model_class", False):
-        return element
-    if isinstance(element, str):
-        return FieldInfo._resolve_model_name(element.strip().strip("\\\"'"), Model)
-    return None
 
 class ModelMeta(type):
     """Metaclass that builds model metadata and field definitions."""
@@ -143,27 +101,6 @@ class ModelMeta(type):
                     all_relationships[k] = v
         all_relationships.update(declared_relationships)
 
-        for fname, field_type in list(annotations.items()):
-            if fname.startswith("_") or fname in all_relationships:
-                continue
-            rel_kind = _mapping_value_kind(field_type)
-            if rel_kind is None:
-                continue
-
-            embedded_many_target = (
-                _embedded_many_target(field_type)
-                if rel_kind == "EmbeddedMany"
-                else None
-            )
-            rel = (
-                EmbeddedOne(dict)
-                if rel_kind == "Embedded"
-                else EmbeddedMany(embedded_many_target or list)
-            )
-            all_relationships[fname] = rel
-            declared_relationships[fname] = rel
-
-            ns[fname] = Field(default=None if not rel.is_collection else [])
 
         validation_fields: dict[str, FieldInfo] = getattr(cls, "_model_fields", {})
         for rname, rel in all_relationships.items():
@@ -225,7 +162,9 @@ class ModelMeta(type):
             is_nullable, base_type, storage_type = analyze_field_type(fi.field_type)
 
             effective_nullable = is_nullable
-            effective_storage_type = storage_type
+            effective_storage_type = (
+                dict if fi.is_model else list if fi.is_model_list else storage_type
+            )
             col_name = db.column_name or fname
 
             pk = db.primary_key or (fname in ("id", "_id") and not any(
@@ -262,6 +201,7 @@ class ModelMeta(type):
                 python_type=fi.field_type,
                 inferred_type=base_type,
                 storage_type=effective_storage_type,
+                model_cls=fi.model_cls if fi.is_model or fi.is_model_list else None,
                 nullable=effective_nullable,
                 required=getattr(fi, "required", False),
                 database=db,
@@ -365,13 +305,7 @@ class ModelMeta(type):
                 )
                 fields_dict["id"] = id_meta
                 column_to_field["id"] = "id"
-                validation_fields["id"] = FieldInfo(
-                    name="id",
-                    field_type=int,
-                    field=Field(default=None),
-                    default=None,
-                    model_base=Model,
-                )
+
                 identity = IdentityMetadata(
                     fields=("id",),
                     kind=IdentityKind.INTEGER,
@@ -392,7 +326,6 @@ class ModelMeta(type):
                 on_delete=rel.on_delete,
                 on_update=rel.on_update,
                 loading=rel.loading,
-                is_embedded=rel.is_embedded,
                 is_collection=rel.is_collection,
             )
             rel_metadata[rname] = rel_meta
@@ -488,8 +421,8 @@ class Model(metaclass=ModelMeta):
 
         The schema is derived from the model's annotations, validation rules,
         and relationship metadata. Nested model fields and relationships are
-        represented recursively, including relationships declared without an
-        annotation such as ``items = EmbeddedMany(Item)``.
+        represented recursively, including nested model fields and
+        model collections.
 
         The returned dictionary is JSON-serializable and follows the JSON
         Schema vocabulary. Models that contain recursive relationships use
@@ -652,8 +585,6 @@ class Model(metaclass=ModelMeta):
                 ):
                     required.append(name)
 
-            for name, relationship in relationships.items():
-                properties[name] = relationship_schema(relationship, next_stack)
 
             result: dict[str, Any] = {
                 "title": model.__name__,
@@ -809,6 +740,7 @@ class Model(metaclass=ModelMeta):
             if kwargs:
                 data.update(kwargs)
 
+
             errors: dict[str, list[Any]] = {}
             values: dict[str, Any] = {}
 
@@ -836,11 +768,13 @@ class Model(metaclass=ModelMeta):
 
             relationship_names = set(meta.relationships.keys()) if meta else set()
             for key, val in data.items():
-                if key not in self._model_fields and key not in relationship_names:
-                    # Mass-assignment guard: input dicts (e.g. request bodies,
-                    # untrusted JSON via from_dict) may only set declared
-                    # fields; relationship keys are allowed so row hydration
-                    # can carry eagerly loaded data onto the instance.
+                if (
+                    key not in self._model_fields
+                    and key not in relationship_names
+                    and key not in (meta.fields if meta else {})
+                ):
+                    # Mass-assignment guard: input dicts may only set declared
+                    # fields, relationships, or a database-generated identity.
                     errors[key] = [["unknown_field", [key]]]
                     continue
                 if key not in self._model_fields:
