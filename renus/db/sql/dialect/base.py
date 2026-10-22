@@ -299,4 +299,6 @@ class SQLDialect(ABC):
             else:
                 continue
             data[fname] = self.decode_value(val, fmeta)
+            if col != fname:
+                data.pop(col, None)
         return data

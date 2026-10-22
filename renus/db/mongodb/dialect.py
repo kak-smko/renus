@@ -167,7 +167,7 @@ class MongoDialect:
             for fname, fmeta in field_meta.fields.items():
                 col = getattr(fmeta, "column_name", fname)
                 if col in data:
-                    val = data[col]
+                    val = data.pop(col) if col != fname else data[col]
                     data[fname] = self.decode_value(val, fmeta)
                 elif fname in data:
                     val = data[fname]

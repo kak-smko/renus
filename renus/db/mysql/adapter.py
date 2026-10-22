@@ -107,7 +107,7 @@ class MySQLAdapter(SQLAdapter):
         self.compiler = SQLCompiler(self.dialect)
         self.mutation_compiler = SQLMutationCompiler(self.dialect)
         self._mysql_db: Any = None
-        self._tx_session: Any = None
+        self._initialize_transaction_state()
         self._schema_conn: Any = None
         self._lock = asyncio.Lock()
 
@@ -319,6 +319,8 @@ class MySQLAdapter(SQLAdapter):
         assert self._mysql_db is not None
 
         if isinstance(compiled, MutationAST):
+            if self._needs_insert_many_shape_grouping(compiled):
+                return await self._execute_insert_many_by_shape(compiled)
             sql_compiled: SQLCompiled = self.compile_mutation(compiled)
         else:
             sql_compiled = compiled

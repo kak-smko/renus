@@ -110,7 +110,7 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         self.compiler = MongoCompiler(self.dialect)
         self._mongo_client: Any = None
         self._mongo_db: Any = None
-        self._tx_session: Any = None
+        self._initialize_transaction_state()
 
     async def connect(self) -> None:
         """Establish a connection to the database."""
@@ -307,6 +307,11 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
                     if "id" not in doc:
                         doc["id"] = doc["_id"]
                     doc.pop("_id", None)
+                if meta and getattr(meta, "fields", None):
+                    for field_name, field_meta in meta.fields.items():
+                        column_name = field_meta.column_name
+                        if column_name in doc and field_name not in doc:
+                            doc[field_name] = doc.pop(column_name)
                 
                 if meta and getattr(meta, "fields", None):
                     decoded = self.dialect.decode_value(doc, meta)

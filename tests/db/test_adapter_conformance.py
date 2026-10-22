@@ -52,6 +52,7 @@ from renus.db import (
 
 )
 from renus.datastructures import ID
+from renus.db.mutation.ast import InsertMany
 from renus.db.query.ast import Path, QueryAST
 from renus.db.validation import MaxLen
 from tests.db.deep_relation_models import DEEP_RELATION_FAMILIES
@@ -470,6 +471,30 @@ async def test_create_and_read(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
+async def test_custom_column_name_is_used_for_insert_and_update(kind):
+    class RenamedColumn(Model):
+        id: str = Field(database=DatabaseField(primary_key=True))
+        display_name: str = Field(database=DatabaseField(column_name="display_label"))
+
+    db = await database_for(kind, [RenamedColumn])
+    try:
+        repo = db.repository(RenamedColumn)
+        await repo.create(RenamedColumn(id="renamed-1", display_name="before"))
+        assert await repo.query(RenamedColumn.display_name == "before").count() == 1
+
+        assert await repo.update(
+            RenamedColumn.id == "renamed-1",
+            values={"display_name": "after"},
+        ) == 1
+        loaded = await repo.where(RenamedColumn.display_name == "after").first()
+        assert loaded is not None
+        assert loaded.display_name == "after"
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
 async def test_create_many(kind):
     db = await database_for(kind)
     try:
@@ -484,6 +509,39 @@ async def test_create_many(kind):
         assert len(created) == 3
         assert all(u.id is not None for u in created)
         assert await repo.count() == 3
+    finally:
+        await cleanup(db)
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_create_many_mixed_generated_and_explicit_ids(kind, monkeypatch):
+    class GeneratedRecord(Model):
+        id: int = Field(
+            database=DatabaseField(primary_key=True, generated=True, auto_inc=True)
+        )
+        name: str
+
+    monkeypatch.setitem(Config._cache, "database", SimpleNamespace(ID=int))
+    db = await database_for(kind, [GeneratedRecord])
+    try:
+        repo = db.repository(GeneratedRecord)
+        rows = await repo.create_many(
+            [
+                GeneratedRecord(name="automatic-first"),
+                GeneratedRecord(name="automatic-two"),
+                GeneratedRecord(id=42, name="explicit-second"),
+            ]
+        )
+
+        assert [row.id for row in rows] == [1,2, 42]
+        stored = await repo.query().order_by(GeneratedRecord.name.asc()).all()
+        assert [(row.id, row.name) for row in stored] == [
+            (1, "automatic-first"),
+            (2, "automatic-two"),
+            (42, "explicit-second"),
+        ]
     finally:
         await cleanup(db)
 
@@ -3097,6 +3155,43 @@ async def test_hard_delete_object_and_query(kind):
 # ---------------------------------------------------------------------------
 # Transactions & unit of work
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_transaction_does_not_capture_another_task_write(kind):
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        entered_transaction = asyncio.Event()
+        release_transaction = asyncio.Event()
+
+        async def rollback_after_other_task_writes():
+            with pytest.raises(RuntimeError, match="rollback outer transaction"):
+                async with db.transaction():
+                    await repo.create(_u("tx-owner", "tx-owner"))
+                    entered_transaction.set()
+                    await release_transaction.wait()
+                    raise RuntimeError("rollback outer transaction")
+
+        transaction_task = asyncio.create_task(rollback_after_other_task_writes())
+        await entered_transaction.wait()
+        other_task = asyncio.create_task(repo.create(_u("tx-other", "tx-other")))
+        if kind == "sqlite":
+            await asyncio.sleep(0)
+            assert not other_task.done()
+            release_transaction.set()
+            created = await other_task
+        else:
+            created = await other_task
+            release_transaction.set()
+
+        await transaction_task
+        assert created.id == "tx-other"
+        assert await repo.exists(User.username == "tx-owner") is False
+        assert await repo.exists(User.username == "tx-other") is True
+    finally:
+        await cleanup(db)
 
 
 @pytest.mark.asyncio

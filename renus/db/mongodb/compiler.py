@@ -661,10 +661,14 @@ class MongoCompiler:
 
     def _path_str(self, p: Path) -> str:
         parts = list(p.parts)
-
         meta = getattr(p.model, "__db_metadata__", None)
-        if meta and meta.primary_key_field == "id" and parts == ["id"]:
-            return "_id"
+        if meta and parts:
+            if parts[0] == meta.primary_key_field == "id":
+                parts[0] = "_id"
+            else:
+                field_meta = meta.fields.get(parts[0])
+                if field_meta is not None:
+                    parts[0] = field_meta.column_name
         return ".".join(parts)
 
     def _compile_having(self, conditions: tuple[Any, ...], aggregates: tuple[Any, ...]) -> dict[str, Any]:
@@ -920,10 +924,12 @@ class MongoCompiler:
     ) -> dict[str, Any]:
         mapped: dict[str, Any] = {}
         for k, v in doc.items():
+            field_meta = meta.fields.get(k) if meta is not None else None
             if k == "id" and (not meta or meta.primary_key_field == "id") and "_id" not in doc:
-                mapped["_id"] = self.dialect.encode_value(v)
+                mapped["_id"] = self.dialect.encode_value(v, field_meta)
             else:
-                mapped[k] = self.dialect.encode_value(v)
+                column = field_meta.column_name if field_meta is not None else k
+                mapped[column] = self.dialect.encode_value(v, field_meta)
         return mapped
 
     def _combine_filter_parts(self, parts: list[dict[str, Any]]) -> dict[str, Any]:

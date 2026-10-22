@@ -54,9 +54,15 @@ class SQLMutationCompiler:
         field_meta = meta.fields.get(name) if meta is not None else None
         return self.dialect.encode_value(value, field_meta)
 
+    def _column_name(self, meta: Any, name: str) -> str:
+        field_meta = meta.fields.get(name) if meta is not None else None
+        return field_meta.column_name if field_meta is not None else name
+
     def _compile_insert(self, table: str, m: Insert, meta: Any = None) -> SQLCompiled:
         cols = list(m.values.keys())
-        col_names = ", ".join(self.dialect.quote(c) for c in cols)
+        col_names = ", ".join(
+            self.dialect.quote(self._column_name(meta, c)) for c in cols
+        )
         val_placeholders = self.dialect.placeholders(len(cols))
         sql = f"INSERT INTO {table} ({col_names}) VALUES ({val_placeholders})"
         params = [self._encode_field_value(meta, c, m.values[c]) for c in cols]
@@ -66,8 +72,12 @@ class SQLMutationCompiler:
         if not m.records:
             return SQLCompiled("", (), meta=meta)
 
-        cols = list(m.records[0].keys())
-        col_names = ", ".join(self.dialect.quote(c) for c in cols)
+        cols = list(m.records[0])
+        if any(set(record) != set(cols) for record in m.records[1:]):
+            raise ValueError("InsertMany records must have identical fields")
+        col_names = ", ".join(
+            self.dialect.quote(self._column_name(meta, c)) for c in cols
+        )
         single_row_placeholders = f"({self.dialect.placeholders(len(cols))})"
         all_placeholders = ", ".join(single_row_placeholders for _ in m.records)
 
@@ -82,7 +92,8 @@ class SQLMutationCompiler:
 
     def _compile_update(self, table: str, m: Update | UpdateMany, meta: Any = None) -> SQLCompiled:
         set_clauses = [
-            f"{self.dialect.quote(k)} = {self.dialect.placeholder}" for k in m.values
+            f"{self.dialect.quote(self._column_name(meta, k))} = {self.dialect.placeholder}"
+            for k in m.values
         ]
         params: list[Any] = [
             self._encode_field_value(meta, name, value)

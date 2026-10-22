@@ -12,6 +12,7 @@ from renus.db import (
 
     Field,
     Insert,
+    InsertMany,
     Max,
     Min,
     MutationResult,
@@ -360,3 +361,56 @@ async def test_native_physical_schema_and_stored_rows():
     assert emp["address"] == '{"street": "1 Main", "city": "Oslo"}'
 
     await db.disconnect()
+
+@pytest.mark.asyncio
+async def test_sql_insert_many_batches_records_by_field_shape():
+    class BatchRecord(Model):
+        id: int = Field(
+            database=DatabaseField(primary_key=True, generated=True, auto_inc=True)
+        )
+        name: str
+        note: str |None = Field(
+            default=None,database=DatabaseField(generated=True)
+        )
+
+    adapter = SQLiteAdapter({"database": ":memory:"})
+    db = Database(adapter)
+    await db.connect()
+    await db.create_schema([BatchRecord])
+    try:
+        adapter = db.adapter("primary")
+        original_execute_mutation = adapter.execute_mutation
+        insert_batches: list[InsertMany] = []
+        top_level_insert_seen = False
+
+        async def track_insert_many(compiled):
+            nonlocal top_level_insert_seen
+            if isinstance(compiled, InsertMany):
+                if top_level_insert_seen:
+                    insert_batches.append(compiled)
+                else:
+                    top_level_insert_seen = True
+            return await original_execute_mutation(compiled)
+
+        adapter.execute_mutation = track_insert_many
+        repo = db.repository(BatchRecord)
+        created = await repo.create_many(
+            [
+                BatchRecord(name="first", note="included"),
+                BatchRecord(name="second", note="included"),
+                BatchRecord(name="third"),
+            ]
+        )
+
+        assert [row.id for row in created] == [1, 2, 3]
+        assert sorted(len(batch.records) for batch in insert_batches) == [1, 2]
+        await repo.create(BatchRecord(name="explicit null", note=None))
+        loaded = await repo.query().order_by(BatchRecord.id.asc()).all()
+        assert [(row.name, row.note) for row in loaded] == [
+            ("first", "included"),
+            ("second", "included"),
+            ("third", None),
+            ("explicit null", None),
+        ]
+    finally:
+        await db.disconnect()

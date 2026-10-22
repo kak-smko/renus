@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import sqlite3
+from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from types import TracebackType
 from typing import Any, ClassVar, Self
@@ -37,7 +38,12 @@ CONNECT_RETRY_DELAY = 0.5
 class SQLiteTransactionContext(TransactionContext):
     """Async context manager wrapping a SQLite connection transaction."""
 
-    def __init__(self, conn: sqlite3.Connection, lock: asyncio.Lock) -> None:
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        lock: asyncio.Lock,
+        transaction_lock: asyncio.Lock,
+    ) -> None:
         """Wrap a SQLite connection for transactional use.
 
         Parameters
@@ -49,13 +55,22 @@ class SQLiteTransactionContext(TransactionContext):
         """
         self._conn = conn
         self._lock = lock
+        self._transaction_lock = transaction_lock
+        self._gate_acquired = False
         self._active = False
 
     async def __aenter__(self) -> Self:
-        async with self._lock:
-            await asyncio.to_thread(self._conn.execute, "BEGIN;")
-            self._active = True
-        return self
+        await self._transaction_lock.acquire()
+        self._gate_acquired = True
+        try:
+            async with self._lock:
+                await asyncio.to_thread(self._conn.execute, "BEGIN;")
+                self._active = True
+            return self
+        except BaseException:
+            self._transaction_lock.release()
+            self._gate_acquired = False
+            raise
 
     async def __aexit__(
         self,
@@ -63,11 +78,16 @@ class SQLiteTransactionContext(TransactionContext):
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> bool:
-        if self._active:
-            if exc is not None:
-                await self.rollback()
-            else:
-                await self.commit()
+        try:
+            if self._active:
+                if exc is not None:
+                    await self.rollback()
+                else:
+                    await self.commit()
+        finally:
+            if self._gate_acquired:
+                self._transaction_lock.release()
+                self._gate_acquired = False
         return False
 
     async def commit(self) -> None:
@@ -102,10 +122,19 @@ class SQLiteAdapter(SQLAdapter):
         self.mutation_compiler = SQLMutationCompiler(self.dialect)
         self._sqlite_db: sqlite3.Connection | None = None
         self._lock = asyncio.Lock()
-        self._tx_session: Any = None
+        self._transaction_lock = asyncio.Lock()
+        self._initialize_transaction_state()
 
     def _normalize_param(self, p: Any) -> Any:
         return self.dialect.encode_value(p)
+
+    @asynccontextmanager
+    async def _transaction_guard(self):
+        if self._in_active_transaction():
+            yield
+        else:
+            async with self._transaction_lock:
+                yield
 
     async def connect(self) -> None:
         """Establish a connection to the database."""
@@ -192,8 +221,9 @@ class SQLiteAdapter(SQLAdapter):
         if self._sqlite_db is None:
             return False
         try:
-            async with self._lock:
-                await asyncio.to_thread(self._sqlite_db.execute, "SELECT 1;")
+            async with self._transaction_guard():
+                async with self._lock:
+                    await asyncio.to_thread(self._sqlite_db.execute, "SELECT 1;")
             return True
         except Exception:
             return False
@@ -211,7 +241,11 @@ class SQLiteAdapter(SQLAdapter):
         async def _tx_generator() -> AsyncIterator[TransactionContext]:
             if adapter_self._in_active_transaction():
                 raise ConfigurationError("Nested transactions are not supported")
-            ctx = SQLiteTransactionContext(conn, adapter_self._lock)
+            ctx = SQLiteTransactionContext(
+                conn,
+                adapter_self._lock,
+                adapter_self._transaction_lock,
+            )
             adapter_self._tx_session = True
             try:
                 yield ctx
@@ -233,13 +267,14 @@ class SQLiteAdapter(SQLAdapter):
 
         params = tuple(self._normalize_param(p) for p in sql_compiled.params)
         try:
-            async with self._lock:
-                cursor = await asyncio.to_thread(
-                    self._sqlite_db.execute,
-                    sql_compiled.sql,
-                    params,
-                )
-                rows = await asyncio.to_thread(cursor.fetchall)
+            async with self._transaction_guard():
+                async with self._lock:
+                    cursor = await asyncio.to_thread(
+                        self._sqlite_db.execute,
+                        sql_compiled.sql,
+                        params,
+                    )
+                    rows = await asyncio.to_thread(cursor.fetchall)
             if getattr(sql_compiled, "joined", ()):
                 return self._decode_joined_rows(rows, sql_compiled)
             meta = getattr(sql_compiled, "meta", None)
@@ -256,20 +291,23 @@ class SQLiteAdapter(SQLAdapter):
         assert self._sqlite_db is not None
 
         if isinstance(compiled, MutationAST):
+            if self._needs_insert_many_shape_grouping(compiled):
+                return await self._execute_insert_many_by_shape(compiled)
             sql_compiled: SQLCompiled = self.compile_mutation(compiled)
         else:
             sql_compiled = compiled
 
         params = tuple(self._normalize_param(p) for p in sql_compiled.params)
         try:
-            async with self._lock:
-                cursor = await asyncio.to_thread(
-                    self._sqlite_db.execute,
-                    sql_compiled.sql,
-                    params,
-                )
-                if not self._in_active_transaction():
-                    await asyncio.to_thread(self._sqlite_db.commit)
+            async with self._transaction_guard():
+                async with self._lock:
+                    cursor = await asyncio.to_thread(
+                        self._sqlite_db.execute,
+                        sql_compiled.sql,
+                        params,
+                    )
+                    if not self._in_active_transaction():
+                        await asyncio.to_thread(self._sqlite_db.commit)
 
             rows_affected = cursor.rowcount if cursor.rowcount >= 0 else 1
             last_id = cursor.lastrowid if cursor.lastrowid else None
@@ -315,13 +353,14 @@ class SQLiteAdapter(SQLAdapter):
         p_list = params if isinstance(params, (list, tuple)) else (params,)
         normalized_params = tuple(self._normalize_param(p) for p in p_list)
         try:
-            async with self._lock:
-                cursor = await asyncio.to_thread(
-                    self._sqlite_db.execute,
-                    sql,
-                    normalized_params,
-                )
-                rows = await asyncio.to_thread(cursor.fetchall)
+            async with self._transaction_guard():
+                async with self._lock:
+                    cursor = await asyncio.to_thread(
+                        self._sqlite_db.execute,
+                        sql,
+                        normalized_params,
+                    )
+                    rows = await asyncio.to_thread(cursor.fetchall)
             return [dict(r) for r in rows]
         except sqlite3.DatabaseError as e:
             raise DatabaseError(f"SQLite raw query error: {e}") from e
@@ -339,14 +378,15 @@ class SQLiteAdapter(SQLAdapter):
         p_list = params if isinstance(params, (list, tuple)) else (params,)
         normalized_params = tuple(self._normalize_param(p) for p in p_list)
         try:
-            async with self._lock:
-                cursor = await asyncio.to_thread(
-                    self._sqlite_db.execute,
-                    sql,
-                    normalized_params,
-                )
-                if not self._in_active_transaction():
-                    await asyncio.to_thread(self._sqlite_db.commit)
+            async with self._transaction_guard():
+                async with self._lock:
+                    cursor = await asyncio.to_thread(
+                        self._sqlite_db.execute,
+                        sql,
+                        normalized_params,
+                    )
+                    if not self._in_active_transaction():
+                        await asyncio.to_thread(self._sqlite_db.commit)
 
             rows_affected = cursor.rowcount if cursor.rowcount >= 0 else 1
             last_id = cursor.lastrowid if cursor.lastrowid else None

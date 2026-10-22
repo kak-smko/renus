@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
+from contextvars import ContextVar
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from types import TracebackType
@@ -90,8 +92,44 @@ class AsyncDatabaseAdapter(ABC):
         """Return an async iterator yielding new transaction contexts."""
         pass
 
+    def _initialize_transaction_state(self) -> None:
+        self._transaction_state: ContextVar[tuple[asyncio.Task[Any] | None, Any] | None] = ContextVar(
+            f"renus_transaction_{id(self)}",
+            default=None,
+        )
+
+    @property
+    def _tx_session(self) -> Any:
+        state = getattr(self, "_transaction_state", None)
+        if state is None:
+            return None
+        owner_and_session = state.get()
+        if owner_and_session is None:
+            return None
+        owner, session = owner_and_session
+        try:
+            current_task = asyncio.current_task()
+        except RuntimeError:
+            current_task = None
+        return session if owner is current_task else None
+
+    @_tx_session.setter
+    def _tx_session(self, session: Any) -> None:
+        state = getattr(self, "_transaction_state", None)
+        if state is None:
+            self._initialize_transaction_state()
+            state = self._transaction_state
+        if session is None:
+            state.set(None)
+            return
+        try:
+            owner = asyncio.current_task()
+        except RuntimeError:
+            owner = None
+        state.set((owner, session))
+
     def _in_active_transaction(self) -> bool:
-        return getattr(self, "_tx_session", None) is not None
+        return self._tx_session is not None
 
     @abstractmethod
     async def health_check(self) -> bool:

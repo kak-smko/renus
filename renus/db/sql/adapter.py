@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any
+from typing import Any, ClassVar
 
-from renus.db.core.adapter import AsyncDatabaseAdapter
+from renus.db.core.adapter import AsyncDatabaseAdapter, MutationResult
 from renus.db.core.backup import DEFAULT_PAGE_SIZE, BackupFileWriter, load_rows_pages
-from renus.db.mutation.ast import MutationAST
+from renus.db.mutation.ast import InsertMany, MutationAST
 from renus.db.query.ast import QueryAST
 
 from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
 from renus.db.sql.dialect.base import SQLDialect
 from renus.db.sql.mutation import SQLMutationCompiler
+from renus.db.transaction.core import Transaction
+from renus.db.core.exceptions import IntegrityError
 from renus.util import to_plural_lower
 
 
@@ -29,6 +31,71 @@ class SQLAdapter(AsyncDatabaseAdapter):
     def compile_mutation(self, ast: MutationAST) -> SQLCompiled:
         """Compile a mutation AST into SQL."""
         return self.mutation_compiler.compile(ast)
+
+    @staticmethod
+    def _needs_insert_many_shape_grouping(ast: MutationAST) -> bool:
+        if not isinstance(ast, InsertMany) or not ast.records:
+            return False
+        first_fields = set(ast.records[0])
+        if any(set(record) != first_fields for record in ast.records[1:]):
+            return True
+        meta = getattr(ast.source, "__db_metadata__", None)
+        if meta is None or not meta.identity.fields:
+            return False
+        pk = meta.primary_key_field
+        pk_meta = meta.fields.get(pk)
+        if pk_meta is None or not pk_meta.database.auto_inc:
+            return False
+        has_explicit_id = [record.get(pk) is not None for record in ast.records]
+        return any(has_explicit_id) and not all(has_explicit_id)
+
+    async def _execute_insert_many_by_shape(self, ast: InsertMany) -> MutationResult:
+        """Batch records with matching columns into atomic multi-row inserts."""
+        meta = getattr(ast.source, "__db_metadata__", None)
+        pk_name = meta.primary_key_field if meta and meta.identity.fields else None
+        groups: dict[frozenset[str], list[tuple[int, dict[str, Any]]]] = {}
+        for index, record in enumerate(ast.records):
+            groups.setdefault(frozenset(record), []).append((index, record))
+
+        generated_ids: list[Any] = [None] * len(ast.records)
+
+        async def insert_groups() -> None:
+            for records in groups.values():
+                batch = InsertMany(ast.source, [record for _, record in records])
+                result = await self.execute_mutation(batch)
+                if result.rows_affected != len(records):
+                    raise IntegrityError(
+                        "Bulk insert did not insert every requested record"
+                    )
+
+                returned_ids = (result.generated or {}).get("ids")
+                if pk_name:
+                    explicit_ids = [record.get(pk_name) for _, record in records]
+                    if all(value is not None for value in explicit_ids):
+                        returned_ids = explicit_ids
+                    elif returned_ids is None and all(
+                        value is None for value in explicit_ids
+                    ):
+                        last_id = getattr(result.last_id, "value", result.last_id)
+                        if last_id is not None:
+                            pk_meta = meta.fields.get(pk_name)
+                            first_id = last_id - len(records) + 1
+                            returned_ids = [
+                                self.dialect.decode_value(first_id + offset, pk_meta)
+                                for offset in range(len(records))
+                            ]
+                if returned_ids is not None:
+                    for (index, _), value in zip(records, returned_ids):
+                        generated_ids[index] = value
+
+        if self._in_active_transaction():
+            await insert_groups()
+        else:
+            async with Transaction(self):
+                await insert_groups()
+
+        generated = {"ids": generated_ids} if pk_name else None
+        return MutationResult(rows_affected=len(ast.records), generated=generated)
 
     def encode_value(self, value: Any, field_meta: Any = None) -> Any:
         return self.dialect.encode_value(value, field_meta)
