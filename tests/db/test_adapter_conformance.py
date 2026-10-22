@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
+from bson.objectid import ObjectId
 import pytest
 from renus.datastructures.id import ID
 from renus.config import Config
@@ -4843,5 +4844,104 @@ async def test_search_matches_values_in_embedded_dictionary_paths(kind):
             "1", "3"
         ]
         assert await matching_ids(~(code == "bravo")) == ["1", "3", "4"]
+    finally:
+        await cleanup(database)
+
+
+class TableUser(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    name: str
+    roles =EmbeddedMany(list)
+    
+class TableUser2(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    name: str
+    roles :list[ID]
+    
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_list_id(kind):
+    database = await database_for(kind, [TableUser,TableUser2])
+    
+    try:
+        repository = database.repository(TableUser)
+        role_id=ID(1)
+        with pytest.raises(TypeError,
+            match=r"Embedded dict/list values must be strings, got ID:"):
+            await repository.create(
+            TableUser(
+                id="1",
+                name="first",
+                roles=[role_id]
+            )
+        )
+
+        repository = database.repository(TableUser2)
+        with pytest.raises(TypeError,
+            match=r"Embedded dict/list values must be strings, got ID:"):
+            await repository.create(
+            TableUser2(
+                id="1",
+                name="first",
+                roles=[role_id]
+            )
+        )
+        
+    finally:
+        await cleanup(database)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_list_str(kind):
+    class Order(Model):
+        id: int
+        items: list
+
+    order = Order(
+        id=100,
+        items=["q","r",3],
+    )
+    database = await database_for(kind, [Order])
+    
+    try:
+        repository = database.repository(Order)
+        with pytest.raises(TypeError,
+            match=r"Embedded dict/list values must be strings, got int: 3"):
+            await repository.create(
+                order
+        )
+
+        
+    finally:
+        await cleanup(database)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_list_item(kind):
+    class Item(Model):
+        name: str
+        quantity: int
+
+    class Order(Model):
+        id: int
+        items: list[Item]
+
+    order = Order(
+        id=100,
+        items=[{"name": "Apple", "quantity": 3}, {"name": "Banana", "quantity": 5}],
+    )
+    database = await database_for(kind, [Order,Item])
+    
+    try:
+        repository = database.repository(Order)
+        await repository.create(order)
+
+        results = await repository.where(
+            Order.id==100
+        ).include(Order.items).first()
+        assert len(results.items)==2
+        assert results.items[0].name=="Apple"
+        
     finally:
         await cleanup(database)

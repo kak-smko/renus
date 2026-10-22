@@ -114,7 +114,7 @@ def _write_markdown(
     concurrency: int,
 ) -> str:
     lines: list[str] = []
-    lines.append("# Cross-Framework Benchmark Results")
+    lines.append("### Cross-Framework Benchmark Results")
     lines.append("")
     lines.append(
         "Real HTTP/1.1 keep-alive load test of `renus` vs other Python web "
@@ -131,7 +131,7 @@ def _write_markdown(
                  "median before drawing conclusions.")
     lines.append("")
     for ep in enum_eps:
-        lines.append(f"## `{ep}` (`{_endpoint_path('', ep)}`)")
+        lines.append(f"#### `{ep}` (`{_endpoint_path('', ep)}`)")
         lines.append("")
         lines.append("| Framework | req/s | p50 (ms) | p90 (ms) | p99 (ms) | max (ms) |")
         lines.append("|-----------|------:|---------:|---------:|---------:|---------:|")

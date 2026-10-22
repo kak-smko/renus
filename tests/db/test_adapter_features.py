@@ -168,4 +168,3 @@ async def test_query_after_connection_loss_reconnects(kind, tmp_path):
     finally:
         await cleanup(db)
 
-

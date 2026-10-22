@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from datetime import date, datetime, timezone
-from typing import Any, ClassVar
+from typing import Any, ClassVar, get_args, get_origin
 
 from renus.db.core.exceptions import ValidationError
 from renus.db.core.state import IdentityKind, Lifecycle
@@ -25,20 +25,45 @@ from renus.db.relationships import EmbeddedMany, EmbeddedOne, Relationship
 _MODEL_REGISTRY: dict[str, type] = {}
 
 def _mapping_value_kind(annotation: Any) -> str | None:
-    try:
-        _nullable, base = is_optional_type(annotation)
-    except Exception:
-        return None
-    if base is dict:
-        return "Embedded"
-    if base is list:
-        return "EmbeddedMany"
+    _nullable, base = is_optional_type(annotation)
     if isinstance(base, str):
-        stripped = base.strip().lower()
-        if stripped == "dict":
+        name = base.strip().lower().split("[", 1)[0].strip()
+        if name == "dict":
             return "Embedded"
-        if stripped == "list":
+        if name == "list":
             return "EmbeddedMany"
+        return None
+    origin = get_origin(base) or base
+    if origin is dict:
+        return "Embedded"
+    if origin is list:
+        return "EmbeddedMany"
+    return None
+
+
+def _embedded_many_target(annotation: Any) -> type | None:
+    """Resolve the model element type from a ``list[Model]`` annotation."""
+    _nullable, base = is_optional_type(annotation)
+    if isinstance(base, str):
+        text = base.strip()
+        if not text.lower().startswith("list[") or not text.endswith("]"):
+            return None
+        element = text[5:-1].strip().strip("\\\"'")
+        _element_nullable, element = is_optional_type(element)
+        if isinstance(element, str):
+            return FieldInfo._resolve_model_name(element.strip().strip("\\\"'"), Model)
+        return None
+
+    if get_origin(base) is not list:
+        return None
+    args = get_args(base)
+    if not args:
+        return None
+    _element_nullable, element = is_optional_type(args[0])
+    if isinstance(element, type) and getattr(element, "_is_model_class", False):
+        return element
+    if isinstance(element, str):
+        return FieldInfo._resolve_model_name(element.strip().strip("\\\"'"), Model)
     return None
 
 class ModelMeta(type):
@@ -125,10 +150,15 @@ class ModelMeta(type):
             if rel_kind is None:
                 continue
 
+            embedded_many_target = (
+                _embedded_many_target(field_type)
+                if rel_kind == "EmbeddedMany"
+                else None
+            )
             rel = (
                 EmbeddedOne(dict)
                 if rel_kind == "Embedded"
-                else EmbeddedMany(list)
+                else EmbeddedMany(embedded_many_target or list)
             )
             all_relationships[fname] = rel
             declared_relationships[fname] = rel

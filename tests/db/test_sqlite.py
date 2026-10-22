@@ -33,6 +33,17 @@ class GeoAddress(Model):
     street: str
     city: str
 
+
+class InferredOrderItem(Model):
+    name: str
+    quantity: int
+
+
+class InferredOrder(Model):
+    id: int = Field(database=DatabaseField(primary_key=True))
+    items: list[InferredOrderItem]
+
+
 class Employee(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
     name: str = Field(database=DatabaseField(unique=True))
@@ -286,6 +297,28 @@ async def test_sqlite_raw_sql_via_native_connection():
     conn.execute("VACUUM;")
 
     await db.disconnect()
+
+@pytest.mark.asyncio
+async def test_inferred_embedded_many_sqlite_roundtrip():
+    db = Database(SQLiteAdapter({"database": ":memory:"}))
+    await db.connect()
+    try:
+        await db.create_schema([InferredOrder])
+        repo = db.repository(InferredOrder)
+        created = await repo.create(
+            InferredOrder(id=1, items=[{"name": "Gadget", "quantity": 2}])
+        )
+        assert created.id == 1
+
+        loaded = await repo.query().include(InferredOrder.items).first()
+        assert loaded is not None
+        assert len(loaded.items) == 1
+        assert isinstance(loaded.items[0], InferredOrderItem)
+        assert loaded.items[0].name == "Gadget"
+        assert loaded.items[0].quantity == 2
+    finally:
+        await db.disconnect()
+
 
 @pytest.mark.asyncio
 async def test_native_physical_schema_and_stored_rows():

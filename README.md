@@ -7,9 +7,6 @@
 **An async-first Python ASGI framework with routing, WebSockets, ORM, caching,
 scheduling, and CLI tools in one small core.**
 
-- **Current version:** 3.0.2
-- **Python:** 3.11+
-- **License:** BSD-3-Clause
 - **Documentation:** [codenus.com/renus](https://codenus.com/renus)
 - **Source:** [github.com/kak-smko/renus](https://github.com/kak-smko/renus)
 

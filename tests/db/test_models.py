@@ -346,6 +346,11 @@ class Customer(Model):
     posts: list[Post] = OneToMany(Post, foreign_key="user_id")
     roles: list[Role] = ManyToMany(Role, through="customer_roles")
 
+
+class InferredEmbeddedOrder(Model):
+    id: int = Field(database=DatabaseField(primary_key=True))
+    items: list[OrderItem]
+
 def test_relationship_metadata():
     meta = Customer.metadata()
     assert len(meta.relationships) == 5
@@ -401,6 +406,21 @@ def test_reference_and_many_to_one_and_embedded_one():
     r_badge = meta.relationships["badge"]
     assert r_badge.kind == RelationshipKind.EMBEDDED_ONE
     assert r_badge.is_embedded is True
+
+def test_annotated_model_lists_are_inferred_as_embedded_many():
+    relationship = InferredEmbeddedOrder.metadata().relationships["items"]
+    assert relationship.kind == RelationshipKind.EMBEDDED_MANY
+    assert relationship.target is OrderItem
+    assert InferredEmbeddedOrder._model_fields["items"].model_cls is OrderItem
+
+    order = InferredEmbeddedOrder(
+        id=1,
+        items=[{"product_name": "Gadget", "quantity": 2, "price": 9.99}],
+    )
+    assert isinstance(order.items[0], OrderItem)
+    assert order.items[0].quantity == 2
+    assert order.schema()["properties"]["items"]["items"]["title"] == "OrderItem"
+
 
 def test_embedded_model_instance_interaction():
     cust = Customer(
@@ -474,18 +494,6 @@ def test_declarative_indexes():
     assert idx.name == "idx_dept_code"
 
 
-
-def test_relationship_forward_reference_resolution():
-    class ParentModel(Model):
-        id: int = Field(database=DatabaseField(primary_key=True))
-        children: list["ChildModel"]
-
-    class ChildModel(Model):
-        id: int = Field(database=DatabaseField(primary_key=True))
-        parent_id: int
-
-    meta = ParentModel.metadata()
-    assert "children" not in meta.relationships
 
 def test_soft_delete_disabled_error():
     class HardDeleteOnly(Model):
