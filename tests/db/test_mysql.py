@@ -29,6 +29,7 @@ from renus.db.sql import (
 )
 from renus.db.mysql.dialect import MySQLDialect
 from renus.db.validation import MaxLen
+from tests.db import _conformance
 
 
 class Customer(Model):
@@ -314,4 +315,117 @@ async def test_mysql_error_translation():
     mock_cursor.execute = AsyncMock(side_effect=Exception("Table 'db.missing' doesn't exist"))
     with pytest.raises(DatabaseError, match="MySQL mutation error"):
         await adapter.execute_mutation(Insert(Customer, values={"username": "test"}))
+
+
+@pytest.mark.asyncio
+async def test_conformance_mysql_adapter_provisions_and_drops_database(monkeypatch):
+    events = []
+
+    class Cursor:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc_info):
+            return None
+
+        async def execute(self, sql):
+            events.append(sql)
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    class Pool:
+        async def acquire(self):
+            return Connection()
+
+        def release(self, conn):
+            events.append("release")
+
+        def close(self):
+            events.append("close")
+
+        async def wait_closed(self):
+            events.append("wait_closed")
+
+    pool = Pool()
+
+    async def make_pool(config, *, connect_timeout=None):
+        return pool
+
+    monkeypatch.setattr(_conformance, "_mysql_admin_pool", make_pool)
+    adapter = _conformance._ConformanceMySQLAdapter(
+        {"database": "renus_test_123", "host": "localhost"}
+    )
+
+    async def base_connect():
+        events.append("connect")
+        adapter._mysql_db = object()
+
+    async def base_disconnect():
+        adapter._mysql_db = None
+        events.append("disconnect")
+
+    monkeypatch.setattr(MySQLAdapter, "connect", lambda self: base_connect())
+    monkeypatch.setattr(MySQLAdapter, "disconnect", lambda self: base_disconnect())
+
+    await adapter.connect()
+    assert events[0] == "CREATE DATABASE IF NOT EXISTS `renus_test_123`"
+    assert events[1] == "release"
+    assert events[-1] == "connect"
+
+    await _conformance._drop_mysql_database(adapter)
+    assert "DROP DATABASE IF EXISTS `renus_test_123`" in events
+    assert events[-3:] == ["release", "close", "wait_closed"]
+
+    await adapter.disconnect()
+    assert events[-1] == "disconnect"
+
+
+def test_mysql_readiness_probe_requires_create_and_drop_privileges(monkeypatch):
+    statements = []
+
+    class Cursor:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc_info):
+            return None
+
+        async def execute(self, sql):
+            statements.append(sql)
+            if sql.startswith("CREATE DATABASE"):
+                raise PermissionError("CREATE DATABASE denied")
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    class Pool:
+        async def acquire(self):
+            return Connection()
+
+        def release(self, conn):
+            pass
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            pass
+
+    async def make_pool(config, *, connect_timeout=None):
+        return Pool()
+
+    monkeypatch.setattr(_conformance, "_mysql_admin_pool", make_pool)
+
+    assert _conformance._mysql_ready() is False
+    assert len(statements) == 1
+    assert statements[0].startswith("CREATE DATABASE `renus_conf_")
+
+
+def test_mysql_database_identifier_rejects_sql_fragments():
+    assert _conformance._mysql_identifier("safe_db_1") == "`safe_db_1`"
+    with pytest.raises(ValueError):
+        _conformance._mysql_identifier("unsafe`; DROP DATABASE mysql; --")
 

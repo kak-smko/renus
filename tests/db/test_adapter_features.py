@@ -23,6 +23,7 @@ from renus.db.sqlite import SQLiteAdapter
 from tests.db._conformance import (
     adapter_for,
     cleanup,
+    cleanup_adapter,
     conformance_tests,
     database_for,
 )
@@ -74,7 +75,7 @@ async def test_direct_create_and_drop_table(kind):
         await adapter.drop_table("direct_ddl")
         assert "direct_ddl" not in {name.lower() for name in await adapter.tables()}
     finally:
-        await adapter.disconnect()
+        await cleanup_adapter(adapter)
 
 
 @pytest.mark.asyncio
@@ -103,7 +104,7 @@ async def test_direct_create_and_drop_index(kind):
         await repo.create(DirectIndexRecord(id="two", email="same@example.com"))
         await adapter.drop_table("direct_indexes")
     finally:
-        await adapter.disconnect()
+        await cleanup_adapter(adapter)
 
 
 @pytest.mark.asyncio

@@ -402,13 +402,13 @@ def _mtm_pair(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_lifecycle_connect_health_disconnect(kind):
-    from tests.db._conformance import adapter_for
+    from tests.db._conformance import adapter_for, cleanup_adapter
 
     adapter = adapter_for(kind)
     assert await adapter.health_check() is False
     await adapter.connect()
     assert await adapter.health_check() is True
-    await adapter.disconnect()
+    await cleanup_adapter(adapter)
     assert await adapter.health_check() is False
 
 
@@ -3601,13 +3601,16 @@ async def test_duplicate_key_translation(kind):
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_connection_pool_connect_is_idempotent(kind):
     """Calling ``connect()`` twice must be a safe no-op on an open pool."""
-    from tests.db._conformance import adapter_for
+    from tests.db._conformance import adapter_for, cleanup_adapter
 
     adapter = adapter_for(kind)
     await adapter.connect()
     await adapter.connect()
     assert await adapter.health_check() is True
-    await adapter.disconnect()
+    if kind in {"mysql", "mongodb"}:
+        await cleanup_adapter(adapter)
+    else:
+        await adapter.disconnect()
     assert await adapter.health_check() is False
 
 
@@ -3615,7 +3618,7 @@ async def test_connection_pool_connect_is_idempotent(kind):
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_connection_pool_reconnect_after_disconnect(kind):
     """A pool torn down by ``disconnect()`` can be re-established by ``connect()``."""
-    from tests.db._conformance import adapter_for
+    from tests.db._conformance import adapter_for, cleanup_adapter
 
     adapter = adapter_for(kind)
     await adapter.connect()
@@ -3625,7 +3628,10 @@ async def test_connection_pool_reconnect_after_disconnect(kind):
 
     await adapter.connect()
     assert await adapter.health_check() is True
-    await adapter.disconnect()
+    if kind in {"mysql", "mongodb"}:
+        await cleanup_adapter(adapter)
+    else:
+        await adapter.disconnect()
     assert await adapter.health_check() is False
 
 
@@ -3633,11 +3639,13 @@ async def test_connection_pool_reconnect_after_disconnect(kind):
 @pytest.mark.parametrize("kind", ADAPTERS)
 async def test_connection_pool_context_manager(kind):
     """Using ``Database`` as an async context manager releases the pool on exit."""
-    from tests.db._conformance import adapter_for
+    from tests.db._conformance import adapter_for, cleanup_adapter
 
     adapter = adapter_for(kind)
     async with Database(adapter):
         assert await adapter.health_check() is True
+    if kind in {"mysql", "mongodb"}:
+        await cleanup_adapter(adapter)
     assert await adapter.health_check() is False
 
 
