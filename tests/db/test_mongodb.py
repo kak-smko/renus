@@ -242,7 +242,52 @@ def test_mongodb_adapter_capabilities():
     adapter = MongoDBAdapter()
     assert adapter.name == "mongodb"
 
-def test_mongodb_adapter_connection_defaults():
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config", "uri", "database", "expected_options"),
+    [
+        (
+            {},
+            "mongodb://localhost:27017",
+            "db",
+            {
+                "maxPoolSize": 100,
+                "minPoolSize": 10,
+                "serverSelectionTimeoutMS": 30_000,
+                "connectTimeoutMS": 2_000,
+            },
+        ),
+        (
+            {
+                "uri": "mongodb://db.example:27018",
+                "database": "my_db",
+                "max_pool": "200",
+                "min_pool": "20",
+                "server_selection_timeout_ms": "12000",
+                "connect_timeout_ms": "2500",
+                "socket_timeout_ms": "7000",
+                "username": "tester",
+                "password": "secret",
+                "retries": 1,
+            },
+            "mongodb://db.example:27018",
+            "my_db",
+            {
+                "maxPoolSize": 200,
+                "minPoolSize": 20,
+                "serverSelectionTimeoutMS": 12_000,
+                "connectTimeoutMS": 2_500,
+                "socketTimeoutMS": 7_000,
+                "username": "tester",
+                "password": "secret",
+            },
+        ),
+    ],
+)
+async def test_mongodb_adapter_connection_options(
+    monkeypatch, config, uri, database, expected_options
+):
+    from renus.db.mongodb import adapter as mongodb_adapter_module
     from renus.db.mongodb.adapter import (
         CONNECT_RETRIES,
         DEFAULT_CONNECT_TIMEOUT_MS,
@@ -251,24 +296,30 @@ def test_mongodb_adapter_connection_defaults():
         DEFAULT_SERVER_SELECTION_TIMEOUT_MS,
     )
 
-    adapter = MongoDBAdapter()
-
     assert DEFAULT_MAX_POOL >= 50
     assert DEFAULT_MIN_POOL >= 5
     assert DEFAULT_MIN_POOL <= DEFAULT_MAX_POOL
     assert DEFAULT_SERVER_SELECTION_TIMEOUT_MS >= 10_000
+    assert DEFAULT_CONNECT_TIMEOUT_MS >= 1
     assert CONNECT_RETRIES >= 1
 
-    cfg = {
-        "uri": "mongodb://localhost:27017",
-        "database": "my_db",
-        "max_pool": 200,
-        "min_pool": 20,
-    }
-    assert cfg.get("max_pool", DEFAULT_MAX_POOL) == 200
-    assert cfg.get("min_pool", DEFAULT_MIN_POOL) == 20
-    assert cfg.get("server_selection_timeout_ms", DEFAULT_SERVER_SELECTION_TIMEOUT_MS) is not None
-    assert cfg.get("connect_timeout_ms", DEFAULT_CONNECT_TIMEOUT_MS) is not None
+    mock_db = MagicMock()
+    mock_db.command = AsyncMock(return_value={"ok": 1})
+    mock_client = MagicMock()
+    mock_client.__getitem__ = MagicMock(return_value=mock_db)
+    mock_client.close = MagicMock()
+    client_factory = MagicMock(return_value=mock_client)
+    monkeypatch.setattr(mongodb_adapter_module, "AsyncMongoClient", client_factory)
+
+    adapter = MongoDBAdapter(config)
+    await adapter.connect()
+
+    client_factory.assert_called_once_with(uri, **expected_options)
+    mock_client.__getitem__.assert_called_once_with(database)
+    mock_db.command.assert_awaited_once_with("ping")
+
+    await adapter.disconnect()
+    mock_client.close.assert_called_once_with()
 
 @pytest.mark.asyncio
 async def test_mongodb_mock_execution():
@@ -301,16 +352,30 @@ async def test_mongodb_mock_execution():
     assert await adapter.health_check() is True
 
     repo = Repository(adapter, AccountDoc)
-    rows = await adapter.execute_query(repo.query(AccountDoc.username == "alice").ast)
+    query = repo.query(AccountDoc.username == "alice")
+    compiled_query = adapter.compile_query(query.ast)
+    rows = await adapter.execute_query(query.ast)
     assert len(rows) == 1
 
     assert rows[0]["id"] == 1
     assert rows[0]["username"] == "alice"
+    mock_coll.find.assert_called_once_with(
+        compiled_query.filter,
+        projection=compiled_query.projection,
+        session=None,
+    )
+    mock_cursor.to_list.assert_awaited_once_with(length=compiled_query.limit or 5000)
 
-    res = await adapter.execute_mutation(Insert(AccountDoc, values={"username": "alice", "age": 25}))
+    insert = Insert(AccountDoc, values={"username": "alice", "age": 25})
+    collection, operation, document, extra = adapter.compile_mutation(insert)
+    res = await adapter.execute_mutation(insert)
     assert isinstance(res, MutationResult)
     assert res.rows_affected == 1
     assert res.last_id == 1
+    assert collection == "accountdocs"
+    assert operation == "insert_one"
+    mock_db.__getitem__.assert_called_with(collection)
+    mock_coll.insert_one.assert_awaited_once_with(document, session=None)
 
     raw_res = await adapter._mongo_db.command({"ping": 1})
     assert raw_res == {"ok": 1}

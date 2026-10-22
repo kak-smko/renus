@@ -3117,12 +3117,10 @@ async def test_transaction_commit_and_rollback(kind):
 
         assert await repo.exists(User.username == "txr") is False
 
-        try:
-            async with db.transaction() as tx:
+        with pytest.raises(RuntimeError, match="test"):
+            async with db.transaction():
                 await db.repository(User).create(_u("txr", "txr", age=2))
                 raise RuntimeError("test")
-        except Exception:
-            pass
         assert await repo.exists(User.username == "txr") is False
     finally:
         await cleanup(db)

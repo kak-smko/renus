@@ -116,33 +116,87 @@ def test_mysql_adapter_capabilities():
     adapter = MySQLAdapter()
     assert adapter.name == "mysql"
 
-def test_mysql_adapter_connection_defaults():
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config", "overrides"),
+    [
+        ({}, {}),
+        (
+            {
+                "host": "127.0.0.1",
+                "port": "3307",
+                "username": "tester",
+                "password": "pwd",
+                "database": "test_db",
+                "max_pool": "200",
+                "min_pool": "20",
+                "connect_timeout": "9",
+                "retries": 1,
+            },
+            {
+                "host": "127.0.0.1",
+                "port": 3307,
+                "user": "tester",
+                "password": "pwd",
+                "db": "test_db",
+                "minsize": 20,
+                "maxsize": 200,
+                "connect_timeout": 9,
+            },
+        ),
+    ],
+)
+async def test_mysql_adapter_connection_options(monkeypatch, config, overrides):
+    from renus.db.mysql import adapter as mysql_adapter_module
     from renus.db.mysql.adapter import (
         DEFAULT_MYSQL_CONNECT_TIMEOUT,
         DEFAULT_MYSQL_MAX_POOL,
         DEFAULT_MYSQL_MIN_POOL,
     )
 
-    adapter = MySQLAdapter()
-
     assert DEFAULT_MYSQL_MIN_POOL >= 1
     assert DEFAULT_MYSQL_MAX_POOL >= 50
     assert DEFAULT_MYSQL_MIN_POOL <= DEFAULT_MYSQL_MAX_POOL
     assert DEFAULT_MYSQL_CONNECT_TIMEOUT >= 1
 
-    cfg = {
-        "host": "127.0.0.1",
-        "port": 3306,
-        "username": "root",
-        "password": "pwd",
-        "database": "test_db",
-        "max_pool": 200,
-        "min_pool": 20,
-    }
-    assert cfg.get("host", "localhost") == "127.0.0.1"
-    assert cfg.get("database", cfg.get("db", "db")) == "test_db"
-    assert cfg.get("max_pool", cfg.get("maxsize", DEFAULT_MYSQL_MAX_POOL)) == 200
-    assert cfg.get("min_pool", cfg.get("minsize", DEFAULT_MYSQL_MIN_POOL)) == 20
+    create_pool = AsyncMock()
+    monkeypatch.setattr(
+        mysql_adapter_module,
+        "aiomysql",
+        MagicMock(create_pool=create_pool),
+    )
+
+    pool = MagicMock()
+    conn = MagicMock()
+    cursor = MagicMock()
+    cursor.execute = AsyncMock()
+    cursor.fetchone = AsyncMock(return_value=(1,))
+    cursor.__aenter__ = AsyncMock(return_value=cursor)
+    cursor.__aexit__ = AsyncMock(return_value=None)
+    conn.cursor = MagicMock(return_value=cursor)
+    pool.acquire = AsyncMock(return_value=conn)
+    pool.release = MagicMock()
+    pool.close = MagicMock()
+    pool.wait_closed = AsyncMock()
+    create_pool.return_value = pool
+
+    adapter = MySQLAdapter(config)
+    await adapter.connect()
+
+    create_pool.assert_awaited_once_with(
+        host=overrides.get("host", "localhost"),
+        port=overrides.get("port", 3306),
+        user=overrides.get("user", "root"),
+        password=overrides.get("password", ""),
+        db=overrides.get("db", "db"),
+        minsize=overrides.get("minsize", DEFAULT_MYSQL_MIN_POOL),
+        maxsize=overrides.get("maxsize", DEFAULT_MYSQL_MAX_POOL),
+        autocommit=False,
+        connect_timeout=overrides.get(
+            "connect_timeout", DEFAULT_MYSQL_CONNECT_TIMEOUT
+        ),
+    )
+    await adapter.disconnect()
 
 @pytest.mark.asyncio
 async def test_mysql_mock_execution():
@@ -176,14 +230,26 @@ async def test_mysql_mock_execution():
     assert await adapter.health_check() is True
 
     repo = Repository(adapter, Customer)
-    rows = await adapter.execute_query(repo.query(Customer.username == "alice").ast)
+    query = repo.query(Customer.username == "alice")
+    compiled_query = adapter.compile_query(query.ast)
+    rows = await adapter.execute_query(query.ast)
     assert len(rows) == 1
     assert rows[0]["username"] == "alice"
+    assert mock_cursor.execute.await_args_list[-1].args == (
+        compiled_query.sql,
+        compiled_query.params,
+    )
 
-    res = await adapter.execute_mutation(Insert(Customer, values={"username": "alice", "balance": 100.0}))
+    insert = Insert(Customer, values={"username": "alice", "balance": 100.0})
+    compiled_insert = adapter.compile_mutation(insert)
+    res = await adapter.execute_mutation(insert)
     assert isinstance(res, MutationResult)
     assert res.rows_affected == 1
     assert res.last_id == 1
+    assert mock_cursor.execute.await_args_list[-1].args == (
+        compiled_insert.sql,
+        compiled_insert.params,
+    )
 
     mysql_conn = await adapter._mysql_db.acquire()
     async with mysql_conn.cursor() as cur:
