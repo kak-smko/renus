@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from renus.db import DatabaseField, Field, Model
+from renus.db import (
+    Database,
+    DatabaseField,
+    Field,
+    IntegrityError,
+    Model,
+    OneToMany,
+    SQLiteAdapter,
+)
 from tests.db._conformance import cleanup, conformance_tests, database_for
 
 
@@ -20,6 +28,18 @@ class Item(Model):
     address: Addr | None = None
     tags: list[Tag] = Field(default_factory=list)
     attributes: dict[str, str] = Field(default_factory=dict)
+
+
+class AtomicChild(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    item_id: str = ""
+
+
+class AtomicItem(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    children: list[AtomicChild] = OneToMany(
+        AtomicChild, foreign_key="item_id", on_save="cascade"
+    )
 
 
 ADAPTERS = conformance_tests()
@@ -69,3 +89,43 @@ async def test_nested_fields_roundtrip_update_and_query(kind: str):
         assert updated.attributes == {"color": "green"}
     finally:
         await cleanup(db)
+
+
+@pytest.mark.asyncio
+async def test_cascading_relationship_writes_are_atomic():
+    db = Database(SQLiteAdapter({"database": ":memory:"}))
+    await db.connect()
+    await db.create_schema([AtomicItem, AtomicChild])
+    try:
+        repo = db.repository(AtomicItem)
+        with pytest.raises(IntegrityError):
+            await repo.create(
+                AtomicItem(
+                    id="item-1",
+                    children=[AtomicChild(id="child-1"), AtomicChild(id="child-1")],
+                )
+            )
+
+        assert await repo.count() == 0
+        assert await db.repository(AtomicChild).count() == 0
+    finally:
+        await db.disconnect()
+
+@pytest.mark.asyncio
+async def test_cascading_relationship_writes_are_atomic2():
+    db = Database(SQLiteAdapter({"database": ":memory:"}))
+    await db.connect()
+    await db.create_schema([AtomicItem, AtomicChild])
+    try:
+        repo = db.repository(AtomicItem)
+        await repo.create(
+                AtomicItem(
+                    id="item-1",
+                    children=[AtomicChild(id="child-1"), AtomicChild(id="child-2")],
+                )
+            )
+
+        assert await repo.count() == 1
+        assert await db.repository(AtomicChild).count() == 2
+    finally:
+        await db.disconnect()

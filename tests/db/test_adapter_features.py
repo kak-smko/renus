@@ -111,8 +111,9 @@ async def test_direct_create_and_drop_index(kind):
 async def test_adapter_value_encoding_and_decoding(kind):
     previous_config = Config._cache.get("database")
     Config._cache["database"] = SimpleNamespace(ID=str)
-    db = await database_for(kind, [EncodedRecord])
+    db = None
     try:
+        db = await database_for(kind, [EncodedRecord])
         repo = db.repository(EncodedRecord)
         values = {
             "when": datetime(2026, 9, 19, 12, 30, 45, tzinfo=timezone.utc),
@@ -138,7 +139,8 @@ async def test_adapter_value_encoding_and_decoding(kind):
         assert fetched.payload == values["payload"]
         assert fetched.blob == values["blob"]
     finally:
-        await cleanup(db)
+        if db is not None:
+            await cleanup(db)
         if previous_config is None:
             Config._cache.pop("database", None)
         else:

@@ -129,7 +129,9 @@ class AuditLogPlugin(Plugin):
         self.connected_events: list[str] = []
         self.disconnected_events: list[str] = []
         self.queries_intercepted: list[Any] = []
+        self.query_results: list[Any] = []
         self.mutations_intercepted: list[Any] = []
+        self.mutation_results: list[Any] = []
         self.errors_intercepted: list[Exception] = []
 
     async def on_connect(self, db: Database, connection: str) -> None:
@@ -141,8 +143,14 @@ class AuditLogPlugin(Plugin):
     async def before_query(self, db: Database, ast: Any, context: dict[str, Any]) -> None:
         self.queries_intercepted.append(ast)
 
+    async def after_query(self, db: Database, ast: Any, result: Any, context: dict[str, Any]) -> None:
+        self.query_results.append((ast, result))
+
     async def before_mutation(self, db: Database, ast: Any, context: dict[str, Any]) -> None:
         self.mutations_intercepted.append(ast)
+
+    async def after_mutation(self, db: Database, ast: Any, result: Any, context: dict[str, Any]) -> None:
+        self.mutation_results.append((ast, result))
 
     async def on_error(self, db: Database, error: Exception, context: dict[str, Any]) -> None:
         self.errors_intercepted.append(error)
@@ -179,6 +187,24 @@ async def test_database_use_plugin_integration():
 
     await db.connect()
     assert plugin.connected_events == ["primary"]
+    await db.create_schema([Article])
+
+    repo = db.repository(Article)
+    created = await repo.create(Article(title="Before"))
+    rows = await repo.query(Article.id == created.id).all()
+    assert len(rows) == 1
+    assert rows[0].title == "Before"
+    assert len(plugin.queries_intercepted) == 1
+    assert plugin.queries_intercepted[0].filters[0].value == created.id
+    assert len(plugin.query_results) == 1
+    assert plugin.query_results[0][1] == rows
+
+    updated = await repo.update(Article.id == created.id, {"title": "After"})
+    assert updated == 1
+    assert len(plugin.mutations_intercepted) == 2
+    assert len(plugin.mutation_results) == 2
+    assert [result.rows_affected for _, result in plugin.mutation_results] == [1, 1]
+    assert (await repo.query(Article.id == created.id).first()).title == "After"
 
     await db.disconnect()
     assert plugin.disconnected_events == ["primary"]
@@ -197,11 +223,17 @@ async def test_third_party_adapter_without_core_modification():
     assert repo.adapter is custom_adapter
     assert repo.model is Article
 
-    results = await repo.query(Article.id == 1).all()
+    query = repo.query(Article.id == 1)
+    results = await query.all()
     assert len(results) == 1
     assert results[0].id == 1
     assert results[0].title == "Test Row"
     assert len(custom_adapter.executed_queries) == 1
+    executed_query = custom_adapter.executed_queries[0]
+    assert executed_query.source is Article
+    assert len(executed_query.filters) == 1
+    assert executed_query.filters[0].path == Article.id
+    assert executed_query.filters[0].value == 1
 
     await db.disconnect()
 

@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from renus.config import Config
 from renus.db import (
     DatabaseField,
     Field,
@@ -21,6 +22,14 @@ from renus.db import (
 
 from renus.datastructures.id import ID
 from renus.db.repository.normalize import normalize_values
+
+
+@pytest.fixture(autouse=True)
+def use_string_ids(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(Config._cache, "database", SimpleNamespace(ID=str))
+
 
 class RoleEnum(Enum):
     ADMIN = "admin"
@@ -152,6 +161,7 @@ def test_json_roundtrip():
     assert restored.id == 99
     assert restored.username == "homer"
     assert restored.address is not None and restored.address.city == "Springfield"
+    assert restored.avatar_bytes == prof.avatar_bytes
 
 class SensitiveUser(Model):
     id: str = Field(database=DatabaseField(primary_key=True))

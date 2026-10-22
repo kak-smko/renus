@@ -10,9 +10,10 @@ Run with::
     venv/bin/python -m pytest tests/db/test_adapter_conformance.py
 """
 
+import asyncio
+from datetime import datetime, timezone
 from decimal import Decimal
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -990,6 +991,7 @@ async def test_aggregations(kind):
         r = row[0]
         assert r["n"] == 3
         assert r["total"] == 60
+        assert r["avg"] == 20
         assert r["lo"] == 10
         assert r["hi"] == 30
 
@@ -1162,8 +1164,8 @@ async def test_model_lifecycle_and_clean_save(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_generated_fields_on_create_and_create_many(kind):
-    Config._cache["database"] = SimpleNamespace(ID=int)
+async def test_generated_fields_on_create_and_create_many(kind, monkeypatch):
+    monkeypatch.setitem(Config._cache, "database", SimpleNamespace(ID=int))
 
     class GeneratedRecord(Model):
         id: ID = Field(
@@ -2960,6 +2962,7 @@ async def test_updates_refresh_updated_at(kind):
         assert updated.updated_at is not None
         assert _utc_timestamp(updated.updated_at) > _utc_timestamp(first_updated_at)
 
+
         rows_many = await repo.update_many(values={"name": "bulk"})
         assert rows_many == 2
         refreshed_first = await repo.where(User.username == "timestamp-1").first()
@@ -3533,6 +3536,9 @@ async def test_in_transaction_error(kind):
                 raise ValueError("Simulated transfer failure")
 
         assert adapter._in_active_transaction() is False
+        rolled_back = await repo.query(User.username == "persist").first()
+        assert rolled_back is not None
+        assert rolled_back.name is None
         usernames = {u.username for u in await repo.query().all()}
         assert usernames == {"persist"}
     finally:
@@ -4400,12 +4406,12 @@ async def test_configured_identity_roundtrip_and_storage(kind, identity_name):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_create_auto_generates_identity_object_id(kind):
+async def test_create_auto_generates_identity_object_id(kind, monkeypatch):
     from bson import ObjectId
 
     from tests.db._conformance import adapter_for
 
-    Config._cache["database"] = SimpleNamespace(ID=ObjectId)
+    monkeypatch.setitem(Config._cache, "database", SimpleNamespace(ID=ObjectId))
 
     class User(Model):
         id: ID = Field(
@@ -4435,10 +4441,10 @@ async def test_create_auto_generates_identity_object_id(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_create_auto_generates_identity_str(kind):
+async def test_create_auto_generates_identity_str(kind, monkeypatch):
     from tests.db._conformance import adapter_for
 
-    Config._cache["database"] = SimpleNamespace(ID=str)
+    monkeypatch.setitem(Config._cache, "database", SimpleNamespace(ID=str))
 
     class User(Model):
         id: ID = Field(
@@ -4468,10 +4474,10 @@ async def test_create_auto_generates_identity_str(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_create_auto_generates_identity_int(kind):
+async def test_create_auto_generates_identity_int(kind, monkeypatch):
     from tests.db._conformance import adapter_for
 
-    Config._cache["database"] = SimpleNamespace(ID=int)
+    monkeypatch.setitem(Config._cache, "database", SimpleNamespace(ID=int))
 
     class User(Model):
         id: ID = Field(
@@ -4502,8 +4508,8 @@ async def test_create_auto_generates_identity_int(kind):
 
 
 @pytest.mark.parametrize("kind", ADAPTERS)
-def test_auto_inc_requires_primary_key(kind):
-    Config._cache["database"] = SimpleNamespace(ID=int)
+def test_auto_inc_requires_primary_key(kind, monkeypatch):
+    monkeypatch.setitem(Config._cache, "database", SimpleNamespace(ID=int))
 
     with pytest.raises(ValueError, match="auto_inc=True must be primary_key=True"):
 
@@ -4525,11 +4531,11 @@ def test_auto_inc_requires_integer_field():
         MongoCompiler().compile_mutation(Insert(InvalidView, {}))
 
 
-def test_auto_inc_requires_integer_config():
+def test_auto_inc_requires_integer_config(monkeypatch):
     from renus.db.mongodb.compiler import MongoCompiler
     from renus.db.mutation import Insert
 
-    Config._cache["database"] = SimpleNamespace(ID=str)
+    monkeypatch.setitem(Config._cache, "database", SimpleNamespace(ID=str))
 
     class InvalidConfigView(Model):
         id: ID = Field(

@@ -39,7 +39,7 @@ class Address(Model):
 class User(Model):
     id: int
     username: str = Field(CustomUsernameRule(), MinLen(3), MaxLen(50))
-    email: str = Field(Email("gmail"))
+    email: str = Field(Email())
     age: int = Field(Min(18), Max(120))
 
     is_active: bool = Field(default=True)
@@ -548,7 +548,7 @@ def test_field_numeric_comparison_constraints():
     assert "d" in errors
 
 
-def test_field_max_digits_and_decimal_places():
+def test_field_minimum_value_validation():
     class Money(Model):
         amount: float = Field(Min(0))
 

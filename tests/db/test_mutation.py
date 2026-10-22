@@ -148,12 +148,20 @@ async def test_update_validates_supplied_fields():
     adapter = SQLiteAdapter({"database": ":memory:"})
     await adapter.connect()
     await adapter.create_schema([Member])
-    repo=Repository(adapter,Member)
-    ast = await repo.update({Member.points: 25})
-    assert ast==0
+    repo = Repository(adapter, Member)
+    member = await repo.create(
+        Member(username="update-target", email="update@example.com", points=10)
+    )
+
+    rows_affected = await repo.update(Member.id == member.id, {Member.points: 25})
+    assert rows_affected == 1
+    updated = await repo.query(Member.id == member.id).first()
+    assert updated is not None
+    assert updated.points == 25
 
     with pytest.raises(ValidationError, match="'points' must be of type int"):
-        await repo.update({"points": "twenty-five"})
+        await repo.update(Member.id == member.id, {"points": "twenty-five"})
+    await adapter.disconnect()
 
 
 @pytest.mark.asyncio

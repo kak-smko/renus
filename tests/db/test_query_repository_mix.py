@@ -165,19 +165,24 @@ async def _full_checklist(
     size = 2
     page1 = await u_repo.query().order_by(User.username.asc()).paginate(1, size).all()
     page2 = await u_repo.query().order_by(User.username.asc()).paginate(2, size).all()
-    assert len(page1) == min(size, len(ordered))
-    if len(ordered) > size:
-        assert len(page2) == min(size, len(ordered) - size)
-    assert page1[0].username == ordered[0].username
+    assert [row.username for row in page1] == [
+        row.username for row in ordered[:size]
+    ]
+    assert [row.username for row in page2] == [
+        row.username for row in ordered[size : size * 2]
+    ]
 
     # --- include with filter ----------------------------------------------
+    initial_total = total - 2
     loaded = await u_repo.query(User.username == "aa_home").include(
         Include(User.posts, filter=Post.title == "keep")
     ).all()
-    if loaded:
+    if initial_total == 0:
+        assert loaded == []
+    else:
         assert len(loaded) == 1
-        for row in loaded:
-            assert all(p.title == "keep" for p in row.posts)
+        assert loaded[0].username == "aa_home"
+        assert [post.title for post in loaded[0].posts] == ["keep"]
 
     # --- group_by (returns plain dict rows) --------------------------------
     groups = (

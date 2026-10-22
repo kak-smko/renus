@@ -173,11 +173,11 @@ def test_composite_identity():
     assert instance.identity_values() == (10, 42)
     assert instance.identity_dict() == {"org_id": 10, "user_id": 42}
 
-def test_configured_id_identity():
+def test_configured_id_identity(monkeypatch):
     from types import SimpleNamespace
     from renus.config import Config
 
-    Config._cache["database"] = SimpleNamespace(ID=str)
+    monkeypatch.setitem(Config._cache, "database", SimpleNamespace(ID=str))
     identity = ID("507f1f77bcf86cd799439011")
     assert str(identity) == "507f1f77bcf86cd799439011"
     assert isinstance(identity, ID)

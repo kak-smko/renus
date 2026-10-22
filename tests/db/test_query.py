@@ -397,17 +397,24 @@ async def test_bound_query_execution():
     assert len(results) == 1
     assert results[0].name == "Alice"
     assert repo.last_ast is not None
+    assert repo.last_ast.source is User
+    assert repo.last_ast.filters == q.ast.filters
+    assert repo.last_ast.ordering == q.ast.ordering
     assert repo.last_ast.limit == 20
 
     first_res = await q.first()
     assert first_res is not None
     assert first_res.name == "Alice"
     assert repo.last_ast.limit == 1
+    assert repo.last_ast.filters == q.ast.filters
+    assert repo.last_ast.ordering == q.ast.ordering
 
     count_val = await q.count()
     assert count_val == 42
+    assert repo.last_ast == q.ast
 
     assert await q.exists() is True
+    assert repo.last_ast == q.ast
 
 
 

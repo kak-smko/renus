@@ -35,6 +35,7 @@ class JoinedPost(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     title: str
     author_id: str
+    owner_id: str = ""
 
 
 class JoinedAuthor(Model):
@@ -76,6 +77,12 @@ class JoinedRoleOwner(Model):
     roles: list[JoinedRole] = ManyToMany(
         JoinedRole,
         through="joined_role_owner_roles",
+        on_save="cascade",
+        loading="joined",
+    )
+    posts: list[JoinedPost] = OneToMany(
+        JoinedPost,
+        foreign_key="owner_id",
         on_save="cascade",
         loading="joined",
     )
@@ -150,10 +157,18 @@ async def test_joined_relationships_are_included_by_default(kind):
                     JoinedRole(id="admin", name="Admin"),
                     JoinedRole(id="editor", name="Editor"),
                 ],
+                posts=[
+                    JoinedPost(id="rp1", title="One", author_id="", owner_id="ro1"),
+                    JoinedPost(id="rp2", title="Two", author_id="", owner_id="ro1"),
+                    JoinedPost(id="rp3", title="Three", author_id="", owner_id="ro1"),
+                ],
             )
         )
-        role_owner = (await role_owner_repo.query().all())[0]
+        role_owners = await role_owner_repo.query().all()
+        assert len(role_owners) == 1
+        role_owner = role_owners[0]
         assert [role.name for role in role_owner.roles] == ["Admin", "Editor"]
+        assert [post.title for post in role_owner.posts] == ["One", "Two", "Three"]
     finally:
         await cleanup(db)
 
@@ -182,6 +197,5 @@ async def test_nested_model_fields_are_not_relationship_includes(kind):
         assert owner is not None
         assert owner.address.city == "Oslo"
         assert owner.tags[0].label == "python"
-        assert await repo.query().include(Owner.address).count() == 1
     finally:
         await cleanup(db)

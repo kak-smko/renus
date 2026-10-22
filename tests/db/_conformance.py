@@ -240,15 +240,24 @@ def all_drivers() -> list[AdapterDriver]:
 
 
 def _mongo_ready() -> bool:
+    client = None
     try:
         import pymongo
 
-        client = pymongo.MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=1500)
+        if getattr(pymongo, "AsyncMongoClient", None) is None:
+            return False
+
+        client = pymongo.MongoClient(
+            "mongodb://localhost:27017", serverSelectionTimeoutMS=1500
+        )
         client.admin.command("ping")
-        client.close()
-        return True
+        hello = client.admin.command("hello")
+        return bool(hello.get("setName") or hello.get("msg") == "isdbgrid")
     except Exception:
         return False
+    finally:
+        if client is not None:
+            client.close()
 
 
 def _mysql_ready() -> bool:

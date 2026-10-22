@@ -178,6 +178,23 @@ def from_dict(
                 except Exception:
                     pass
 
+            elif (
+                target_type in (bytes, bytearray)
+                or storage_type in (bytes, bytearray)
+                or "bytes" in target_str
+                or "bytearray" in target_str
+            ) and isinstance(raw_val, str):
+                try:
+                    decoded = bytes.fromhex(raw_val)
+                    is_bytearray = (
+                        target_type is bytearray
+                        or storage_type is bytearray
+                        or "bytearray" in target_str
+                    )
+                    cleaned_data[fname] = bytearray(decoded) if is_bytearray else decoded
+                except ValueError:
+                    pass
+
             elif isinstance(raw_val, str):
                 enum_cls = None
                 if isinstance(target_type, type) and issubclass(target_type, Enum):
