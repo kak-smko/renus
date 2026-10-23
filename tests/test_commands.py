@@ -748,6 +748,35 @@ class TestExtensionCommands:
         routes_index = (tmp_path / "routes" / "api.py").read_text()
         assert "codenus_kit_route" not in routes_index
 
+    def test_install_app_resolves_versioned_dependencies(self, tmp_path):
+        mock_install = SimpleNamespace(
+            dependencies=["codenus/kit==1.0.*"],
+            cls=(),
+            route="",
+            imprt="",
+            command="",
+            admin_templates="",
+            index_templates="",
+            component_templates="",
+            config="",
+            setup=None,
+        )
+        installed = {}
+
+        with (
+            patch("importlib.import_module", return_value=mock_install),
+            patch.object(extension_run_module, "download") as mock_download,
+        ):
+            install_app("codenus/parent", installed, base_dir=str(tmp_path))
+
+        mock_download.assert_called_once_with(
+            "codenus/kit",
+            "1.0.*",
+            installed,
+            mode="install",
+            base_dir=str(tmp_path),
+        )
+
     def test_update_vs_upgrade_modes(self):
         mock_install = MagicMock()
         mock_install.update = MagicMock()

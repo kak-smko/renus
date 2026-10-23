@@ -317,8 +317,22 @@ def install_app(
 
     if hasattr(install, "dependencies") and install.dependencies:
         Terminal.cyan.print(f"Installing dependencies for '{app}'...")
-        for dep in install.dependencies:
-            download(dep, "*", installed, mode=mode, base_dir=base_dir)
+        for dependency in install.dependencies:
+            dep = str(dependency).strip()
+            if "==" in dep:
+                dep_app, version_spec = dep.split("==", 1)
+                dep_app = dep_app.strip()
+                version_spec = version_spec.strip() or "*"
+            else:
+                dep_app, version_spec = dep, "*"
+            if dep_app:
+                download(
+                    dep_app,
+                    version_spec,
+                    installed,
+                    mode=mode,
+                    base_dir=base_dir,
+                )
 
     if mode == "update":
         try:
