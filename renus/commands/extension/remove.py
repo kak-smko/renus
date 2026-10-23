@@ -50,7 +50,13 @@ def remove_all(installed: dict[str, str], base_dir: str = "./") -> None:
     for app in items:
         remove(app, installed, base_dir=base_dir)
 
-def remove(app: str, installed: dict[str, str], base_dir: str = "./") -> None:
+def remove(
+    app: str,
+    installed: dict[str, str],
+    base_dir: str = "./",
+    *,
+    run_remove_hook: bool = True,
+) -> None:
     Terminal.cyan.print(f"Removing extension: {app}")
     installed.pop(app, None)
 
@@ -60,7 +66,7 @@ def remove(app: str, installed: dict[str, str], base_dir: str = "./") -> None:
     except Exception as exc:
         Terminal.yellow.print(f"   Notice: {exc}")
 
-    if install is not None and hasattr(install, "remove"):
+    if run_remove_hook and install is not None and hasattr(install, "remove"):
         Terminal.dim.print(f"   Running remove for {app}...")
         try:
             _run_awaitable(install.remove())

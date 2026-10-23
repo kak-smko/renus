@@ -58,6 +58,7 @@ from renus.commands.extension.run import (
     run as extension_run,
     write_lock,
 )
+import renus.commands.extension.remove as extension_remove_module
 import renus.commands.extension.run as extension_run_module
 from renus.config import Config
 
@@ -655,6 +656,211 @@ class TestExtensionCommands:
             "https://codenus.com/app/versions/codenus/kit",
             "https://codenus.com/app/codenus/kit/1.0.0",
         ]
+
+    @pytest.mark.parametrize(
+        ("mode", "expected_version"),
+        [("update", "1.1.4"), ("upgrade", "1.2.0")],
+    )
+    def test_update_and_upgrade_select_expected_remote_versions(
+        self, tmp_path, mode, expected_version
+    ):
+        available_versions = ["1.1.1", "1.1.2", "1.1.3", "1.1.4", "1.2.0"]
+        archive = BytesIO()
+        with zipfile.ZipFile(archive, "w") as zip_file:
+            zip_file.writestr("install.py", "")
+        requested_urls = []
+
+        def fake_http_get(url, timeout=30):
+            requested_urls.append(url)
+            return 200, {"version": expected_version}, archive.getvalue()
+
+        installed = {"codenus/kit": "1.1.2"}
+        with (
+            patch.object(
+                extension_run_module,
+                "get_available_versions",
+                return_value=available_versions,
+            ),
+            patch.object(extension_run_module, "http_get", side_effect=fake_http_get),
+            patch.object(extension_run_module, "install_app") as mock_install_app,
+        ):
+            result = download(
+                "codenus/kit",
+                "*",
+                installed,
+                mode=mode,
+                base_dir=str(tmp_path),
+            )
+
+        assert result == expected_version
+        assert installed["codenus/kit"] == expected_version
+        assert requested_urls == [f"https://codenus.com/app/codenus/kit/{expected_version}"]
+        mock_install_app.assert_called_once_with(
+            "codenus/kit", installed, mode=mode, base_dir=str(tmp_path)
+        )
+
+    def test_update_replaces_package_without_reinstalling_routes(self, tmp_path):
+        package_dir = tmp_path / "extension" / "codenus" / "kit"
+        package_dir.mkdir(parents=True)
+        (package_dir / "old.txt").write_text("old package", encoding="utf-8")
+
+        archive = BytesIO()
+        with zipfile.ZipFile(archive, "w") as zip_file:
+            zip_file.writestr("new.txt", "updated package")
+        installed = {"codenus/kit": "1.1.2"}
+
+        with (
+            patch.object(extension_run_module, "get_available_versions", return_value=["1.1.3"]),
+            patch.object(
+                extension_run_module,
+                "http_get",
+                return_value=(200, {"version": "1.1.3"}, archive.getvalue()),
+            ),
+            patch.object(extension_run_module, "install_app") as mock_install_app,
+            patch.object(extension_remove_module, "_remove_route") as mock_remove_route,
+        ):
+            result = download(
+                "codenus/kit",
+                "*",
+                installed,
+                mode="update",
+                base_dir=str(tmp_path),
+            )
+
+        assert result == "1.1.3"
+        assert installed["codenus/kit"] == "1.1.3"
+        assert not (package_dir / "old.txt").exists()
+        assert (package_dir / "new.txt").read_text(encoding="utf-8") == "updated package"
+        mock_install_app.assert_called_once_with(
+            "codenus/kit", installed, mode="update", base_dir=str(tmp_path)
+        )
+        mock_remove_route.assert_not_called()
+
+    def test_upgrade_removes_old_routes_then_reinstalls_and_runs_upgrade_hook(self, tmp_path):
+        events = []
+        old_install = SimpleNamespace(
+            route="old.routes",
+            command="old-command",
+            admin_templates="old-admin",
+            index_templates="old-index",
+            component_templates="old-components",
+            config="old-config",
+            remove=lambda: events.append("remove-hook"),
+        )
+        new_install = SimpleNamespace(
+            route="new.routes",
+            admin_templates="new-admin",
+            index_templates="new-index",
+            upgrade=lambda: events.append("upgrade"),
+            setup=lambda: events.append("setup"),
+        )
+        archive = BytesIO()
+        with zipfile.ZipFile(archive, "w") as zip_file:
+            zip_file.writestr("install.py", "new install metadata")
+        installed = {"codenus/kit": "1.1.2"}
+
+        def remove_route(install, app, base_dir):
+            events.append(("remove-route", install.route))
+
+        def remove_frontend_routes(app, base_dir):
+            events.append(("remove-frontend-routes", app))
+
+        def remove_command(install, app, base_dir):
+            events.append(("remove-command", app))
+
+        def remove_components(app, base_dir):
+            events.append(("remove-components", app))
+
+        def remove_config(install, base_dir):
+            events.append(("remove-config", install.config))
+
+        def add_route(install, app, base_dir):
+            events.append(("add-route", install.route))
+
+        with (
+            patch.object(extension_run_module, "get_available_versions", return_value=["1.2.0"]),
+            patch.object(
+                extension_run_module,
+                "http_get",
+                return_value=(200, {"version": "1.2.0"}, archive.getvalue()),
+            ),
+            patch.object(
+                extension_run_module.importlib,
+                "import_module",
+                side_effect=[old_install, new_install],
+            ),
+            patch.object(extension_remove_module, "_remove_route", side_effect=remove_route),
+            patch.object(
+                extension_remove_module,
+                "_remove_admin_templates",
+                side_effect=remove_frontend_routes,
+            ),
+            patch.object(
+                extension_remove_module,
+                "_remove_index_templates",
+                side_effect=remove_frontend_routes,
+            ),
+            patch.object(
+                extension_remove_module,
+                "_remove_command",
+                side_effect=remove_command,
+            ),
+            patch.object(
+                extension_remove_module,
+                "_remove_component_templates",
+                side_effect=remove_components,
+            ),
+            patch.object(
+                extension_remove_module,
+                "_remove_config",
+                side_effect=remove_config,
+            ),
+            patch.object(extension_run_module, "_add_route", side_effect=add_route),
+        ):
+            result = download(
+                "codenus/kit",
+                "*",
+                installed,
+                mode="upgrade",
+                base_dir=str(tmp_path),
+            )
+
+        assert result == "1.2.0"
+        assert events == [
+            ("remove-route", "old.routes"),
+            ("remove-command", "codenus/kit"),
+            ("remove-frontend-routes", "codenus/kit"),
+            ("remove-frontend-routes", "codenus/kit"),
+            ("remove-components", "codenus/kit"),
+            ("remove-config", "old-config"),
+            ("add-route", "new.routes"),
+            "upgrade",
+        ]
+        assert "remove-hook" not in events
+        assert "setup" not in events
+        assert (tmp_path / "extension" / "codenus" / "kit" / "install.py").exists()
+
+    @pytest.mark.parametrize("mode", ["update", "upgrade"])
+    def test_download_skips_when_installed_version_matches_remote(self, tmp_path, mode):
+        installed = {"codenus/kit": "1.2.3"}
+        with (
+            patch.object(extension_run_module, "get_available_versions", return_value=["1.2.3"]),
+            patch.object(extension_run_module, "http_get") as mock_http_get,
+            patch.object(extension_run_module, "install_app") as mock_install_app,
+        ):
+            result = download(
+                "codenus/kit",
+                "*",
+                installed,
+                mode=mode,
+                base_dir=str(tmp_path),
+            )
+
+        assert result == "1.2.3"
+        assert installed == {"codenus/kit": "1.2.3"}
+        mock_http_get.assert_not_called()
+        mock_install_app.assert_not_called()
+        assert not (tmp_path / "extension").exists()
 
     def test_download_fails_cleanly_when_wildcard_cannot_be_resolved(self, tmp_path):
         with patch.object(extension_run_module, "get_available_versions", return_value=[]):

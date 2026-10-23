@@ -5,6 +5,7 @@ import importlib
 import inspect
 import os
 import shutil
+import sys
 import threading
 import time
 import urllib.error
@@ -173,6 +174,14 @@ def is_upgrade(target_version: str, current_version: str) -> bool:
     return parse_version_tuple(target_version) > parse_version_tuple(current_version)
 
 
+def _clear_extension_modules(app: str) -> None:
+    module_prefix = f"extension.{app.replace('/', '.')}"
+    for name in tuple(sys.modules):
+        if name == module_prefix or name.startswith(f"{module_prefix}."):
+            del sys.modules[name]
+    importlib.invalidate_caches()
+
+
 def download(
     app: str,
     version_spec: str,
@@ -186,15 +195,43 @@ def download(
             f"Could not resolve version '{version_spec}' for '{app}': no versions available."
         )
         return None
-    target_version = match_version(version_spec, available_versions)
+    current_installed = installed.get(app)
+    effective_mode = mode
+
+    if mode == "update" and current_installed:
+        if not available_versions:
+            Terminal.red.print(
+                f"Could not resolve a compatible version for '{app}': no versions available."
+            )
+            return None
+
+        current_release = parse_version_tuple(current_installed)[:2]
+        compatible_versions = [
+            version
+            for version in available_versions
+            if parse_version_tuple(version)[:2] == current_release
+        ]
+        if not compatible_versions:
+            Terminal.yellow.print(
+                f"No compatible update available for '{app}' at version {current_installed}."
+            )
+            return current_installed
+
+        target_version = match_version(version_spec, compatible_versions)
+        if target_version not in compatible_versions:
+            Terminal.red.print(
+                f"Could not find a version matching '{version_spec}' for '{app}' within "
+                f"the {current_release[0]}.{current_release[1]} release line."
+            )
+            return None
+    else:
+        target_version = match_version(version_spec, available_versions)
+
     if version_spec.strip().endswith(".*") and "*" in target_version:
         Terminal.red.print(
             f"Could not find a version matching '{version_spec}' for '{app}'."
         )
         return None
-
-    current_installed = installed.get(app)
-    effective_mode = mode
 
     if current_installed:
         if mode == "install" and is_upgrade(target_version, current_installed):
@@ -202,8 +239,11 @@ def download(
             Terminal.cyan.print(
                 f"Upgrading '{app}' from {current_installed} to {target_version}..."
             )
-        elif mode == "install" and current_installed == target_version:
-            Terminal.yellow.print(f"'{app}' is already installed at version {current_installed}.")
+        elif mode in ("install", "update", "upgrade") and current_installed == target_version:
+            if mode == "install":
+                Terminal.yellow.print(f"'{app}' is already installed at version {current_installed}.")
+            else:
+                Terminal.yellow.print(f"'{app}' is already up to date at version {current_installed}.")
             return current_installed
 
     Terminal.green.print(f"Downloading {app}/{target_version}...")
@@ -222,6 +262,11 @@ def download(
         return None
 
     resolved_version = headers.get("version", target_version)
+
+    if effective_mode == "upgrade" and current_installed:
+        remove(app, installed, base_dir=base_dir, run_remove_hook=False)
+
+    _clear_extension_modules(app)
     installed[app] = resolved_version
 
     dest_dir = os.path.join(base_dir, "extension", app)
