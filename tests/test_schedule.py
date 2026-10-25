@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import threading
 import time
@@ -259,7 +260,7 @@ class TestSchedule:
         sched = Schedule().every().minutes()
         sched.do("a", lambda: calls.append("a"))
         sched.do("b", lambda: calls.append("b"))
-        sched.run(parallel=False)
+        asyncio.run(sched.run(parallel=False))
         assert sorted(calls) == ["a", "b"]
         assert sched._job_list == {}
 
@@ -267,8 +268,8 @@ class TestSchedule:
         event = threading.Event()
         sched = Schedule().every().minutes()
         sched.do("k", lambda: event.set())
-        sched.run(parallel=True)
-        assert event.wait(timeout=2)
+        asyncio.run(sched.run(parallel=True))
+        assert event.is_set()
         assert sched._job_list == {}
 
     def test_same_key_runs_never_overlap(self):
@@ -285,22 +286,23 @@ class TestSchedule:
             active["now"] -= 1
             active["done"] += 1
 
-        sched._job_list["k"] = slow
-        sched.run(parallel=True)  
-        assert entered.wait(timeout=2)
+        async def run_twice():
+            sched._job_list["k"] = slow
+            first = asyncio.create_task(sched.run(parallel=True))
+            assert await asyncio.to_thread(entered.wait, 2)
 
-        sched._job_list["k"] = slow
-        sched.run(parallel=True)
-        assert active["now"] == 1
+            sched._job_list["k"] = slow
+            second = asyncio.create_task(sched.run(parallel=True))
+            await asyncio.sleep(0.05)
+            assert active["now"] == 1
+            assert active["max"] == 1
+
+            release.set()
+            await asyncio.gather(first, second)
+
+        asyncio.run(run_twice())
+        assert active["done"] == 2
         assert active["max"] == 1
-
-        release.set()  
-        deadline = time.monotonic() + 5
-        while active["done"] < 2 and time.monotonic() < deadline:
-            time.sleep(0.01)
-
-        assert active["done"] == 2  
-        assert active["max"] == 1  
 
     def test_different_keys_run_in_parallel(self):
         sched = Schedule().every().minutes()
@@ -313,15 +315,74 @@ class TestSchedule:
 
         sched._job_list["a"] = lambda: slow("a")
         sched._job_list["b"] = lambda: slow("b")
-        sched.run(parallel=True)
 
-        deadline = time.monotonic() + 5
-        while (not entered["a"] or not entered["b"]) and time.monotonic() < deadline:
-            time.sleep(0.01)
+        async def await_jobs():
+            task = asyncio.create_task(sched.run(parallel=True))
+            deadline = time.monotonic() + 5
+            while (not entered["a"] or not entered["b"]) and time.monotonic() < deadline:
+                await asyncio.sleep(0.01)
 
-        assert entered["a"]
-        assert entered["b"]
-        release.set()
+            assert entered["a"]
+            assert entered["b"]
+            release.set()
+            await task
+
+        asyncio.run(await_jobs())
+
+    def test_run_awaits_async_jobs(self):
+        sched = Schedule().every().minutes()
+        calls = []
+
+        async def work(value):
+            await asyncio.sleep(0)
+            calls.append(value)
+
+        sched.do("async", work, 42)
+        asyncio.run(sched.run(parallel=False))
+        assert calls == [42]
+
+    def test_run_retries_async_job_failures(self):
+        sched = Schedule().every().minutes().max_try(3)
+        calls = []
+
+        async def flaky():
+            calls.append(1)
+            if len(calls) < 3:
+                raise ValueError("not yet")
+
+        sched.do("async", flaky)
+        asyncio.run(sched.run(parallel=False))
+        assert len(calls) == 3
+
+    def test_run_parallel_async_jobs(self):
+        sched = Schedule().every().minutes()
+        entered = set()
+        release = asyncio.Event()
+
+        async def work(name):
+            entered.add(name)
+            await release.wait()
+
+        sched.do("a", work, "a")
+        sched.do("b", work, "b")
+
+        async def run_jobs():
+            task = asyncio.create_task(sched.run(parallel=True))
+            await asyncio.wait_for(
+                asyncio.gather(
+                    *(wait_for_entry(name, entered) for name in ("a", "b"))
+                ),
+                timeout=2,
+            )
+            release.set()
+            await task
+
+        async def wait_for_entry(name, values):
+            while name not in values:
+                await asyncio.sleep(0)
+
+        asyncio.run(run_jobs())
+        assert entered == {"a", "b"}
 
     def test_job_failure_logs_and_pops(self, cache):
         def boom():

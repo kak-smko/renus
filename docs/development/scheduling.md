@@ -1,6 +1,6 @@
 # Scheduling
 
-Renus includes a lightweight task scheduler for running periodic or time-based jobs inside an application. Jobs are defined with a fluent, chainable builder, deduplicated by a unique key, and executed either inline or on background threads.
+Renus includes a lightweight task scheduler for running periodic or time-based jobs inside an application. Jobs are defined with a fluent, chainable builder, deduplicated by a unique key, and can be synchronous or asynchronous. `Schedule.run()` is async and waits for registered jobs to complete.
 
 The scheduler lives in the `renus.schedule` module and is built on four pieces:
 
@@ -96,15 +96,21 @@ Because `do` only registers on a due+match check, a `Schedule` is typically buil
 
 ### `run(parallel=True)`
 
-`run` executes every job currently registered on the schedule. It runs each job via `job()`, removes it from the pending list, and records the run time so it will not run again until its interval has elapsed.
+`run` executes every job currently registered on the schedule, removes it from the pending list, and records the run time so it will not run again until its interval has elapsed. It accepts both synchronous and asynchronous job functions and waits for completion.
 
 ```python
 sched = Schedule()
 sched.every().minutes().do("ping", ping)
-sched.run(parallel=False)  # run inline
+await sched.run(parallel=False)  # run sequentially
+
+async def refresh_cache():
+    await cache.refresh()
+
+sched.every().minutes().do("refresh_cache", refresh_cache)
+await sched.run()  # run concurrently and wait for completion
 ```
 
-By default jobs run `parallel=True`, each on its own worker thread.
+By default `parallel=True` runs async jobs concurrently on the current event loop and moves synchronous jobs to worker threads. `parallel=False` runs and awaits jobs sequentially.
 
 ### `job(key, func, parallel=True)`
 
@@ -156,7 +162,7 @@ async def run_scheduler(app, on_startup):
     while True:
         sched = Schedule()
         sched.every().minutes().do("prune", prune_old_rows)
-        sched.run()
+        await sched.run()
         await asyncio.sleep(60)
 
 app = App(on_startup=[run_scheduler])

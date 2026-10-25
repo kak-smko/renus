@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import asyncio
 import datetime
 import functools
 import threading
@@ -9,7 +11,7 @@ from renus.cache import Cache
 from renus.log import Log
 
 from .matcher import is_due, matches
-from .runner import run_with_retry
+from .runner import run_with_retry, run_with_retry_async
 from .state import Spec, TZ_OFFSET
 
 _LAST_RUN_KEY: str = "schedule_last_run"
@@ -21,7 +23,7 @@ class Schedule:
     def __init__(self) -> None:
         """Initialize a schedule with a fresh spec and no registered jobs."""
         self._spec = Spec()
-        self._job_list: dict[str, Callable[[], None]] = {}
+        self._job_list: dict[str, Callable[[], Any]] = {}
         self._last_run: dict = Cache().get(_LAST_RUN_KEY, {})
         self._locks: dict[str, threading.Lock] = {}
 
@@ -115,7 +117,7 @@ class Schedule:
     def job(
         self,
         key: str,
-        func: Callable[[], None],
+        func: Callable[[], Any],
         parallel: bool = True,
     ) -> None:
         """Execute the job for ``key`` now, waiting for any running instance."""
@@ -134,7 +136,7 @@ class Schedule:
     def _run_job(
         self,
         key: str,
-        func: Callable[[], None],
+        func: Callable[[], Any],
         max_try: int,
         now: datetime.datetime,
         lock: threading.Lock,
@@ -146,7 +148,42 @@ class Schedule:
             except Exception as exc:
                 Log().error(f"schedule failed [{key}] at: {now!s} - {exc!s}")
 
-    def run(self, parallel: bool = True) -> None:
-        """Execute all registered jobs."""
-        for key, func in list(self._job_list.items()):
-            self.job(key, func, parallel)
+    async def _run_job_async(
+        self,
+        key: str,
+        func: Callable[[], Any],
+        max_try: int,
+        now: datetime.datetime,
+        lock: threading.Lock,
+        parallel: bool,
+    ) -> None:
+        await asyncio.to_thread(lock.acquire)
+        try:
+            await run_with_retry_async(func, max_try=max_try, parallel=parallel)
+            Log().info(f"schedule job {key} at: {now!s}")
+        except Exception as exc:
+            Log().error(f"schedule failed [{key}] at: {now!s} - {exc!s}")
+        finally:
+            lock.release()
+
+    async def run(self, parallel: bool = True) -> None:
+        """Execute all registered jobs and wait for them to finish."""
+        jobs = list(self._job_list.items())
+        for key, _ in jobs:
+            now = datetime.datetime.now(datetime.timezone.utc) + TZ_OFFSET
+            self._last_run[key] = now
+            Cache().put(_LAST_RUN_KEY, self._last_run, _LAST_RUN_TTL)
+            self._job_list.pop(key, None)
+
+        async def execute(key: str, func: Callable[[], Any]) -> None:
+            now = datetime.datetime.now(datetime.timezone.utc) + TZ_OFFSET
+            lock = self._locks.setdefault(key, threading.Lock())
+            await self._run_job_async(
+                key, func, self._spec.max_try, now, lock, parallel
+            )
+
+        if parallel:
+            await asyncio.gather(*(execute(key, func) for key, func in jobs))
+        else:
+            for key, func in jobs:
+                await execute(key, func)
