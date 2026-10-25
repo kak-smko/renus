@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from renus.db.core.exceptions import ValidationError
+from renus.response import Status, abort_if
 
 if TYPE_CHECKING:
     from renus.db.models.base import Model
@@ -52,8 +53,8 @@ class Validate(dict[str, Any]):
             else:
                 values[name] = value
 
-        if errors:
-            raise ValidationError(errors)
+
+        abort_if(errors,{"msg":"invalid_data","errors":errors},Status.HTTP_406_NOT_ACCEPTABLE)
 
         super().update(values)
         self._form = source

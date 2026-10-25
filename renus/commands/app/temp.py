@@ -18,9 +18,9 @@ class {name_camel}Controller:
 
     async def store(self):
         payload = await self.request.form()
-        payload = {name_camel}(dict(payload))
+        payload = Validate({name_camel},payload,None)
 
-        await self.repo.create(payload)
+        await self.repo.create({name_camel}(payload))
         return JsonResponse({"msg": "stored"}, Status.HTTP_201_CREATED)
 
     async def update(self, id: ID):
@@ -62,7 +62,7 @@ from app.{name}.controller import {name_camel}Controller
 
 admin_router = Router(
     subdomain=Config("app").get("admin_subdomain", "admin"),
-    prefix="/admin{folder}",
+    prefix="/api/admin{folder}",
 )
 admin_router.get("/{names}", {name_camel}Controller, "index")
 admin_router.post("/{names}", {name_camel}Controller, "store")
@@ -83,7 +83,7 @@ from app.extension.codenus.kit.middlewares.permission import PermissionMiddlewar
 
 admin_router = Router(
     subdomain=Config("app").get("admin_subdomain", "admin"),
-    prefix="/admin{folder}",
+    prefix="/api/admin{folder}",
     middlewares=[AuthMiddleware, PermissionMiddleware("admin")],
 )
 admin_router.get("/{names}", {name_camel}Controller, "index", middlewares=[PermissionMiddleware("{names}.view")])
@@ -102,7 +102,7 @@ router.include(home_router)
 
 vue_temp = '''<template>
   <r-container class="container-fluid">
-    <r-table-crud link="admin/{folder}{names}"{soft_delete_attribute}></r-table-crud>
+    <r-table-crud link="api/admin/{folder}{names}"{soft_delete_attribute}></r-table-crud>
   </r-container>
 </template>
 

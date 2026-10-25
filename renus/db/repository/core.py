@@ -73,6 +73,14 @@ class Repository(Generic[T]):
         """Return the active database adapter."""
         return self._adapter
 
+    def _require_model_instance(self, obj: Any) -> T:
+        """Reject payloads that are not instances of this repository's model."""
+        if not isinstance(obj, self.model):
+            raise ValidationError(
+                f"Expected {self.model.__name__} instance, got {type(obj).__name__}"
+            )
+        return obj
+
     @asynccontextmanager
     async def _atomic(self, required: bool = True) -> AsyncIterator[None]:
         if not required or self.adapter._in_active_transaction():
@@ -156,11 +164,12 @@ class Repository(Generic[T]):
 
     def build_insert_ast(self, obj: T) -> Insert:
         """Build an insert AST from a model instance's values."""
+        obj = self._require_model_instance(obj)
         return self._build_insert_ast_for_model(self.model, obj)
 
     def build_insert_many_ast(self, objs: Iterable[T]) -> InsertMany:
         """Build a multi-row insert AST from model instances."""
-        inst_list = list(objs)
+        inst_list = [self._require_model_instance(obj) for obj in objs]
         if not inst_list:
             raise ValueError("build_insert_many_ast requires at least one model instance")
         records = [self._build_insert_ast_for_model(self.model, m).values for m in inst_list]
@@ -168,14 +177,17 @@ class Repository(Generic[T]):
 
     def build_update_ast(self, obj: T) -> Update:
         """Build an update AST from a model instance's dirty fields."""
+        obj = self._require_model_instance(obj)
         return self._build_update_ast_for_model(self.model, obj)
 
     def build_delete_ast(self, obj: T) -> Delete:
         """Build a delete AST from a model instance's identity."""
+        obj = self._require_model_instance(obj)
         return self._build_delete_ast_for_model(self.model, obj)
 
     async def create(self, obj: T) -> T:
         """Insert a single model and return it with generated keys."""
+        obj = self._require_model_instance(obj)
         async with self._atomic(self._rel_coordinator.requires_transaction(obj)):
             insert_ast = self.build_insert_ast(obj)
             result = await self._execute_mutation(insert_ast)
@@ -199,7 +211,7 @@ class Repository(Generic[T]):
 
     async def create_many(self, objs: Iterable[T]) -> list[T]:
         """Insert multiple models in bulk and return them."""
-        obj_list = list(objs)
+        obj_list = [self._require_model_instance(obj) for obj in objs]
         if not obj_list:
             return []
 
@@ -240,6 +252,7 @@ class Repository(Generic[T]):
 
     async def save(self, obj: T) -> T:
         """Insert or update the model depending on its persistence state."""
+        obj = self._require_model_instance(obj)
         if obj.is_new():
             return await self.create(obj)
 
@@ -310,8 +323,8 @@ class Repository(Generic[T]):
         """Delete a single model or matching rows, honoring soft deletes."""
         meta = getattr(self.model, "__db_metadata__", None)
 
-        if isinstance(target_or_condition, self.model):
-            obj: Any = target_or_condition
+        if not isinstance(target_or_condition, Condition):
+            obj = self._require_model_instance(target_or_condition)
 
             async with self._atomic():
                 await self._rel_coordinator.cascade_delete(obj)
@@ -394,8 +407,8 @@ class Repository(Generic[T]):
                 f"Model '{self.model.__name__}' does not have soft_delete enabled"
             )
 
-        if isinstance(target_or_condition, self.model):
-            obj: Any = target_or_condition
+        if not isinstance(target_or_condition, Condition):
+            obj = self._require_model_instance(target_or_condition)
             row_conditions: list[Condition] = []
             if hasattr(obj, "identity_dict"):
                 for pk_name, pk_val in obj.identity_dict().items():
@@ -420,7 +433,7 @@ class Repository(Generic[T]):
         )
         result = await self._execute_mutation(update_ast)
 
-        if isinstance(target_or_condition, self.model) and result.rows_affected:
+        if not isinstance(target_or_condition, Condition) and result.rows_affected:
             if hasattr(obj, "restore"):
                 obj.restore()
             if meta.timestamps and "updated_at" in values:
@@ -436,8 +449,8 @@ class Repository(Generic[T]):
     ) -> int:
         """Physically delete a single model or matching rows, ignoring soft deletes.
         """
-        if isinstance(target_or_condition, self.model):
-            obj: Any = target_or_condition
+        if not isinstance(target_or_condition, Condition):
+            obj = self._require_model_instance(target_or_condition)
             async with self._atomic():
                 await self._rel_coordinator.cascade_delete(obj, hard=True)
                 del_ast = self.build_delete_ast(obj)

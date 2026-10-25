@@ -5140,3 +5140,47 @@ async def test_nested_deep_list(kind):
         ]
     finally:
         await cleanup(database)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_repository_rejects_dict_for_model_inputs(kind):
+    class TableUser(Model):
+        id: str = Field(database=DatabaseField(primary_key=True))
+        name: str
+
+        class Meta:
+            soft_delete = True
+
+    database = await database_for(kind, [TableUser])
+
+    try:
+        repository = database.repository(TableUser)
+        payload: Any = {"id": "1", "name": "smko"}
+
+        with pytest.raises(ValidationError):
+            await repository.create(payload)
+        with pytest.raises(ValidationError):
+            await repository.create_many([TableUser(**payload), payload])
+        with pytest.raises(ValidationError):
+            await repository.save(payload)
+
+        with pytest.raises(ValidationError):
+            repository.build_insert_ast(payload)
+        with pytest.raises(ValidationError):
+            repository.build_insert_many_ast([payload])
+        with pytest.raises(ValidationError):
+            repository.build_update_ast(payload)
+        with pytest.raises(ValidationError):
+            repository.build_delete_ast(payload)
+
+        with pytest.raises(ValidationError):
+            await repository.delete(payload)
+        with pytest.raises(ValidationError):
+            await repository.restore(payload)
+        with pytest.raises(ValidationError):
+            await repository.hard_delete(payload)
+
+        # Rejecting a bad member must happen before a valid batch member is written.
+        assert await repository.query().with_deleted().count() == 0
+    finally:
+        await cleanup(database)

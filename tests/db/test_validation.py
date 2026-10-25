@@ -19,6 +19,7 @@ from renus.db.validation import (
     Validate,
 )
 from renus.db.validation.base import Rule
+from renus.response import HTTPException, Status
 
 
 class CustomUsernameRule(Rule):
@@ -410,14 +411,16 @@ def test_validate_model_fields_rejects_invalid_selected_values():
     class FormUser(Model):
         age: int
 
-    with pytest.raises(ValidationError) as exc_info:
+    with pytest.raises(HTTPException) as exc_info:
         Validate(FormUser, {"age": "not an integer"}, ("age",))
 
-    assert "age" in exc_info.value.errors
+    assert exc_info.value.status_code == Status.HTTP_406_NOT_ACCEPTABLE
+    assert exc_info.value.detail["msg"] == "invalid_data"
+    assert "age" in exc_info.value.detail["errors"]
 
 
 def test_validate_model_fields_nested_failed():
-    with pytest.raises(ValidationError) as exc_info:
+    with pytest.raises(HTTPException) as exc_info:
         Validate(
             User,
             {
@@ -427,10 +430,14 @@ def test_validate_model_fields_nested_failed():
             },
             ("username", "age", "address"),
         )
-        
-    assert exc_info.value.errors == {
-        "age": ["internal_error", ["type_error", ["int", "str"]]],
-        "address": [["unknown_field", ["fake"]]],
+
+    assert exc_info.value.status_code == Status.HTTP_406_NOT_ACCEPTABLE
+    assert exc_info.value.detail == {
+        "msg": "invalid_data",
+        "errors": {
+            "age": ["internal_error", ["type_error", ["int", "str"]]],
+            "address": [["unknown_field", ["fake"]]],
+        },
     }
 
 

@@ -393,9 +393,8 @@ class TestAppScaffolding:
         assert "self.repo:Repository[Article]" in ctrl_code
         assert "table = Table(Article, self.request)" in ctrl_code
         assert "return JsonResponse(await table.index())" in ctrl_code
-        assert "payload = Article(dict(payload))" in ctrl_code
-        assert "await self.repo.create(payload)" in ctrl_code
         assert "payload = Validate(Article,payload,None)" in ctrl_code
+        assert "await self.repo.create(Article(payload))" in ctrl_code
         assert "await self.repo.where(Article.id == id).update(payload)" in ctrl_code
         assert "await self.repo.delete(Article.id == id)" in ctrl_code
         assert "async def restore(self, id: ID):" in ctrl_code
