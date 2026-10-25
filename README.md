@@ -193,7 +193,7 @@ comparison. GitHub Actions runs it weekly; the latest results are published here
 
 <!-- benchmark-results:start -->
 
-# Cross-Framework Benchmark Results
+### Cross-Framework Benchmark Results
 
 Real HTTP/1.1 keep-alive load test of `renus` vs other Python web frameworks. Each framework serves the same routes and is hammered single-process with the bundled stdlib load tester.
 
@@ -203,41 +203,41 @@ Real HTTP/1.1 keep-alive load test of `renus` vs other Python web frameworks. Ea
 
 > These are **relative** numbers for a single machine/run. Absolute throughput is machine-dependent; rerun and take the median before drawing conclusions.
 
-## `plain` (`/plain`)
+#### `plain` (`/plain`)
 
 | Framework | req/s | p50 (ms) | p90 (ms) | p99 (ms) | max (ms) |
 |-----------|------:|---------:|---------:|---------:|---------:|
-| pur_uvicorn | 23,779 | 2.68 | 2.80 | 3.35 | 6.92 |
-| renus | 23,763 | 2.68 | 2.77 | 3.82 | 6.66 |
-| blacksheep | 23,419 | 2.72 | 2.82 | 3.38 | 7.33 |
-| robyn | 23,087 | 2.75 | 2.86 | 3.66 | 9.32 |
-| sanic | 22,561 | 2.88 | 3.13 | 3.79 | 9.22 |
-| litestar | 17,497 | 3.69 | 3.88 | 4.78 | 9.08 |
-| fastapi | 13,587 | 4.75 | 4.91 | 6.43 | 11.35 |
+| renus | 37,190 | 1.70 | 1.81 | 2.20 | 7.75 |
+| pur_uvicorn | 36,616 | 1.72 | 1.85 | 2.32 | 7.83 |
+| blacksheep | 36,053 | 1.75 | 1.87 | 2.30 | 8.23 |
+| sanic | 36,040 | 1.74 | 2.11 | 2.43 | 10.56 |
+| robyn | 35,414 | 1.78 | 1.89 | 2.20 | 9.76 |
+| litestar | 29,245 | 2.31 | 2.48 | 3.23 | 11.81 |
+| fastapi | 20,374 | 3.32 | 3.47 | 4.73 | 14.68 |
 
-## `json` (`/json`)
-
-| Framework | req/s | p50 (ms) | p90 (ms) | p99 (ms) | max (ms) |
-|-----------|------:|---------:|---------:|---------:|---------:|
-| renus | 23,713 | 2.69 | 2.79 | 3.25 | 6.50 |
-| pur_uvicorn | 23,612 | 2.68 | 2.81 | 4.14 | 7.80 |
-| blacksheep | 23,492 | 2.69 | 3.22 | 3.55 | 7.93 |
-| robyn | 23,222 | 2.73 | 2.84 | 3.64 | 7.27 |
-| sanic | 21,803 | 2.99 | 3.21 | 3.90 | 8.92 |
-| litestar | 16,998 | 3.80 | 3.98 | 4.71 | 10.39 |
-| fastapi | 12,647 | 5.12 | 5.29 | 6.02 | 10.53 |
-
-## `user` (`/user/alice`)
+#### `json` (`/json`)
 
 | Framework | req/s | p50 (ms) | p90 (ms) | p99 (ms) | max (ms) |
 |-----------|------:|---------:|---------:|---------:|---------:|
-| blacksheep | 23,710 | 2.67 | 3.18 | 3.51 | 8.30 |
-| pur_uvicorn | 23,560 | 2.71 | 2.82 | 3.33 | 7.64 |
-| renus | 23,431 | 2.72 | 2.88 | 3.63 | 7.30 |
-| sanic | 21,538 | 3.01 | 3.27 | 3.99 | 9.10 |
-| robyn | 17,031 | 3.72 | 3.83 | 4.80 | 8.87 |
-| litestar | 15,150 | 4.22 | 4.43 | 6.56 | 12.01 |
-| fastapi | 10,533 | 6.13 | 6.36 | 7.63 | 16.63 |
+| blacksheep | 36,227 | 1.74 | 1.86 | 2.11 | 8.39 |
+| sanic | 36,003 | 1.75 | 2.10 | 2.41 | 9.68 |
+| pur_uvicorn | 35,999 | 1.75 | 1.88 | 2.37 | 8.98 |
+| renus | 35,799 | 1.75 | 1.89 | 2.42 | 8.33 |
+| robyn | 35,093 | 1.80 | 1.92 | 2.27 | 10.69 |
+| litestar | 28,408 | 2.39 | 2.53 | 3.19 | 15.05 |
+| fastapi | 19,433 | 3.51 | 3.66 | 4.06 | 13.70 |
+
+#### `user` (`/user/alice`)
+
+| Framework | req/s | p50 (ms) | p90 (ms) | p99 (ms) | max (ms) |
+|-----------|------:|---------:|---------:|---------:|---------:|
+| renus | 36,094 | 1.74 | 1.87 | 2.37 | 10.10 |
+| sanic | 35,976 | 1.75 | 2.10 | 2.37 | 8.98 |
+| pur_uvicorn | 35,885 | 1.75 | 1.87 | 2.40 | 7.60 |
+| blacksheep | 35,721 | 1.77 | 1.89 | 2.27 | 7.08 |
+| robyn | 32,628 | 1.92 | 2.05 | 2.36 | 10.55 |
+| litestar | 24,825 | 2.73 | 2.91 | 3.52 | 12.50 |
+| fastapi | 16,220 | 4.10 | 4.75 | 5.26 | 14.15 |
 
 <!-- benchmark-results:end -->
 
