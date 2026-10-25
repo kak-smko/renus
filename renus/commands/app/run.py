@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import importlib
 import os
 import sys
 
@@ -28,6 +30,67 @@ def _is_kit_extension_installed(base_dir: str = "./") -> bool:
         ),
     )
     return any(os.path.exists(p) for p in check_paths)
+
+
+async def _async_add_kit_menu_route(
+    route_name: str,
+) -> None:
+    """Add the generated package to the Codenus Kit admin menu."""
+    from renus.db import Database
+
+    menu_model = importlib.import_module(
+        "app.extension.codenus.kit.menu.model"
+    ).Menu
+    get_last_id = importlib.import_module(
+        "extension.codenus.kit.menu.service"
+    ).last_id
+
+    async with Database() as db:
+        repo = db.repository(menu_model)
+        admin_menu = await repo.where(menu_model.name == "admin").first()
+        if admin_menu is None:
+            return
+
+        menu_data = admin_menu.data
+        if not isinstance(menu_data, list):
+            return
+        if any(
+            isinstance(item, dict) and item.get("permission") == route_name
+            for item in menu_data
+        ):
+            return
+
+        menu_id = get_last_id(menu_data) + 1
+        menu_data.append(
+            {
+                "id": menu_id,
+                "titles": {"en": route_name},
+                "permission": route_name,
+                "children": [],
+                "active": True,
+                "to": f'{{"name": "{route_name}"}}',
+            }
+        )
+        await repo.where(menu_model.name == "admin").update({"data": menu_data})
+
+
+def _add_kit_menu_route(
+    base_dir: str,
+    route_name: str,
+) -> None:
+    """Run the optional Kit menu update with the project on the import path."""
+    project_dir = os.path.abspath(base_dir)
+    added_to_path = project_dir not in sys.path
+    if added_to_path:
+        sys.path.insert(0, project_dir)
+    try:
+        asyncio.run(
+            _async_add_kit_menu_route(route_name)
+        )
+    finally:
+        if added_to_path:
+            sys.path.remove(project_dir)
+
 
 def add_temp(
     name: str,
@@ -200,5 +263,16 @@ def run(args: list[str] | None = None, base_dir: str = "./") -> int:
     Terminal.green.print("Templates created.")
     add_routes(name, names, name_camel, folder, base_dir=base_dir)
     Terminal.green.print("Routes created.")
+
+    if _is_kit_extension_installed(base_dir=base_dir):
+        try:
+            _add_kit_menu_route(
+                base_dir,
+                names,
+            )
+        except Exception as exc:
+            Terminal.red.print(f"Error: could not add the package to the Kit menu: {exc}")
+            return 1
+
     Terminal.cyan.print(f"Package '{name}' is ready.")
     return 0
