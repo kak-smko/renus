@@ -23,6 +23,8 @@ from renus.commands.cli import execute_handler, find_command, get_version, run
 from renus.commands.app.run import (
     add_routes,
     add_temp,
+    remove_package,
+    _remove_menu_route,
     to_camel_case,
     to_plural,
     run as app_run,
@@ -501,6 +503,66 @@ class TestAppScaffolding:
         routes_index = (tmp_path / "routes" / "api.py").read_text()
         assert "from app.invoice.route import router as invoice_route" in routes_index
         assert "router.include(invoice_route)" in routes_index
+
+    def test_app_remove_cleans_generated_package_and_routes(self, tmp_path):
+        router_js = tmp_path / "frontend" / "admin" / "src" / "router" / "index.js"
+        router_js.parent.mkdir(parents=True)
+        router_js.write_text(
+            "/* {{place new import}} */\n/* {{place new app route}} */\n"
+        )
+        (tmp_path / "app" / "admin").mkdir(parents=True)
+        (tmp_path / "app" / "admin" / "keep.py").write_text("# sibling package\n")
+
+        assert app_run(["admin.blog"], base_dir=str(tmp_path)) == 0
+        assert app_run(["--remove", "admin.blog"], base_dir=str(tmp_path)) == 0
+
+        assert not (tmp_path / "app" / "admin" / "blog").exists()
+        assert (tmp_path / "app" / "admin" / "keep.py").exists()
+        assert not (tmp_path / "frontend" / "admin" / "src" / "views" / "admin" / "blog.vue").exists()
+        assert not (tmp_path / "frontend" / "admin" / "src" / "views" / "admin").exists()
+        assert "app.admin.blog.route" not in (tmp_path / "routes" / "api.py").read_text()
+        assert "router.include(blog_route)" not in (tmp_path / "routes" / "api.py").read_text()
+        router_content = router_js.read_text()
+        assert "../views/admin/blog.vue" not in router_content
+        assert 'path: "admin/blogs"' not in router_content
+
+    def test_app_remove_requires_existing_safe_package(self, tmp_path):
+        assert app_run(["--remove"], base_dir=str(tmp_path)) == 1
+        assert remove_package("../outside", base_dir=str(tmp_path)) == 1
+        assert app_run(["--remove", "missing"], base_dir=str(tmp_path)) == 1
+
+    def test_remove_menu_route_recursively_removes_nested_entries(self):
+        menu = [
+            {
+                "permission": "admin",
+                "children": [
+                    {"permission": "users", "children": []},
+                    {
+                        "permission": "content",
+                        "children": [
+                            {"permission": "blogs", "children": []},
+                            {"permission": "pages", "children": []},
+                        ],
+                    },
+                ],
+            }
+        ]
+
+        updated_menu, changed = _remove_menu_route(menu, "blogs")
+
+        assert changed is True
+        assert updated_menu == [
+            {
+                "permission": "admin",
+                "children": [
+                    {"permission": "users", "children": []},
+                    {
+                        "permission": "content",
+                        "children": [{"permission": "pages", "children": []}],
+                    },
+                ],
+            }
+        ]
 
 class TestGeneratedScaffoldRunsAgainstDatabase:
 

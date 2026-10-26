@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import importlib
 import os
+import re
+import shutil
 import sys
 
-from renus.commands.routing import include_router_in_index
+from renus.commands.routing import include_router_in_index, remove_router_from_index
 from renus.commands.app.temp import (
     controller_temp,
     model_temp,
@@ -84,9 +86,58 @@ def _add_kit_menu_route(
     if added_to_path:
         sys.path.insert(0, project_dir)
     try:
-        asyncio.run(
-            _async_add_kit_menu_route(route_name)
-        )
+        asyncio.run(_async_add_kit_menu_route(route_name))
+    finally:
+        if added_to_path:
+            sys.path.remove(project_dir)
+
+
+def _remove_menu_route(items: list, route_name: str) -> tuple[list, bool]:
+    """Remove a matching menu route at any depth and report whether it changed."""
+    filtered = []
+    changed = False
+    for item in items:
+        if isinstance(item, dict):
+            if item.get("permission") == route_name:
+                changed = True
+                continue
+
+            children = item.get("children")
+            if isinstance(children, list):
+                filtered_children, children_changed = _remove_menu_route(
+                    children, route_name
+                )
+                if children_changed:
+                    item["children"] = filtered_children
+                    changed = True
+        filtered.append(item)
+    return filtered, changed
+
+
+async def _async_remove_kit_menu_route(route_name: str) -> None:
+    """Remove the generated package from the Codenus Kit admin menu."""
+    from renus.db import Database
+
+    menu_model = importlib.import_module("app.extension.codenus.kit.menu.model").Menu
+    async with Database() as db:
+        repo = db.repository(menu_model)
+        admin_menu = await repo.where(menu_model.name == "admin").first()
+        if admin_menu is None or not isinstance(admin_menu.data, list):
+            return
+
+        menu_data, changed = _remove_menu_route(admin_menu.data, route_name)
+        if changed:
+            await repo.where(menu_model.name == "admin").update({"data": menu_data})
+
+
+def _remove_kit_menu_route(base_dir: str, route_name: str) -> None:
+    """Run the optional Kit menu cleanup with the project on the import path."""
+    project_dir = os.path.abspath(base_dir)
+    added_to_path = project_dir not in sys.path
+    if added_to_path:
+        sys.path.insert(0, project_dir)
+    try:
+        asyncio.run(_async_remove_kit_menu_route(route_name))
     finally:
         if added_to_path:
             sys.path.remove(project_dir)
@@ -218,9 +269,114 @@ def add_routes(
         with open(router_js, "w", encoding="utf-8") as f:
             f.write(content)
 
+
+def _remove_empty_parents(path: str, stop_at: str) -> None:
+    """Remove empty generated parent folders without crossing the given root."""
+    current = os.path.dirname(path)
+    stop_at = os.path.abspath(stop_at)
+    while os.path.abspath(current) != stop_at:
+        try:
+            os.rmdir(current)
+        except OSError:
+            break
+        current = os.path.dirname(current)
+
+
+def remove_package(raw_name: str, base_dir: str = "./") -> int:
+    """Remove a generated package, its route registrations, and its Vue view."""
+    package_parts = raw_name.strip().lower().split(".")
+    if not package_parts or any(
+        not re.fullmatch(r"[a-z_][a-z0-9_]*", part) for part in package_parts
+    ):
+        Terminal.red.print("Error: package name must contain lowercase package names separated by dots.")
+        return 1
+
+    name = package_parts[-1]
+    folder = package_parts[:-1]
+    package_dir = os.path.abspath(os.path.join(base_dir, "app", *package_parts))
+    app_dir = os.path.abspath(os.path.join(base_dir, "app"))
+    resolved_app_dir = os.path.realpath(app_dir)
+    resolved_package_dir = os.path.realpath(package_dir)
+    if os.path.commonpath((resolved_app_dir, resolved_package_dir)) != resolved_app_dir:
+        Terminal.red.print("Error: package path is outside the app directory.")
+        return 1
+
+    current_path = app_dir
+    for part in package_parts:
+        current_path = os.path.join(current_path, part)
+        if os.path.islink(current_path):
+            Terminal.red.print(f"Error: package path '{raw_name}' contains a symbolic link.")
+            return 1
+    if not os.path.isdir(package_dir):
+        Terminal.red.print(f"Error: package '{raw_name}' was not found.")
+        return 1
+
+    names_raw = to_plural(name)
+    names = names_raw[0].lower() + names_raw[1:] if names_raw else ""
+    module = f"app.{'.'.join(package_parts)}.route"
+    remove_router_from_index(module, raw_name, base_dir=base_dir)
+
+    router_js = os.path.join(
+        base_dir, "frontend", "admin", "src", "router", "index.js"
+    )
+    if os.path.exists(router_js):
+        view_folder = "/".join(folder)
+        view_path = f"{view_folder + '/' if view_folder else ''}{name}.vue"
+        route_path = f"{view_folder + '/' if view_folder else ''}{names}"
+        with open(router_js, "r", encoding="utf-8") as file:
+            content = file.read()
+        content = content.replace(
+            f'const {names} = () => import("../views/{view_path}");\n', ""
+        )
+        content = content.replace(
+            f'{{ path: "{route_path}", name: "{names}", component: {names} }},\n',
+            "",
+        )
+        with open(router_js, "w", encoding="utf-8") as file:
+            file.write(content)
+
+    view_file = os.path.abspath(
+        os.path.join(
+            base_dir,
+            "frontend",
+            "admin",
+            "src",
+            "views",
+            *folder,
+            f"{name}.vue",
+        )
+    )
+    views_dir = os.path.abspath(
+        os.path.join(base_dir, "frontend", "admin", "src", "views")
+    )
+    if os.path.commonpath((views_dir, view_file)) == views_dir:
+        if os.path.isfile(view_file) or os.path.islink(view_file):
+            os.remove(view_file)
+        _remove_empty_parents(view_file, views_dir)
+
+    shutil.rmtree(package_dir)
+    _remove_empty_parents(package_dir, app_dir)
+
+    if _is_kit_extension_installed(base_dir=base_dir):
+        try:
+            _remove_kit_menu_route(base_dir, names)
+        except Exception as exc:
+            Terminal.red.print(f"Error: could not remove the package from the Kit menu: {exc}")
+            return 1
+
+    Terminal.cyan.print(f"Package '{raw_name}' was removed.")
+    return 0
+
+
 def run(args: list[str] | None = None, base_dir: str = "./") -> int:
     """Scaffold a new package and register its routes."""
     command_args = args or []
+    if command_args and command_args[0] == "--remove":
+        if len(command_args) < 2 or not command_args[1].strip():
+            Terminal.red.print("Error: provide a package name to remove.")
+            return 1
+        return remove_package(command_args[1], base_dir=base_dir)
+
     raw_name = command_args[0].strip().lower() if command_args else ""
     if not raw_name:
         raw_name = input("name (single lowercase): ").strip().lower()
