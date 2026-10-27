@@ -274,12 +274,10 @@ async def test_sqlite_end_to_end_repository_operations():
     assert await emp_repo.query().only_deleted().count() == 1
 
 
-    async with db.unit_of_work() as uow:
-        p_uow = uow.repository(Project)
-        await p_uow.create(Project(code="UOW-PRJ", budget=5000.0))
-        await uow.commit()
+    async with db.transaction():
+        await prj_repo.create(Project(code="TX-PRJ", budget=5000.0))
 
-    assert await prj_repo.exists(Project.code == "UOW-PRJ") is True
+    assert await prj_repo.exists(Project.code == "TX-PRJ") is True
 
     await db.disconnect()
 

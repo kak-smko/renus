@@ -205,7 +205,7 @@ For successful direct mutations, inspect the integer returned by the repository 
 
 ## 13. Atomic groups of mutations
 
-A mutation is not a replacement for an application-level transaction. Wrap related writes in `db.transaction()` or use a unit of work when they must commit or roll back together:
+A mutation is not a replacement for an application-level transaction. Wrap related writes in `db.transaction()` when they must commit or roll back together:
 
 ```python
 async with db.transaction():
@@ -213,7 +213,7 @@ async with db.transaction():
     await users.create(User(username="two", name="Two"))
 ```
 
-See [`/docs/database/transactions.md`](transactions.md) and [`/docs/database/uow.md`](uow.md) for transaction boundaries and rollback behavior.
+See [`/docs/database/transactions.md`](transactions.md) for transaction boundaries and rollback behavior.
 
 ## Next steps
 

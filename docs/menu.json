@@ -103,7 +103,7 @@
           "path": "docs/database/queries.md"
         },
         {
-          "name": "Transactions & Unit of Work",
+          "name": "Transactions",
           "path": "docs/database/transactions.md"
         },
         {

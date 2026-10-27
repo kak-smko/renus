@@ -385,7 +385,7 @@ async with db.transaction():
     await users.create(second_user)
 ```
 
-Use `db.unit_of_work()` when several repositories share a transaction. Do not assume nested transactions are supported; verify the adapter implementation.
+Use `db.transaction()` when several repositories share an atomic boundary. Do not assume nested transactions are supported; verify the adapter implementation.
 
 ### 75–85%: migrations, backup, plugins, and scheduling
 

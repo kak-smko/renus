@@ -118,7 +118,6 @@ from renus.db.serialization import (
 )
 from renus.db.sqlite import SQLiteAdapter
 from renus.db.transaction import Transaction
-from renus.db.unit_of_work import UnitOfWork
 
 __all__ = [
     "AsyncDatabaseAdapter",
@@ -205,8 +204,6 @@ __all__ = [
     "TransactionContext",
     "TransactionError",
     "DBError",
-
-    "UnitOfWork",
     "UnsupportedOperationError",
     "Update",
     "UpdateMany",

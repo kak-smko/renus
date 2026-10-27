@@ -11,7 +11,6 @@ from renus.db.core.exceptions import ConfigurationError
 from renus.db.plugins.core import Plugin, PluginManager
 from renus.db.repository.core import Repository
 from renus.db.transaction.core import Transaction
-from renus.db.unit_of_work.core import UnitOfWork
 
 T = TypeVar("T")
 
@@ -156,10 +155,6 @@ class Database:
     ) -> Repository[T]:
         """Create a repository for a model on a connection."""
         return Repository(self, model, connection)
-
-    def unit_of_work(self, connection: str = "primary") -> UnitOfWork:
-        """Start a unit of work on a connection."""
-        return UnitOfWork(self.adapter(connection), connection)
 
     def transaction(self, connection: str = "primary") -> Transaction:
         """Create a transaction context for a connection."""

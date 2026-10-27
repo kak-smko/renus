@@ -11,7 +11,7 @@ flowchart TD
     DB --> Repo[Repository<Model>]
     Repo --> Query[Query builder]
     Repo --> Mutation[Create, update, delete]
-    DB --> Tx[Transaction or UnitOfWork]
+    DB --> Tx[Transaction]
     DB --> Adapter[AsyncDatabaseAdapter]
     Adapter --> SQLite[SQLiteAdapter]
     Adapter --> MySQL[MySQLAdapter]
@@ -24,7 +24,7 @@ The main layers are:
 - **Repositories** bind a model to a database connection and expose persistence and query operations.
 - **Queries** build an immutable query structure that adapters compile and execute.
 - **Adapters** implement the asynchronous backend interface. Renus includes SQLite, MySQL, and MongoDB adapters.
-- **Transactions and units of work** define the boundary for atomic database work.
+- **Transactions** define the boundary for atomic database work.
 - **Migrations** apply and track versioned schema changes.
 - **Plugins** receive connection, query, mutation, and error lifecycle hooks.
 
@@ -228,7 +228,7 @@ Supported query operations include:
 
 A normal query returns hydrated model instances. A query with a projection or aggregate returns dictionaries containing the selected result data. See [Queries](queries.md) for the complete query API and condition operators.
 
-## Transactions and units of work
+## Transactions
 
 Use `Database.transaction()` when a block of operations should commit or roll back as one transaction:
 
@@ -240,18 +240,6 @@ async with db.transaction():
 
 The transaction context commits when the block exits without an exception and rolls back when an exception escapes. The adapter does not support nested transactions.
 
-Use `Database.unit_of_work()` when several repositories should share one transactional boundary:
-
-```python
-async with db.unit_of_work() as work:
-    users = work.repository(User)
-    posts = work.repository(Post)
-    await users.create(User(id="u6", name="Alan Turing"))
-    await posts.create(Post(id="p1", title="Programming"))
-    await work.commit()
-```
-
-A `UnitOfWork` caches repositories by model and exposes `commit()` and `rollback()`. If the unit of work exits without an explicit commit, its current transaction is rolled back. See [Transactions](transactions.md) and [Unit of Work](uow.md) for the detailed semantics.
 
 ## Migrations
 
@@ -290,7 +278,6 @@ Both methods return a dictionary of table names and row counts. See [Backup & Re
 - [Queries](queries.md) — build and execute filters, projections, ordering, pagination, and aggregates.
 - [Mutations](mutations.md) — insert, update, and delete data.
 - [Repositories](repositories.md) — organize model persistence behind repository objects.
-- [Unit of Work](uow.md) — coordinate repositories in one application operation.
 - [Transactions](transactions.md) — control commit and rollback boundaries.
 - [Migrations](migrations.md) — evolve and track database schemas.
 - [Adapters](adapters.md) — configure and extend database backends.

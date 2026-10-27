@@ -3153,7 +3153,7 @@ async def test_hard_delete_object_and_query(kind):
 
 
 # ---------------------------------------------------------------------------
-# Transactions & unit of work
+# Transactions
 # ---------------------------------------------------------------------------
 
 
@@ -3221,9 +3221,14 @@ async def test_transaction_commit_and_rollback(kind):
         await cleanup(db)
 
 
+# ---------------------------------------------------------------------------
+# Transactions
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_unit_of_work_commit_across_repositories(kind):
+async def test_transaction_cross_repository_atomic_commit(kind):
     db = await database_for(kind)
     adapter = db.adapter("primary")
     transaction_calls: list[None] = []
@@ -3235,105 +3240,9 @@ async def test_unit_of_work_commit_across_repositories(kind):
 
     adapter.transaction_factory = transaction_factory
     try:
-        repo = db.repository(User)
-        async with db.unit_of_work() as uow:
-            assert uow.is_active is True
-            assert uow.is_committed is False
-
-            u_users = uow.repository(User)
-            u_posts = uow.repository(Post)
-            await u_users.create(_u("uw1", "uw1", age=7))
-            await u_posts.create(Post(id="up1", title="uow post", user_id="uw1"))
-            await u_users.create(_u("uw2", "uw2", age=8))
-
-            assert uow.users is u_users
-            assert uow.posts is u_posts
-
-            await uow.commit()
-            assert uow.is_committed is True
-
-        assert await repo.exists(User.username == "uw1") is True
-        assert await repo.exists(User.username == "uw2") is True
-        assert transaction_calls == [None]
-        posts = await db.repository(Post).where(Post.user_id == "uw1").all()
-        assert len(posts) == 1
-        assert posts[0].title == "uow post"
-    finally:
-        await cleanup(db)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ADAPTERS)
-async def test_unit_of_work_rollback_on_uncommitted_exit(kind):
-    db = await database_for(kind)
-    try:
-        repo = db.repository(User)
-        async with db.unit_of_work() as uow:
-            await uow.repository(User).create(_u("uwr1", "uwr1", age=1))
-            await uow.repository(User).create(_u("uwr2", "uwr2", age=2))
-
-        assert await repo.exists(User.username == "uwr1") is False
-        assert await repo.exists(User.username == "uwr2") is False
-    finally:
-        await cleanup(db)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ADAPTERS)
-async def test_unit_of_work_rollback_on_exception(kind):
-    db = await database_for(kind)
-    try:
-        repo = db.repository(User)
-        with pytest.raises(RuntimeError):
-            async with db.unit_of_work() as uow:
-                await uow.repository(User).create(_u("uwx1", "uwx1", age=1))
-                await uow.repository(User).create(_u("uwx2", "uwx2", age=2))
-                raise RuntimeError("boom")
-
-        assert await repo.exists(User.username == "uwx1") is False
-        assert await repo.exists(User.username == "uwx2") is False
-    finally:
-        await cleanup(db)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ADAPTERS)
-async def test_unit_of_work_explicit_rollback(kind):
-    db = await database_for(kind)
-    try:
-        repo = db.repository(User)
-        async with db.unit_of_work() as uow:
-            await uow.repository(User).create(_u("uwz1", "uwz1", age=1))
-            await uow.rollback()
-            assert uow.is_committed is False
-        assert await repo.exists(User.username == "uwz1") is False
-    finally:
-        await cleanup(db)
-
-
-# ---------------------------------------------------------------------------
-# Transactions & unit of work
-#
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ADAPTERS)
-async def test_uow_cross_repository_atomic_commit(kind):
-    db = await database_for(kind)
-    adapter = db.adapter("primary")
-    transaction_calls: list[None] = []
-    original_factory = adapter.transaction_factory
-
-    def transaction_factory():
-        transaction_calls.append(None)
-        return original_factory()
-
-    adapter.transaction_factory = transaction_factory
-    try:
-        async with db.unit_of_work() as uow:
-            users = uow.repository(User)
-            posts = uow.repository(Post)
+        async with db.transaction():
+            users = db.repository(User)
+            posts = db.repository(Post)
             await users.create(
                 _u(
                     "a1",
@@ -3346,7 +3255,6 @@ async def test_uow_cross_repository_atomic_commit(kind):
             await posts.create_many(
                 [_p("ap1", "Alice first post", "a1"), _p("ap2", "Alice two post", "a1")]
             )
-            await uow.commit()
 
         assert transaction_calls == [None]
         assert await db.repository(User).count() == 1
@@ -3367,12 +3275,12 @@ async def test_uow_cross_repository_atomic_commit(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_uow_cross_repository_rollback_on_error(kind):
+async def test_transaction_cross_repository_rollback_on_error(kind):
     db = await database_for(kind)
     try:
         with pytest.raises(ValueError, match="Simulated transfer failure"):
-            async with db.unit_of_work() as uow:
-                await uow.repository(User).create(
+            async with db.transaction():
+                await db.repository(User).create(
                     _u(
                         "b1",
                         "bob",
@@ -3381,7 +3289,7 @@ async def test_uow_cross_repository_rollback_on_error(kind):
                         profile=Profile(city="Shiraz", street="two"),
                     )
                 )
-                await uow.repository(Post).create(_p("bp1", "Bob post", "b1"))
+                await db.repository(Post).create(_p("bp1", "Bob post", "b1"))
                 raise ValueError("Simulated transfer failure")
 
         assert await db.repository(User).count() == 0
@@ -3396,11 +3304,35 @@ async def test_uow_cross_repository_rollback_on_error(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_uow_auto_rollback_on_uncommitted_exit(kind):
+async def test_transaction_rolls_back_cross_repository_writes_on_duplicate_user_id(kind):
     db = await database_for(kind)
     try:
-        async with db.unit_of_work() as uow:
-            await uow.repository(User).create(
+        users = db.repository(User)
+        posts = db.repository(Post)
+
+        with pytest.raises(DuplicateKeyError):
+            async with db.transaction():
+                await users.create(_u("tx-duplicate", "tx-first"))
+                await posts.create(_p("tx-post", "Transaction post", "tx-duplicate"))
+                await users.create(_u("tx-duplicate", "tx-second"))
+
+        assert await users.count() == 0
+        assert await posts.count() == 0
+        assert await _row_counts(db, "users", "posts") == {
+            "users": 0,
+            "posts": 0,
+        }
+    finally:
+        await cleanup(db)
+        
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_transaction_commit_relationship_changes(kind):
+    db = await database_for(kind)
+    try:
+        async with db.transaction():
+            await db.repository(User).create(
                 _u(
                     "c1",
                     "charlie",
@@ -3410,8 +3342,7 @@ async def test_uow_auto_rollback_on_uncommitted_exit(kind):
                 )
             )
 
-        assert uow.is_active is False
-        assert await db.repository(User).count() == 0
+        assert await db.repository(User).count() == 1
     finally:
         await cleanup(db)
 
@@ -3449,7 +3380,7 @@ async def test_committed_row_visibility(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
-async def test_uow_rollback_and_transaction_commit(kind):
+async def test_transaction_explicit_rollback_and_commit(kind):
     db = await database_for(kind)
     adapter = db.adapter("primary")
     transaction_calls: list[None] = []
@@ -3461,8 +3392,8 @@ async def test_uow_rollback_and_transaction_commit(kind):
 
     adapter.transaction_factory = transaction_factory
     try:
-        async with db.unit_of_work() as uow:
-            await uow.repository(User).create(
+        async with db.transaction() as transaction:
+            await db.repository(User).create(
                 _u(
                     "u1",
                     "bob",
@@ -3471,6 +3402,7 @@ async def test_uow_rollback_and_transaction_commit(kind):
                     profile=Profile(city="Mashhad", street="six"),
                 )
             )
+            await transaction.rollback()
         assert transaction_calls == [None]
         assert await db.repository(User).count() == 0
 
@@ -5182,5 +5114,30 @@ async def test_repository_rejects_dict_for_model_inputs(kind):
 
         # Rejecting a bad member must happen before a valid batch member is written.
         assert await repository.query().with_deleted().count() == 0
+    finally:
+        await cleanup(database)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_id_update(kind):
+    class TableUser(Model):
+        id: int = Field(database=DatabaseField(primary_key=True))
+        name: str
+
+    database = await database_for(kind, [TableUser])
+
+    try:
+        repository = database.repository(TableUser)
+        await repository.create(TableUser(
+                    id=1,
+                    name="smko"
+                ))
+
+
+        r=await repository.where(TableUser.id==1).update({"id":2,"name":"kak-smko"})
+        assert r==1
+        user = await repository.where(TableUser.id==2).first()
+        assert user.name=="kak-smko"
     finally:
         await cleanup(database)

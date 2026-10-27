@@ -1,13 +1,6 @@
-# Transactions & Unit of Work
+# Transactions
 
-Renus provides two ways to group database operations into one atomic boundary:
-
-- `db.transaction()` is a direct transaction context for one sequence of operations.
-- `db.unit_of_work()` coordinates repositories for several models and requires an explicit commit.
-
-Both APIs operate on one named database connection. They are asynchronous context managers.
-
-## Transactions
+`db.transaction()` groups database operations on one named connection into an atomic boundary. It is an asynchronous context manager.
 
 Create a transaction from `Database` and use it with `async with`:
 
@@ -65,48 +58,6 @@ async with db.transaction():
 
 If an application needs independent transaction boundaries, complete the outer context before starting the next one.
 
-## Unit of Work
-
-Use a unit of work when one application operation writes through multiple repositories. Repositories created by the unit of work share its connection and transaction:
-
-```python
-async with db.unit_of_work() as work:
-    users = work.repository(User)
-    accounts = work.repository(Account)
-
-    user = await users.create(User(id="u4", name="Alan"))
-    await accounts.create(Account(user_id=user.id, balance=100))
-    await work.commit()
-```
-
-`work.repository(Model)` caches one repository per model for the lifetime of the unit of work. The unit of work also exposes:
-
-- `adapter` — the adapter used by the work;
-- `connection_name` — the selected connection name;
-- `is_active` — whether the context is open;
-- `is_committed` — whether `commit()` has been called;
-- `repository(Model)` — retrieve or create a model repository;
-- `commit()` — commit the current transaction;
-- `rollback()` — roll back the current transaction.
-
-A unit of work does **not** commit automatically on a clean context exit. If the block exits without `await work.commit()`, its changes are rolled back:
-
-```python
-async with db.unit_of_work() as work:
-    await work.repository(User).create(User(id="u5", name="Temporary"))
-    # No commit: the insert is rolled back on exit.
-```
-
-An exception also rolls back the unit of work. `commit()` and `rollback()` must be called while the unit of work is active.
-
-## Which API should you use?
-
-| Need | API |
-| --- | --- |
-| Group a short sequence of writes | `db.transaction()` |
-| Share one boundary across several model repositories | `db.unit_of_work()` |
-| Commit automatically after successful block exit | `db.transaction()` |
-| Decide explicitly whether an application operation commits | `db.unit_of_work()` |
 
 Transactions do not replace the repository and query APIs. See [`/docs/database/repositories.md`](/docs/database/repositories.md), [`/docs/database/mutations.md`](/docs/database/mutations.md), and [`/docs/database/queries.md`](/docs/database/queries.md) for the operations placed inside these boundaries.
 

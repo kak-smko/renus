@@ -175,7 +175,7 @@ The methods return the number of affected rows. Relationship cascade behavior de
 
 Repository methods use the adapter selected at construction time. They do not open or close the `Database` for you, so connect before schema and repository work and disconnect when the application is finished.
 
-For several repository operations that must commit or roll back together, use [`/docs/database/transactions.md`](transactions.md) or [`/docs/database/uow.md`](uow.md):
+For several repository operations that must commit or roll back together, use [`/docs/database/transactions.md`](transactions.md):
 
 ```python
 async with db.transaction():
