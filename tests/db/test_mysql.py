@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
 from renus.db import (
+    Database,
     DatabaseError,
     DatabaseField,
     DuplicateKeyError,
@@ -428,4 +430,94 @@ def test_mysql_database_identifier_rejects_sql_fragments():
     assert _conformance._mysql_identifier("safe_db_1") == "`safe_db_1`"
     with pytest.raises(ValueError):
         _conformance._mysql_identifier("unsafe`; DROP DATABASE mysql; --")
+
+
+@pytest.mark.asyncio
+async def test_native_mysql_graph_update():
+    class GraphChilds(Model):
+        id: str = Field(database=DatabaseField(primary_key=True))
+        total_childs: int = 0
+
+    class Graph(Model):
+        id: int = Field(database=DatabaseField(primary_key=True, generated=True, auto_inc=True))
+        parent: int = 0
+        gen: str = Field(database=DatabaseField(unique=True, indexed=True))
+        genum: str
+        status: int = 0
+
+    if not _conformance._mysql_ready():
+        pytest.skip("MySQL is unavailable or test database privileges are missing")
+
+    database_name = f"renus_graph_test_{uuid4().hex}"
+    adapter = _conformance._ConformanceMySQLAdapter(
+        {
+            "host": "localhost",
+            "port": 3306,
+            "user": "root",
+            "password": "",
+            "database": database_name,
+            "retries": 1,
+            "connect_timeout": 2,
+        }
+    )
+    db = Database(adapter)
+
+    try:
+        await db.connect()
+        await db.create_schema([GraphChilds, Graph])
+        graph_repo: Repository[Graph] = db.repository(Graph)
+        child_repo: Repository[GraphChilds] = db.repository(GraphChilds)
+
+        await child_repo.create_many(
+            [
+                GraphChilds(id="0"),
+                GraphChilds(id="a"),
+                GraphChilds(id="b"),
+                GraphChilds(id="c"),
+                GraphChilds(id="d"),
+            ]
+        )
+        await graph_repo.create_many(
+            [
+                Graph(id=1, gen="0", genum="-0-"),
+                Graph(id=2, gen="a", genum="-0-a-"),
+                Graph(id=3, gen="b", genum="-0-a-b-"),
+                Graph(id=4, gen="c", genum="-0-a-b-c-"),
+                Graph(id=5, gen="d", genum="-0-a-d-"),
+            ]
+        )
+
+        nodes = (
+            await graph_repo.where(Graph.status == 0)
+            .select(Graph.genum, Graph.id)
+            .limit(100)
+            .all()
+        )
+        book: dict[str, int] = {}
+        for node in nodes:
+            ancestors = [part for part in node["genum"].split("-") if part][:-1]
+            for ancestor in ancestors:
+                book[ancestor] = book.get(ancestor, 0) + 1
+
+        nodes_id = [node["id"] for node in nodes]
+        child_table = adapter.dialect.quote(GraphChilds.metadata().table)
+        child_id = adapter.dialect.quote(GraphChilds.metadata().primary_key_field)
+        child_total = adapter.dialect.quote("total_childs")
+        async with db.transaction():
+            await graph_repo.where(Graph.id.in_(nodes_id)).update({"status": 1})
+            async with adapter._tx_session.cursor() as cursor:
+                for ancestor, total in book.items():
+                    await cursor.execute(
+                        f"UPDATE {child_table} SET {child_total} = {child_total} + %s "
+                        f"WHERE {child_id} = %s",
+                        (total, ancestor),
+                    )
+
+        assert await graph_repo.where(Graph.status == 1).count() == 5
+        assert (await child_repo.where(GraphChilds.id == "0").first()).total_childs == 4
+        assert (await child_repo.where(GraphChilds.id == "a").first()).total_childs == 3
+        assert (await child_repo.where(GraphChilds.id == "b").first()).total_childs == 1
+    finally:
+        await db.disconnect()
+        await _conformance._drop_mysql_database(adapter)
 

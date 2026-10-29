@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
 from renus.db import (
     Avg,
     Count,
+    Database,
     DatabaseField,
 
     Field,
@@ -409,3 +411,96 @@ async def test_mongodb_transaction_context():
 
     mock_session.abort_transaction.assert_called_once()
     mock_session.end_session.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_native_mongodb_graph_update():
+    class GraphChilds(Model):
+        id: str = Field(database=DatabaseField(primary_key=True))
+        total_childs: int = 0
+
+    class Graph(Model):
+        id: int = Field(database=DatabaseField(primary_key=True, generated=True))
+        parent: int = 0
+        gen: str = Field(database=DatabaseField(unique=True, indexed=True))
+        genum: str
+        status: int = 0
+
+    database_name = f"renus_graph_test_{uuid4().hex}"
+    adapter = MongoDBAdapter(
+        {
+            "uri": "mongodb://localhost:27017",
+            "database": database_name,
+            "retries": 1,
+            "server_selection_timeout_ms": 1000,
+        }
+    )
+    db = Database(adapter)
+
+    try:
+        await db.connect()
+    except Exception as exc:
+        pytest.skip(f"MongoDB is unavailable: {exc}")
+
+    try:
+        hello = await adapter._mongo_db.command("hello")
+        if not (hello.get("setName") or hello.get("msg") == "isdbgrid"):
+            pytest.skip("MongoDB transactions require a replica set or sharded cluster")
+
+        graph_repo: Repository[Graph] = db.repository(Graph)
+        child_repo: Repository[GraphChilds] = db.repository(GraphChilds)
+        await child_repo.create_many(
+            [
+                GraphChilds(id="0"),
+                GraphChilds(id="a"),
+                GraphChilds(id="b"),
+                GraphChilds(id="c"),
+                GraphChilds(id="d"),
+            ]
+        )
+        await graph_repo.create_many(
+            [
+                Graph(id=0, gen="0", genum="-0-"),
+                Graph(id=1, gen="a", genum="-0-a-"),
+                Graph(id=2, gen="b", genum="-0-a-b-"),
+                Graph(id=3, gen="c", genum="-0-a-b-c-"),
+                Graph(id=4, gen="d", genum="-0-a-d-"),
+            ]
+        )
+
+        nodes = (
+            await graph_repo.where(Graph.status == 0)
+            .select(Graph.genum, Graph.id)
+            .limit(100)
+            .all()
+        )
+        book: dict[str, int] = {}
+        for node in nodes:
+            ancestors = [part for part in node["genum"].split("-") if part][:-1]
+            for ancestor in ancestors:
+                book[ancestor] = book.get(ancestor, 0) + 1
+
+        nodes_id = [node["id"] for node in nodes]
+        async with db.transaction():
+            await graph_repo.where(Graph.id.in_(nodes_id)).update({"status": 1})
+            child_collection = adapter._mongo_db[GraphChilds.metadata().table]
+            for ancestor, total in book.items():
+                await child_collection.update_one(
+                    {"_id": ancestor},
+                    {"$inc": {"total_childs": total}},
+                    session=adapter._tx_session,
+                )
+
+        graph_collection = adapter._mongo_db[Graph.metadata().table]
+        assert await graph_collection.count_documents({"status": 1}) == 5
+        assert (await child_collection.find_one({"_id": "0"}))[
+            "total_childs"
+        ] == 4
+        assert (await child_collection.find_one({"_id": "a"}))[
+            "total_childs"
+        ] == 3
+        assert (await child_collection.find_one({"_id": "b"}))[
+            "total_childs"
+        ] == 1
+    finally:
+        await adapter._mongo_client.drop_database(database_name)
+        await db.disconnect()
