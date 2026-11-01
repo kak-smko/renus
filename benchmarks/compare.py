@@ -112,6 +112,7 @@ def _write_markdown(
     enum_eps: list[str],
     duration: float,
     concurrency: int,
+    output: str | None = None,
 ) -> str:
     lines: list[str] = []
     lines.append("### Cross-Framework Benchmark Results")
@@ -148,7 +149,9 @@ def _write_markdown(
                 f"{_pc(lat, 99) * 1e3:.2f} | {max(lat) * 1e3 if lat else float('nan'):.2f} |"
             )
         lines.append("")
-    out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RESULTS.md")
+    out_path = output or os.path.join(_ROOT, "benchmarks", "RESULTS.md")
+    if not os.path.isabs(out_path):
+        out_path = os.path.join(_ROOT, out_path)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines))
     return out_path
@@ -167,7 +170,11 @@ def main() -> None:
     parser.add_argument(
         "--endpoints", nargs="*", default=ENDPOINTS, choices=ENDPOINTS,
     )
-    parser.add_argument("-o", "--output", default="RESULTS.md")
+    parser.add_argument(
+        "-o",
+        "--output",
+        help="Markdown output file (default: benchmarks/RESULTS.md)",
+    )
     args = parser.parse_args()
 
     frameworks = [f for f in args.frameworks if f in FRAMEWORKS]
@@ -191,7 +198,7 @@ def main() -> None:
         print(f"[bench] {name}: done", flush=True)
 
     _report(results, args.endpoints, args.duration, args.concurrency)
-    out = _write_markdown(results, args.endpoints, args.duration, args.concurrency)
+    out = _write_markdown(results, args.endpoints, args.duration, args.concurrency, args.output)
     print(f"\nResults written to {out}")
 
 if __name__ == "__main__":

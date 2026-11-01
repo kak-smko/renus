@@ -38,9 +38,9 @@ Default: all frameworks, `--duration 5`, `--concurrency 64`. Options:
 | `--endpoints`  | Subset of `plain json user` |
 | `-d` / `--duration` | Seconds per endpoint |
 | `-c` / `--concurrency` | Keep-alive connections |
-| `-o` / `--output` | Markdown file (default `RESULTS.md`) |
+| `-o` / `--output` | Markdown file (default `benchmarks/RESULTS.md`) |
 
-Results are printed to stdout and written to `RESULTS.md`.
+Results are printed to stdout and written to `benchmarks/RESULTS.md` by default. Paths supplied with `--output` are relative to the repository root.
 
 ## How it works
 

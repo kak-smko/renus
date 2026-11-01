@@ -188,58 +188,10 @@ The full documentation covers:
 
 ## Benchmarks
 
-The [benchmark guide](benchmarks/README.md) describes the cross-framework HTTP
-comparison. GitHub Actions runs it weekly; the latest results are published here.
-
-<!-- benchmark-results:start -->
-
-### Cross-Framework Benchmark Results
-
-Real HTTP/1.1 keep-alive load test of `renus` vs other Python web frameworks. Each framework serves the same routes and is hammered single-process with the bundled stdlib load tester.
-
-- Python: 3.12.15
-- Concurrency: 64 keep-alive connections
-- Duration: 60.0s per endpoint
-
-> These are **relative** numbers for a single machine/run. Absolute throughput is machine-dependent; rerun and take the median before drawing conclusions.
-
-#### `plain` (`/plain`)
-
-| Framework | req/s | p50 (ms) | p90 (ms) | p99 (ms) | max (ms) |
-|-----------|------:|---------:|---------:|---------:|---------:|
-| renus | 37,190 | 1.70 | 1.81 | 2.20 | 7.75 |
-| pur_uvicorn | 36,616 | 1.72 | 1.85 | 2.32 | 7.83 |
-| blacksheep | 36,053 | 1.75 | 1.87 | 2.30 | 8.23 |
-| sanic | 36,040 | 1.74 | 2.11 | 2.43 | 10.56 |
-| robyn | 35,414 | 1.78 | 1.89 | 2.20 | 9.76 |
-| litestar | 29,245 | 2.31 | 2.48 | 3.23 | 11.81 |
-| fastapi | 20,374 | 3.32 | 3.47 | 4.73 | 14.68 |
-
-#### `json` (`/json`)
-
-| Framework | req/s | p50 (ms) | p90 (ms) | p99 (ms) | max (ms) |
-|-----------|------:|---------:|---------:|---------:|---------:|
-| blacksheep | 36,227 | 1.74 | 1.86 | 2.11 | 8.39 |
-| sanic | 36,003 | 1.75 | 2.10 | 2.41 | 9.68 |
-| pur_uvicorn | 35,999 | 1.75 | 1.88 | 2.37 | 8.98 |
-| renus | 35,799 | 1.75 | 1.89 | 2.42 | 8.33 |
-| robyn | 35,093 | 1.80 | 1.92 | 2.27 | 10.69 |
-| litestar | 28,408 | 2.39 | 2.53 | 3.19 | 15.05 |
-| fastapi | 19,433 | 3.51 | 3.66 | 4.06 | 13.70 |
-
-#### `user` (`/user/alice`)
-
-| Framework | req/s | p50 (ms) | p90 (ms) | p99 (ms) | max (ms) |
-|-----------|------:|---------:|---------:|---------:|---------:|
-| renus | 36,094 | 1.74 | 1.87 | 2.37 | 10.10 |
-| sanic | 35,976 | 1.75 | 2.10 | 2.37 | 8.98 |
-| pur_uvicorn | 35,885 | 1.75 | 1.87 | 2.40 | 7.60 |
-| blacksheep | 35,721 | 1.77 | 1.89 | 2.27 | 7.08 |
-| robyn | 32,628 | 1.92 | 2.05 | 2.36 | 10.55 |
-| litestar | 24,825 | 2.73 | 2.91 | 3.52 | 12.50 |
-| fastapi | 16,220 | 4.10 | 4.75 | 5.26 | 14.15 |
-
-<!-- benchmark-results:end -->
+Renus delivers fast request handling and strong throughput in cross-framework
+benchmarks. See the [benchmark guide](benchmarks/README.md) for methodology and
+comparisons. GitHub Actions runs the benchmarks weekly; view the [latest
+results](benchmarks/RESULTS.md).
 
 ## Development
 
