@@ -276,14 +276,7 @@ class SQLAdapter(AsyncDatabaseAdapter):
             pk_constraint = " PRIMARY KEY" if fmeta.primary_key else ""
             null_constraint = " NULL" if fmeta.nullable else " NOT NULL"
             unique_constraint = " UNIQUE" if fmeta.unique else ""
-            default_constraint = ""
-            if fmeta.has_default and fmeta.default is not None:
-                if isinstance(fmeta.default, bool):
-                    default_constraint = f" DEFAULT {1 if fmeta.default else 0}"
-                elif isinstance(fmeta.default, (int, float)):
-                    default_constraint = f" DEFAULT {fmeta.default}"
-                else:
-                    default_constraint = f" DEFAULT '{fmeta.default}'"
+            default_constraint = self.dialect.column_default_sql(fmeta, type_def)
 
             col_defs.append(
                 f"{col_name} {type_def}{pk_constraint}{null_constraint}"
@@ -374,6 +367,10 @@ class SQLAdapter(AsyncDatabaseAdapter):
                     continue
                 await self._execute_ddl(self._main_table_sql(meta))
                 for idx in meta.indexes:
+                    if idx.unique and len(idx.fields) == 1:
+                        field_meta = meta.get_field(idx.fields[0])
+                        if field_meta is not None and field_meta.unique:
+                            continue
                     await self._execute_index_ddl(self._index_sql(meta, idx))
 
 

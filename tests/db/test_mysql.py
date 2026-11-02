@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -50,6 +52,9 @@ def test_mysql_dialect_quoting_and_placeholders():
     assert dialect.quote("user`table") == "`user``table`"
     assert dialect.placeholder == "%s"
     assert dialect.placeholders(4) == "%s, %s, %s, %s"
+    assert dialect.limit_offset("SELECT 1", None, 2) == (
+        "SELECT 1 LIMIT 18446744073709551615 OFFSET 2"
+    )
 
 def test_mysql_dialect_type_mapping():
     dialect = MySQLDialect()
@@ -65,7 +70,26 @@ def test_mysql_dialect_type_mapping():
     assert balance_sql == "DOUBLE"
 
     active_sql = dialect.type_to_sql(meta.fields["active"])
-    assert active_sql == "TINYINT(1)"
+    assert active_sql == "BOOLEAN"
+    assert dialect.type_to_sql(meta.fields["created_at"]) == "DATETIME(6)"
+
+    class TemporalValues(Model):
+        created: datetime
+        at: time
+
+    temporal_meta = TemporalValues.metadata()
+    assert dialect.type_to_sql(temporal_meta.fields["created"]) == "DATETIME(6)"
+    assert dialect.type_to_sql(temporal_meta.fields["at"]) == "TIME(6)"
+
+    class StringKey(Model):
+        id: str = Field(database=DatabaseField(primary_key=True))
+        name: str
+
+    string_key_meta = StringKey.metadata()
+    assert dialect.type_to_sql(string_key_meta.fields["id"]) == "VARCHAR(255)"
+    ddl = MySQLAdapter()._main_table_sql(string_key_meta)
+    assert "`id` VARCHAR(255) PRIMARY KEY NOT NULL" in ddl
+    assert "`id` LONGTEXT" not in ddl
 
 
 def test_mysql_compiler_query_compilation():
@@ -177,6 +201,8 @@ async def test_mysql_adapter_connection_options(monkeypatch, config, overrides):
     cursor.__aenter__ = AsyncMock(return_value=cursor)
     cursor.__aexit__ = AsyncMock(return_value=None)
     conn.cursor = MagicMock(return_value=cursor)
+    conn.commit = AsyncMock()
+    conn.rollback = AsyncMock()
     pool.acquire = AsyncMock(return_value=conn)
     pool.release = MagicMock()
     pool.close = MagicMock()
@@ -305,6 +331,7 @@ async def test_mysql_error_translation():
 
     mock_conn = MagicMock()
     mock_conn.cursor = MagicMock(return_value=mock_cursor)
+    mock_conn.rollback = AsyncMock()
     mock_pool = MagicMock()
     mock_pool.acquire = AsyncMock(return_value=mock_conn)
     mock_pool.release = MagicMock()
@@ -313,10 +340,14 @@ async def test_mysql_error_translation():
 
     with pytest.raises(DuplicateKeyError, match="duplicate key error"):
         await adapter.execute_mutation(Insert(Customer, values={"username": "alice"}))
+    mock_conn.rollback.assert_awaited_once()
+    assert mock_pool.release.call_count == 1
 
     mock_cursor.execute = AsyncMock(side_effect=Exception("Table 'db.missing' doesn't exist"))
     with pytest.raises(DatabaseError, match="MySQL mutation error"):
         await adapter.execute_mutation(Insert(Customer, values={"username": "test"}))
+    assert mock_conn.rollback.await_count == 2
+    assert mock_pool.release.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -445,7 +476,7 @@ async def test_native_mysql_graph_update():
         genum: str
         status: int = 0
 
-    if not _conformance._mysql_ready():
+    if not await asyncio.to_thread(_conformance._mysql_ready):
         pytest.skip("MySQL is unavailable or test database privileges are missing")
 
     database_name = f"renus_graph_test_{uuid4().hex}"

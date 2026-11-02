@@ -48,6 +48,17 @@ class SQLDialect(ABC):
         """Return the SQL column type for a field's metadata."""
         pass
 
+    def column_default_sql(self, field_meta: FieldMetadata, type_def: str) -> str:
+        """Render a supported SQL default constraint for a column."""
+        if not field_meta.has_default or field_meta.default is None:
+            return ""
+        if isinstance(field_meta.default, bool):
+            return f" DEFAULT {1 if field_meta.default else 0}"
+        if isinstance(field_meta.default, (int, float)):
+            return f" DEFAULT {field_meta.default}"
+        escaped_default = str(field_meta.default).replace("'", "''")
+        return f" DEFAULT '{escaped_default}'"
+
     @staticmethod
     def _max_text_length(field_meta: FieldMetadata) -> int | None:
         """Return a declared ``MaxLen`` value for a field, if present."""
@@ -83,7 +94,7 @@ class SQLDialect(ABC):
             if lower in ("float", "double", "real"):
                 return "DOUBLE" if is_mysql else "REAL"
             if lower in ("bool", "boolean"):
-                return "TINYINT(1)" if is_mysql else "INTEGER"
+                return "BOOLEAN" if is_mysql else "INTEGER"
             if lower in ("datetime", "timestamp"):
                 return "DATETIME" if is_mysql else "TEXT"
             if lower == "date":
@@ -100,7 +111,7 @@ class SQLDialect(ABC):
 
         if isinstance(col.type, type):
             if issubclass(col.type, bool):
-                return "TINYINT(1)" if is_mysql else "INTEGER"
+                return "BOOLEAN" if is_mysql else "INTEGER"
             if issubclass(col.type, int):
                 if col.primary_key and col.generated and col.auto_inc:
                     return (

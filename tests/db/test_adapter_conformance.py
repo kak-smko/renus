@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import os
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
@@ -3155,6 +3156,135 @@ async def test_hard_delete_object_and_query(kind):
 # ---------------------------------------------------------------------------
 # Transactions
 # ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_transaction_does_not_capture_another_threading(kind):
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        adapter = db.adapter("primary")
+        loop = asyncio.get_running_loop()
+        other_thread_started = threading.Event()
+        release_other_thread = threading.Event()
+        other_thread_done = threading.Event()
+        other_thread_errors = []
+        created_ids = []
+
+        def write_from_another_thread():
+            async def write():
+                assert adapter._in_active_transaction() is False
+                created = await repo.create(_u("tx-thread", "tx-thread"))
+                return created.id
+
+            try:
+                other_thread_started.set()
+                if kind == "sqlite" and not release_other_thread.wait(timeout=5):
+                    raise TimeoutError("timed out waiting for the SQLite transaction")
+                created_ids.append(
+                    asyncio.run_coroutine_threadsafe(write(), loop).result(timeout=5)
+                )
+            except Exception as exc:
+                other_thread_errors.append(exc)
+            finally:
+                other_thread_done.set()
+
+        other_thread = threading.Thread(target=write_from_another_thread)
+        try:
+            with pytest.raises(RuntimeError, match="rollback outer transaction"):
+                async with db.transaction():
+                    assert adapter._in_active_transaction() is True
+                    await repo.create(_u("tx-owner", "tx-owner"))
+                    other_thread.start()
+                    assert await asyncio.to_thread(other_thread_started.wait, 5)
+                    if kind != "sqlite":
+                        assert await asyncio.to_thread(other_thread_done.wait, 5)
+                    raise RuntimeError("rollback outer transaction")
+        finally:
+            release_other_thread.set()
+            if other_thread.ident is not None:
+                await asyncio.to_thread(other_thread.join, 5)
+                assert not other_thread.is_alive()
+
+        assert not other_thread_errors, other_thread_errors
+        assert created_ids == ["tx-thread"]
+        assert await repo.exists(User.username == "tx-owner") is False
+        assert await repo.exists(User.username == "tx-thread") is True
+    finally:
+        await cleanup(db)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_two_threads_use_independent_transactions(kind):
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        adapter = db.adapter("primary")
+        loop = asyncio.get_running_loop()
+        entered = {name: asyncio.Event() for name in ("rollback", "commit")}
+        release = {name: asyncio.Event() for name in ("rollback", "commit")}
+        done = {name: threading.Event() for name in ("rollback", "commit")}
+        errors = []
+        created_ids = {}
+
+        async def transact(name: str):
+            assert adapter._in_active_transaction() is False
+            try:
+                async with db.transaction():
+                    assert adapter._in_active_transaction() is True
+                    created = await repo.create(_u(f"tx-{name}", f"tx-{name}"))
+                    created_ids[name] = created.id
+                    entered[name].set()
+                    await release[name].wait()
+                    if name == "rollback":
+                        raise RuntimeError("rollback this transaction")
+            except RuntimeError as exc:
+                if name != "rollback" or str(exc) != "rollback this transaction":
+                    raise
+
+        def run_in_thread(name: str):
+            try:
+                asyncio.run_coroutine_threadsafe(transact(name), loop).result(timeout=10)
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                done[name].set()
+
+        rollback_thread = threading.Thread(target=run_in_thread, args=("rollback",))
+        commit_thread = threading.Thread(target=run_in_thread, args=("commit",))
+        try:
+            rollback_thread.start()
+            await asyncio.wait_for(entered["rollback"].wait(), timeout=5)
+            commit_thread.start()
+
+            if kind == "sqlite":
+                # SQLite serializes transactions on its shared connection.
+                await asyncio.sleep(0.1)
+                assert not entered["commit"].is_set()
+                release["rollback"].set()
+                await asyncio.wait_for(entered["commit"].wait(), timeout=5)
+                release["commit"].set()
+            else:
+                await asyncio.wait_for(entered["commit"].wait(), timeout=5)
+                release["rollback"].set()
+                release["commit"].set()
+
+            assert await asyncio.to_thread(done["rollback"].wait, timeout=5)
+            assert await asyncio.to_thread(done["commit"].wait, timeout=5)
+        finally:
+            release["rollback"].set()
+            release["commit"].set()
+            for thread in (rollback_thread, commit_thread):
+                if thread.ident is not None:
+                    await asyncio.to_thread(thread.join, 5)
+                    assert not thread.is_alive()
+
+        assert not errors, errors
+        assert created_ids == {"rollback": "tx-rollback", "commit": "tx-commit"}
+        assert await repo.exists(User.username == "tx-rollback") is False
+        assert await repo.exists(User.username == "tx-commit") is True
+    finally:
+        await cleanup(db)
 
 
 @pytest.mark.asyncio

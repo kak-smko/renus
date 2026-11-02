@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
+from decimal import Decimal
 from types import TracebackType
 from typing import Any, ClassVar, Self
 
@@ -15,7 +17,7 @@ from renus.db.core.adapter import (
 )
 from renus.db.core.exceptions import ConfigurationError, ConnectionError
 from renus.db import errors
-from renus.db.mutation.ast import MutationAST
+from renus.db.mutation.ast import InsertMany, MutationAST
 from renus.db.query.ast import QueryAST
 from renus.db.sql.adapter import SQLAdapter
 from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
@@ -141,7 +143,14 @@ class MySQLAdapter(SQLAdapter):
             async with conn.cursor() as cur:
                 await cur.execute("SELECT 1;")
                 await cur.fetchone()
+            await conn.commit()
             return True
+        except Exception:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            raise
         finally:
             self._mysql_db.release(conn)
 
@@ -213,8 +222,14 @@ class MySQLAdapter(SQLAdapter):
             async with conn.cursor() as cur:
                 await cur.execute("SELECT 1;")
                 await cur.fetchone()
+            await conn.commit()
             return True
         except Exception:
+            if conn is not None:
+                try:
+                    await conn.rollback()
+                except Exception:
+                    pass
             return False
         finally:
             if conn is not None and self._mysql_db is not None:
@@ -245,6 +260,58 @@ class MySQLAdapter(SQLAdapter):
         await self.disconnect()
         await self.connect()
 
+    @staticmethod
+    def _natural_sort_key(value: Any) -> tuple[tuple[int, Any], ...]:
+        return tuple(
+            (1, int(part)) if part.isdigit() else (0, part.casefold())
+            for part in re.findall(r"[A-Za-z]+|\d+", str(value))
+        )
+
+    @classmethod
+    def _sort_joined_collection(
+        cls,
+        value: Any,
+        path: tuple[str, ...],
+        primary_key: str,
+    ) -> None:
+        if not path:
+            return
+        if isinstance(value, list):
+            for item in value:
+                cls._sort_joined_collection(item, path, primary_key)
+            return
+        if not isinstance(value, dict):
+            return
+        if len(path) == 1:
+            children = value.get(path[0])
+            if isinstance(children, list):
+                children.sort(
+                    key=lambda child: cls._natural_sort_key(
+                        child.get(primary_key, "") if isinstance(child, dict) else ""
+                    )
+                )
+            return
+        cls._sort_joined_collection(value.get(path[0]), path[1:], primary_key)
+
+    def _decode_joined_rows(
+        self,
+        rows: list[Any],
+        compiled: SQLCompiled,
+    ) -> list[dict[str, Any]]:
+        decoded = super()._decode_joined_rows(rows, compiled)
+        for spec in compiled.joined:
+            if not spec.get("collection"):
+                continue
+            target_meta = spec.get("meta")
+            if target_meta is None:
+                continue
+            path = tuple(spec.get("path", ()))
+            for row in decoded:
+                self._sort_joined_collection(
+                    row, path, target_meta.primary_key_field
+                )
+        return decoded
+
     async def _query_pool(
         self,
         sql_compiled: SQLCompiled,
@@ -253,10 +320,12 @@ class MySQLAdapter(SQLAdapter):
         conn: Any = None
         try:
             conn = self._tx_session or await self._mysql_db.acquire()
-            cursor_kwargs = {"cursor": cursor_cls} if cursor_cls else {}
-            async with conn.cursor(**cursor_kwargs) as cur:
+            cursor_args = (cursor_cls,) if cursor_cls else ()
+            async with conn.cursor(*cursor_args) as cur:
                 await cur.execute(sql_compiled.sql, sql_compiled.params)
                 rows = await cur.fetchall()
+            if self._tx_session is None:
+                await conn.commit()
             if getattr(sql_compiled, "joined", ()):
                 return self._decode_joined_rows(list(rows), sql_compiled)
             meta = getattr(sql_compiled, "meta", None)
@@ -264,6 +333,11 @@ class MySQLAdapter(SQLAdapter):
                 return [self.dialect.decode_row(dict(r), meta) for r in rows]
             return [dict(r) if not isinstance(r, dict) else r for r in rows]
         except Exception as e:
+            if conn is not None and self._tx_session is None:
+                try:
+                    await conn.rollback()
+                except Exception:
+                    pass
             raise errors.translate_driver_error("MySQL", "mysql", e, "query") from e
         finally:
             if conn is not None and self._tx_session is None and self._mysql_db is not None:
@@ -283,12 +357,21 @@ class MySQLAdapter(SQLAdapter):
         cursor_cls = aiomysql.DictCursor if aiomysql is not None else None
 
         try:
-            return await self._query_pool(sql_compiled, cursor_cls)
+            rows = await self._query_pool(sql_compiled, cursor_cls)
         except errors.DBConnectionError:
             if self._tx_session is not None:
                 raise
             await self._reconnect_if_dropped()
-            return await self._query_pool(sql_compiled, cursor_cls)
+            rows = await self._query_pool(sql_compiled, cursor_cls)
+
+        if isinstance(compiled, QueryAST) and compiled.aggregates:
+            aliases = {aggregate.alias for aggregate in compiled.aggregates}
+            for row in rows:
+                for alias in aliases:
+                    value = row.get(alias)
+                    if isinstance(value, Decimal):
+                        row[alias] = float(value)
+        return rows
 
     async def _mutation_pool(self, sql_compiled: SQLCompiled) -> MutationResult:
         conn: Any = None
@@ -307,10 +390,46 @@ class MySQLAdapter(SQLAdapter):
                         last_id = self.dialect.decode_value(last_id, pk_meta)
                 return MutationResult(rows_affected=rows_affected, last_id=last_id)
         except Exception as e:
+            if conn is not None and self._tx_session is None:
+                try:
+                    await conn.rollback()
+                except Exception:
+                    pass
             raise errors.translate_driver_error("MySQL", "mysql", e, "mutation") from e
         finally:
             if conn is not None and self._tx_session is None and self._mysql_db is not None:
                 self._mysql_db.release(conn)
+
+    def _with_insert_many_ids(
+        self,
+        mutation: CompiledMutation,
+        result: MutationResult,
+    ) -> MutationResult:
+        if not isinstance(mutation, InsertMany) or result.last_id is None:
+            return result
+
+        meta = getattr(mutation.source, "__db_metadata__", None)
+        if meta is None or not meta.identity.fields:
+            return result
+        pk_name = meta.primary_key_field
+        pk_meta = meta.fields.get(pk_name)
+        if pk_meta is None or not pk_meta.database.auto_inc:
+            return result
+        if any(record.get(pk_name) is not None for record in mutation.records):
+            return result
+
+        first_id = getattr(result.last_id, "value", result.last_id)
+        ids = [
+            self.dialect.decode_value(first_id + offset, pk_meta)
+            for offset in range(len(mutation.records))
+        ]
+        generated = dict(result.generated or {})
+        generated["ids"] = ids
+        return MutationResult(
+            rows_affected=result.rows_affected,
+            last_id=result.last_id,
+            generated=generated,
+        )
 
     async def execute_mutation(self, compiled: CompiledMutation) -> MutationResult:
         """Execute a compiled mutation and return the result."""
@@ -326,12 +445,13 @@ class MySQLAdapter(SQLAdapter):
             sql_compiled = compiled
 
         try:
-            return await self._mutation_pool(sql_compiled)
+            result = await self._mutation_pool(sql_compiled)
         except errors.DBConnectionError:
             if self._tx_session is not None:
                 raise
             await self._reconnect_if_dropped()
-            return await self._mutation_pool(sql_compiled)
+            result = await self._mutation_pool(sql_compiled)
+        return self._with_insert_many_ids(compiled, result)
 
     async def _open_schema_session(self) -> Any:
         if self._mysql_db is None:
@@ -350,6 +470,20 @@ class MySQLAdapter(SQLAdapter):
             await self._execute_ddl(sql)
         except Exception:
             pass
+
+    async def ensure_migration_schema(
+        self,
+        table_name: str = "_db_migrations",
+    ) -> None:
+        rows = await self.execute_query(
+            SQLCompiled(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = DATABASE() AND table_name = %s LIMIT 1",
+                (table_name,),
+            )
+        )
+        if not rows:
+            await super().ensure_migration_schema(table_name)
 
     async def _commit_schema(self) -> None:
         assert self._schema_conn is not None

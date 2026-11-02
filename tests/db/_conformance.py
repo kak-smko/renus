@@ -356,8 +356,9 @@ class _ConformanceMySQLAdapter(MySQLAdapter):
     """MySQL adapter that provisions its isolated database for test runs."""
 
     async def connect(self) -> None:
-        if self._mysql_db is None:
+        if getattr(self, "_database_provisioned", False) is False:
             await _create_mysql_database(self.config)
+            self._database_provisioned = True
         await super().connect()
 
 

@@ -370,7 +370,10 @@ class SQLCompiler:
             )
             dialect_name = type(self.dialect).__name__.lower()
             if "mysql" in dialect_name:
-                return f"JSON_UNQUOTE(JSON_EXTRACT({base}, '{json_path}'))"
+                return (
+                    f"(CASE WHEN JSON_TYPE(JSON_EXTRACT({base}, '{json_path}')) = 'NULL' "
+                    f"THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT({base}, '{json_path}')) END)"
+                )
             return f"json_extract({base}, '{json_path}')"
 
         return self.dialect.quote(".".join(p.parts))
