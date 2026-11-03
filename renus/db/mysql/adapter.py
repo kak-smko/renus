@@ -91,6 +91,7 @@ class MySQLTransactionContext(TransactionContext):
 class MySQLAdapter(SQLAdapter):
 
     name: ClassVar[str] = "mysql"
+    need_locked_parent: ClassVar[bool] = True
 
     _index_if_not_exists: ClassVar[str] = ""
 

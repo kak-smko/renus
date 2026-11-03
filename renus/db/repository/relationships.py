@@ -110,7 +110,12 @@ class RelationshipCoordinator:
 
         return False
 
-    async def persist_relationships(self, obj: Any) -> None:
+    async def persist_relationships(
+        self,
+        obj: Any,
+        *,
+        preserve_foreign_keys: set[int] | None = None,
+    ) -> None:
         """Persist all configured relationships for the given model object."""
         meta = getattr(self.model, "__db_metadata__", None)
         if not meta:
@@ -130,13 +135,17 @@ class RelationshipCoordinator:
                 rel.on_save == "cascade"
             ):
                 local_value = self._local_key_value(obj, rel, parent_id)
-                await self._persist_one_to_many(meta, rel, local_value, val)
+                await self._persist_one_to_many(
+                    meta, rel, local_value, val, preserve_foreign_keys
+                )
 
             elif rel.kind == RelationshipKind.ONE_TO_ONE and (
                 rel.on_save == "cascade"
             ):
                 local_value = self._local_key_value(obj, rel, parent_id)
-                await self._persist_one_to_one(meta, rel, local_value, val)
+                await self._persist_one_to_one(
+                    meta, rel, local_value, val, preserve_foreign_keys
+                )
 
             elif rel.kind == RelationshipKind.MANY_TO_ONE and rel.on_save == "cascade":
                 await self._persist_many_to_one(obj, rel)
@@ -274,12 +283,14 @@ class RelationshipCoordinator:
         rel: Any,
         local_value: Any,
         child: Any,
+        preserve_foreign_keys: set[int] | None = None,
     ) -> None:
         target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
         child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
 
         fk_name = rel.foreign_key or f"{to_plural_lower(parent_meta.table)}_id"
-        object.__setattr__(child, fk_name, local_value)
+        if preserve_foreign_keys is None or id(child) not in preserve_foreign_keys:
+            object.__setattr__(child, fk_name, local_value)
         await child_repo.save(child)
 
     async def _persist_one_to_many(
@@ -288,6 +299,7 @@ class RelationshipCoordinator:
         rel: Any,
         local_value: Any,
         children: Iterable[Any],
+        preserve_foreign_keys: set[int] | None = None,
     ) -> None:
         target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
         child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
@@ -295,7 +307,8 @@ class RelationshipCoordinator:
         fk_name = rel.foreign_key or f"{to_plural_lower(parent_meta.table)}_id"
 
         for child in children:
-            object.__setattr__(child, fk_name, local_value)
+            if preserve_foreign_keys is None or id(child) not in preserve_foreign_keys:
+                object.__setattr__(child, fk_name, local_value)
             await child_repo.save(child)
 
     @staticmethod
@@ -316,7 +329,8 @@ class RelationshipCoordinator:
             return
 
         parent_pk = meta.primary_key_field
-        parent_id = getattr(obj, parent_pk, None)
+        snapshot = getattr(obj, "_db_original_snapshot", {}) or {}
+        parent_id = snapshot.get(parent_pk, getattr(obj, parent_pk, None))
         if parent_id is None:
             return
 
@@ -324,7 +338,7 @@ class RelationshipCoordinator:
             if rel.kind not in (RelationshipKind.ONE_TO_ONE, RelationshipKind.ONE_TO_MANY):
                 continue
             local_key = rel.local_key or parent_pk
-            local_value = getattr(obj, local_key, None)
+            local_value = snapshot.get(local_key, getattr(obj, local_key, None))
             if local_value is not None:
                 await self._cascade_delete_for_parent_ids(
                     meta, [local_value], hard=hard, relationships={rname}
@@ -477,18 +491,55 @@ class RelationshipCoordinator:
             return None
         return fmeta.get_default()
 
-    async def cascade_on_update(self, obj: Any) -> None:
+    async def cascade_on_update(self, obj: Any) -> set[int]:
         meta = getattr(self.model, "__db_metadata__", None)
         if not meta:
-            return
+            return set()
 
         snapshot = getattr(obj, "_db_original_snapshot", {}) or {}
         pk = meta.primary_key_field
         old_pk = snapshot.get(pk)
         new_pk = getattr(obj, pk, None)
         pk_changed = old_pk is not None and old_pk != new_pk
+        preserve_foreign_keys: set[int] = set()
+        lock_parent = False
+        keys_to_verify: dict[str, Any] = {}
 
-        for _, rel in meta.relationships.items():
+        for rel in meta.relationships.values():
+            if (
+                rel.kind == RelationshipKind.MANY_TO_MANY
+                and pk_changed
+                and rel.through
+            ):
+                lock_parent = True
+            if rel.kind not in (RelationshipKind.ONE_TO_ONE, RelationshipKind.ONE_TO_MANY):
+                continue
+            local_key = rel.local_key or pk
+            old_value = old_pk if local_key == pk else snapshot.get(local_key)
+            new_value = new_pk if local_key == pk else getattr(obj, local_key, None)
+            if (
+                old_value is not None
+                and old_value != new_value
+                and rel.on_update in ("cascade", "set null", "set default", "restrict")
+            ):
+                lock_parent = True
+                keys_to_verify[local_key] = old_value
+
+        if lock_parent and self.adapter.need_locked_parent:
+            locked_parent = await self.repo.query(
+                Path(self.model, (pk,)) == old_pk
+            ).first()
+            if locked_parent is None:
+                raise IntegrityError(
+                    f"cannot update {meta.table} because the persisted parent row no longer exists"
+                )
+            for local_key, old_value in keys_to_verify.items():
+                if getattr(locked_parent, local_key, None) != old_value:
+                    raise IntegrityError(
+                        f"cannot update {meta.table} because its {local_key} key changed concurrently"
+                    )
+
+        for rel in meta.relationships.values():
             if rel.kind == RelationshipKind.MANY_TO_MANY:
                 if not pk_changed or not rel.through:
                     continue
@@ -543,6 +594,55 @@ class RelationshipCoordinator:
                 filters=(condition,),
             )
             await self.adapter.execute_mutation(upd_ast)
+            self._sync_loaded_related_children(
+                obj,
+                rel,
+                fk_name,
+                old_value,
+                values[fk_name],
+                preserve_foreign_keys,
+                preserve_foreign_key=action != "cascade",
+            )
+
+        return preserve_foreign_keys
+
+    @staticmethod
+    def _sync_loaded_related_children(
+        obj: Any,
+        rel: Any,
+        fk_name: str,
+        old_value: Any,
+        new_value: Any,
+        preserve_foreign_keys: set[int],
+        *,
+        preserve_foreign_key: bool,
+    ) -> None:
+        children = getattr(obj, rel.name, None)
+        if children is None:
+            return
+        if not isinstance(children, (list, tuple, set)):
+            children = (children,)
+
+        for child in children:
+            current_fk = (
+                child.get(fk_name) if isinstance(child, dict)
+                else getattr(child, fk_name, None)
+            )
+            if current_fk != old_value:
+                continue
+
+            if isinstance(child, dict):
+                child[fk_name] = new_value
+                continue
+
+            setattr(child, fk_name, new_value)
+            child_meta = getattr(child, "__db_metadata__", None)
+            if child_meta and fk_name in child_meta.identity.fields:
+                child_snapshot = getattr(child, "_db_original_snapshot", None)
+                if child_snapshot is not None:
+                    child_snapshot[fk_name] = new_value
+            if preserve_foreign_key:
+                preserve_foreign_keys.add(id(child))
 
     @staticmethod
     def _row_pk_value(row: Any, pk: str) -> Any:

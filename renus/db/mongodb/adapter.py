@@ -468,9 +468,16 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         doc = docs[0]
         old_id = doc.get("_id")
         new_id = set_doc["_id"]
-        if old_id == new_id:
-            return MutationResult(rows_affected=0)
         replacement = {k: v for k, v in set_doc.items() if k != "_id"}
+        if old_id == new_id:
+            if not replacement:
+                return MutationResult(rows_affected=0)
+            res = await coll.update_one(
+                filt,
+                {"$set": replacement},
+                session=session,
+            )
+            return MutationResult(rows_affected=res.modified_count)
         new_doc = dict(doc)
         new_doc.update(replacement)
         new_doc["_id"] = new_id

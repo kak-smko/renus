@@ -159,8 +159,10 @@ class Repository(Generic[T]):
     def _build_delete_ast_for_model(cls, model_cls: type, obj: Any) -> Delete:
         filters: list[Condition] = []
         if hasattr(obj, "identity_dict"):
+            snapshot = getattr(obj, "_db_original_snapshot", {}) or {}
             for pk_name, pk_val in obj.identity_dict().items():
-                filters.append(Path(model_cls, (pk_name,)) == pk_val)
+                original_value = snapshot.get(pk_name, pk_val)
+                filters.append(Path(model_cls, (pk_name,)) == original_value)
 
         return Delete(source=model_cls, filters=tuple(filters))
 
@@ -262,7 +264,7 @@ class Repository(Generic[T]):
             return obj
 
         async with self._atomic(self._rel_coordinator.requires_transaction(obj)):
-            await self._rel_coordinator.cascade_on_update(obj)
+            preserve_foreign_keys = await self._rel_coordinator.cascade_on_update(obj)
             update_ast = self.build_update_ast(obj)
             if update_ast.values:
                 if (
@@ -276,7 +278,9 @@ class Repository(Generic[T]):
             if hasattr(obj, "_mark_persisted"):
                 getattr(obj, "_mark_persisted")()
 
-            await self._rel_coordinator.persist_relationships(obj)
+            await self._rel_coordinator.persist_relationships(
+                obj, preserve_foreign_keys=preserve_foreign_keys
+            )
         return obj
 
     async def update(self,*conditions: Condition,values: dict[Any, Any] | None = None,) -> int:
@@ -344,8 +348,12 @@ class Repository(Generic[T]):
 
                     pk_filters: list[Condition] = []
                     if hasattr(obj, "identity_dict"):
+                        snapshot = getattr(obj, "_db_original_snapshot", {}) or {}
                         for pk_name, pk_val in obj.identity_dict().items():
-                            pk_filters.append(Path(self.model, (pk_name,)) == pk_val)
+                            original_value = snapshot.get(pk_name, pk_val)
+                            pk_filters.append(
+                                Path(self.model, (pk_name,)) == original_value
+                            )
 
                     update_ast = Update(source=self.model, values=soft_vals, filters=tuple(pk_filters))
                     res = await self._execute_mutation(update_ast)

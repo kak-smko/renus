@@ -66,6 +66,7 @@ class AsyncDatabaseAdapter(ABC):
     """Abstract async database adapter interface."""
 
     name: ClassVar[str]
+    need_locked_parent: ClassVar[bool] = False
 
     @abstractmethod
     async def connect(self) -> None:

@@ -326,6 +326,36 @@ async def test_mongodb_adapter_connection_options(
     mock_client.close.assert_called_once_with()
 
 @pytest.mark.asyncio
+async def test_mongodb_update_with_unchanged_primary_key_keeps_other_changes():
+    adapter = MongoDBAdapter()
+    collection = MagicMock()
+    cursor = MagicMock()
+    cursor.to_list = AsyncMock(
+        return_value=[{"_id": "same", "name": "before"}]
+    )
+    collection.find = MagicMock(return_value=cursor)
+    collection.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
+    database = MagicMock()
+    database.__getitem__ = MagicMock(return_value=collection)
+    adapter._mongo_db = database
+
+    result = await adapter._run_mutation(
+        "accounts",
+        "update_one",
+        {"_id": "same"},
+        {"$set": {"_id": "same", "name": "after"}},
+    )
+
+    assert result.rows_affected == 1
+    collection.update_one.assert_awaited_once_with(
+        {"_id": "same"},
+        {"$set": {"name": "after"}},
+        session=None,
+    )
+    collection.insert_one.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_mongodb_mock_execution():
     adapter = MongoDBAdapter()
 

@@ -19,6 +19,7 @@ from renus.db import (
     MySQLAdapter,
     Path,
     Model,
+    OneToMany,
     Repository,
     Delete,
     Insert,
@@ -26,6 +27,7 @@ from renus.db import (
     Update,
 )
 from renus.db.mysql.adapter import MySQLTransactionContext
+from renus.db.repository.relationships import RelationshipCoordinator
 from renus.db.sql import (
     SQLCompiled,
     SQLCompiler,
@@ -45,6 +47,20 @@ class Customer(Model):
     class Meta:
         timestamps = True
         soft_delete = True
+
+
+class LockedParentChild(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    parent_id: str
+
+
+class LockedParent(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    children: list[LockedParentChild] = OneToMany(
+        LockedParentChild,
+        foreign_key="parent_id",
+        on_update="cascade",
+    )
 
 def test_mysql_dialect_quoting_and_placeholders():
     dialect = MySQLDialect()
@@ -226,6 +242,67 @@ async def test_mysql_adapter_connection_options(monkeypatch, config, overrides):
         ),
     )
     await adapter.disconnect()
+
+@pytest.mark.asyncio
+async def test_mysql_transactional_query_locks_parent_rows():
+    adapter = MySQLAdapter()
+    cursor = MagicMock()
+    cursor.execute = AsyncMock()
+    cursor.fetchall = AsyncMock(return_value=[])
+    cursor.__aenter__ = AsyncMock(return_value=cursor)
+    cursor.__aexit__ = AsyncMock(return_value=None)
+
+    connection = MagicMock()
+    connection.cursor = MagicMock(return_value=cursor)
+    connection.commit = AsyncMock()
+    pool = MagicMock()
+    pool.acquire = AsyncMock(return_value=connection)
+    pool.release = MagicMock()
+    adapter._mysql_db = pool
+    adapter._tx_session = connection
+
+    await adapter.execute_query(Repository(adapter, Customer).query(Customer.id == 8).ast)
+
+    sql, params = cursor.execute.await_args.args
+    assert sql.endswith("FOR UPDATE")
+    assert params == (8,)
+    adapter._tx_session = None
+
+
+@pytest.mark.asyncio
+async def test_mysql_key_cascade_locks_parent_before_updating_children():
+    events = []
+    adapter = MagicMock()
+    adapter.need_locked_parent = True
+
+    async def record_cascade(mutation):
+        events.append("cascade")
+        return MutationResult(rows_affected=1)
+
+    adapter.execute_mutation = AsyncMock(side_effect=record_cascade)
+    query = MagicMock()
+
+    async def record_lock():
+        events.append("lock")
+        return LockedParent(id="old-id")
+
+    query.first = AsyncMock(side_effect=record_lock)
+    repo = MagicMock()
+    repo.model = LockedParent
+    repo.adapter = adapter
+    repo.connection_name = "primary"
+    repo.query.return_value = query
+
+    parent = LockedParent(id="old-id", children=[])
+    parent._mark_persisted()
+    parent.id = "new-id"
+
+    await RelationshipCoordinator(repo).cascade_on_update(parent)
+
+    assert events == ["lock", "cascade"]
+    repo.query.assert_called_once()
+    adapter.execute_mutation.assert_awaited_once()
+
 
 @pytest.mark.asyncio
 async def test_mysql_mock_execution():

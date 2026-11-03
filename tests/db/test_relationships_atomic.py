@@ -10,6 +10,7 @@ from renus.db import (
     IntegrityError,
     Model,
     OneToMany,
+    OneToOne,
     SQLiteAdapter,
 )
 from tests.db._conformance import cleanup, conformance_tests, database_for
@@ -60,6 +61,72 @@ class AtomicKeyOwner(Model):
         foreign_key="owner_code",
         on_save="cascade",
         on_update="cascade",
+    )
+
+
+class KeyUpdateChild(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    label: str
+
+
+class KeyUpdateParent(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    child: KeyUpdateChild = OneToOne(
+        KeyUpdateChild,
+        foreign_key="id",
+        on_save="cascade",
+        on_update="cascade",
+    )
+
+
+class NullingChild(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    owner_code: str | None = None
+
+
+class NullingParent(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    code: str = Field(database=DatabaseField(unique=True))
+    child: NullingChild = OneToOne(
+        NullingChild,
+        local_key="code",
+        foreign_key="owner_code",
+        on_save="cascade",
+        on_update="set null",
+    )
+
+
+class DefaultingChild(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    owner_code: str = Field(default="orphan")
+
+
+class DefaultingParent(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    code: str = Field(database=DatabaseField(unique=True))
+    child: DefaultingChild = OneToOne(
+        DefaultingChild,
+        local_key="code",
+        foreign_key="owner_code",
+        on_save="cascade",
+        on_update="set default",
+    )
+
+
+class DeleteChild(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    owner_code: str | None = None
+
+
+class DeleteParent(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    code: str = Field(database=DatabaseField(unique=True))
+    children: list[DeleteChild] = OneToMany(
+        DeleteChild,
+        local_key="code",
+        foreign_key="owner_code",
+        on_save="cascade",
+        on_delete="cascade",
     )
 
 
@@ -166,6 +233,120 @@ async def test_local_key_update_cascade_rolls_back_with_parent_update():
         stored_child = await children.where(AtomicKeyChild.id == "child-1").first()
         assert stored_owner.code == "code-1"
         assert stored_child.owner_code == "code-1"
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_parent_key_update_preserves_included_child_edits():
+    db = Database(SQLiteAdapter({"database": ":memory:"}))
+    await db.connect()
+    await db.create_schema([KeyUpdateParent, KeyUpdateChild])
+    try:
+        parents = db.repository(KeyUpdateParent)
+        children = db.repository(KeyUpdateChild)
+        await parents.create(
+            KeyUpdateParent(
+                id="old-key",
+                child=KeyUpdateChild(id="old-key", label="before"),
+            )
+        )
+
+        parent = await parents.where(KeyUpdateParent.id == "old-key").include(
+            KeyUpdateParent.child
+        ).first()
+        parent.id = "new-key"
+        parent.child.label = "after"
+        await parents.save(parent)
+
+        stored = await children.where(KeyUpdateChild.id == "new-key").first()
+        assert stored is not None
+        assert stored.label == "after"
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_set_null_update_is_not_overwritten_by_save_cascade():
+    db = Database(SQLiteAdapter({"database": ":memory:"}))
+    await db.connect()
+    await db.create_schema([NullingParent, NullingChild])
+    try:
+        parents = db.repository(NullingParent)
+        children = db.repository(NullingChild)
+        await parents.create(
+            NullingParent(
+                id="parent-1",
+                code="before",
+                child=NullingChild(id="child-1", owner_code="before"),
+            )
+        )
+
+        parent = await parents.where(NullingParent.id == "parent-1").include(
+            NullingParent.child
+        ).first()
+        parent.code = "after"
+        await parents.save(parent)
+
+        stored = await children.where(NullingChild.id == "child-1").first()
+        assert stored is not None
+        assert stored.owner_code is None
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_set_default_update_is_not_overwritten_by_save_cascade():
+    db = Database(SQLiteAdapter({"database": ":memory:"}))
+    await db.connect()
+    await db.create_schema([DefaultingParent, DefaultingChild])
+    try:
+        parents = db.repository(DefaultingParent)
+        children = db.repository(DefaultingChild)
+        await parents.create(
+            DefaultingParent(
+                id="parent-1",
+                code="before",
+                child=DefaultingChild(id="child-1", owner_code="before"),
+            )
+        )
+
+        parent = await parents.where(DefaultingParent.id == "parent-1").include(
+            DefaultingParent.child
+        ).first()
+        parent.code = "after"
+        await parents.save(parent)
+
+        stored = await children.where(DefaultingChild.id == "child-1").first()
+        assert stored is not None
+        assert stored.owner_code == "orphan"
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_delete_uses_persisted_parent_and_local_keys():
+    db = Database(SQLiteAdapter({"database": ":memory:"}))
+    await db.connect()
+    await db.create_schema([DeleteParent, DeleteChild])
+    try:
+        parents = db.repository(DeleteParent)
+        children = db.repository(DeleteChild)
+        await parents.create(
+            DeleteParent(
+                id="old-id",
+                code="old-code",
+                children=[DeleteChild(id="child-1", owner_code="old-code")],
+            )
+        )
+
+        parent = await parents.where(DeleteParent.id == "old-id").first()
+        parent.id = "unsaved-id"
+        parent.code = "unsaved-code"
+        assert await parents.delete(parent) == 1
+
+        assert await parents.where(DeleteParent.id == "old-id").count() == 0
+        assert await children.count() == 0
     finally:
         await db.disconnect()
 
