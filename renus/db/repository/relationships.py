@@ -11,7 +11,7 @@ from renus.db.mutation.ast import (
     Update,
     UpdateMany,
 )
-from renus.db.query.ast import Condition, Path, QueryAST
+from renus.db.query.ast import Condition, Path
 from renus.datastructures.id import ID
 from renus.db.relationships import RelationshipKind
 
@@ -72,22 +72,41 @@ class RelationshipCoordinator:
         if not meta:
             return False
 
+        snapshot = getattr(obj, "_db_original_snapshot", {}) or {}
+        pk = meta.primary_key_field
+        pk_changed = (
+            snapshot.get(pk) is not None
+            and snapshot.get(pk) != getattr(obj, pk, None)
+        )
+        persisted = not getattr(obj, "is_new", lambda: True)()
+
         for rname, rel in meta.relationships.items():
             value = getattr(obj, rname, None)
-            if value is None:
-                continue
 
             if rel.kind in (
                 RelationshipKind.ONE_TO_MANY,
                 RelationshipKind.ONE_TO_ONE,
-            ) and rel.on_save == "cascade" and value:
+            ):
+                if rel.on_save == "cascade" and value:
+                    return True
+                if persisted and rel.on_update in (
+                    "cascade",
+                    "set null",
+                    "set default",
+                    "restrict",
+                ):
+                    local_key = rel.local_key or pk
+                    old_value = snapshot.get(local_key)
+                    new_value = getattr(obj, local_key, None)
+                    if old_value is not None and old_value != new_value:
+                        return True
+
+            elif rel.kind == RelationshipKind.MANY_TO_ONE and rel.on_save == "cascade":
                 return True
 
-            if rel.kind == RelationshipKind.MANY_TO_ONE and rel.on_save == "cascade":
-                return True
-
-            if rel.kind == RelationshipKind.MANY_TO_MANY and value:
-                return True
+            elif rel.kind == RelationshipKind.MANY_TO_MANY:
+                if value or (persisted and pk_changed):
+                    return True
 
         return False
 
@@ -110,12 +129,14 @@ class RelationshipCoordinator:
             if rel.kind == RelationshipKind.ONE_TO_MANY and (
                 rel.on_save == "cascade"
             ):
-                await self._persist_one_to_many(meta, rel, parent_id, val)
+                local_value = self._local_key_value(obj, rel, parent_id)
+                await self._persist_one_to_many(meta, rel, local_value, val)
 
             elif rel.kind == RelationshipKind.ONE_TO_ONE and (
                 rel.on_save == "cascade"
             ):
-                await self._persist_one_to_one(meta, rel, parent_id, val)
+                local_value = self._local_key_value(obj, rel, parent_id)
+                await self._persist_one_to_one(meta, rel, local_value, val)
 
             elif rel.kind == RelationshipKind.MANY_TO_ONE and rel.on_save == "cascade":
                 await self._persist_many_to_one(obj, rel)
@@ -251,21 +272,21 @@ class RelationshipCoordinator:
         self,
         parent_meta: Any,
         rel: Any,
-        parent_id: Any,
+        local_value: Any,
         child: Any,
     ) -> None:
         target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
         child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
 
         fk_name = rel.foreign_key or f"{to_plural_lower(parent_meta.table)}_id"
-        object.__setattr__(child, fk_name, parent_id)
+        object.__setattr__(child, fk_name, local_value)
         await child_repo.save(child)
 
     async def _persist_one_to_many(
         self,
         parent_meta: Any,
         rel: Any,
-        parent_id: Any,
+        local_value: Any,
         children: Iterable[Any],
     ) -> None:
         target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
@@ -274,8 +295,19 @@ class RelationshipCoordinator:
         fk_name = rel.foreign_key or f"{to_plural_lower(parent_meta.table)}_id"
 
         for child in children:
-            object.__setattr__(child, fk_name, parent_id)
+            object.__setattr__(child, fk_name, local_value)
             await child_repo.save(child)
+
+    @staticmethod
+    def _local_key_value(obj: Any, rel: Any, parent_id: Any) -> Any:
+        """Return the owner value related rows must store as their foreign key.
+
+        A configured ``local_key`` takes precedence even when its value is
+        ``None``; falling back to the primary key would create a false link.
+        """
+        if rel.local_key is None:
+            return parent_id
+        return getattr(obj, rel.local_key, None)
 
     async def cascade_delete(self, obj: Any, hard: bool = False) -> None:
         """Cascade-delete related rows for a single model object."""
@@ -450,15 +482,15 @@ class RelationshipCoordinator:
         if not meta:
             return
 
+        snapshot = getattr(obj, "_db_original_snapshot", {}) or {}
         pk = meta.primary_key_field
-        old_id = getattr(obj, "_db_original_snapshot", {}).get(pk)
-        new_id = getattr(obj, pk, None)
-        if old_id is None or old_id == new_id:
-            return
+        old_pk = snapshot.get(pk)
+        new_pk = getattr(obj, pk, None)
+        pk_changed = old_pk is not None and old_pk != new_pk
 
-        for rname, rel in meta.relationships.items():
+        for _, rel in meta.relationships.items():
             if rel.kind == RelationshipKind.MANY_TO_MANY:
-                if not rel.through:
+                if not pk_changed or not rel.through:
                     continue
                 target_meta = self._mtm_target_meta(rel)
                 if target_meta is None:
@@ -467,21 +499,32 @@ class RelationshipCoordinator:
                 junction_source = _junction_source(rel.through)
                 upd_ast = UpdateMany(
                     source=junction_source,
-                    values={local_col: new_id},
-                    filters=(Path(junction_source, (local_col,)) == old_id,),
+                    values={local_col: new_pk},
+                    filters=(Path(junction_source, (local_col,)) == old_pk,),
                 )
                 await self.adapter.execute_mutation(upd_ast)
                 continue
             if rel.kind not in (RelationshipKind.ONE_TO_ONE, RelationshipKind.ONE_TO_MANY):
                 continue
+
+
+            local_key = rel.local_key or pk
+            if local_key == pk:
+                old_value, new_value = old_pk, new_pk
+            else:
+                old_value = snapshot.get(local_key)
+                new_value = getattr(obj, local_key, None)
+            if old_value is None or old_value == new_value:
+                continue
+
             action = rel.on_update
             if action not in ("cascade", "set null", "set default", "restrict"):
                 continue
             target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
             fk_name = rel.foreign_key or f"{to_plural_lower(meta.table)}_id"
-            condition = Path(target_cls, (fk_name,)) == old_id
+            condition = Path(target_cls, (fk_name,)) == old_value
             if action == "cascade":
-                values = {fk_name: new_id}
+                values = {fk_name: new_value}
             elif action == "set null":
                 values = {fk_name: None}
             elif action == "set default":

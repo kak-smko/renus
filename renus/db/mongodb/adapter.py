@@ -474,8 +474,12 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
         new_doc = dict(doc)
         new_doc.update(replacement)
         new_doc["_id"] = new_id
-        await coll.insert_one(new_doc, session=session)
-        await coll.delete_one({"_id": old_id}, session=session)
+        if session is not None:
+            await coll.delete_one({"_id": old_id}, session=session)
+            await coll.insert_one(new_doc, session=session)
+        else:
+            await coll.insert_one(new_doc, session=session)
+            await coll.delete_one({"_id": old_id}, session=session)
         return MutationResult(rows_affected=1)
 
     async def execute_mutation(self, compiled: CompiledMutation) -> MutationResult:

@@ -189,7 +189,10 @@ class MongoCompiler:
                     }})
                 else:
                     local_field = relation_meta.local_key or meta.primary_key_field
-                    foreign_field = relation_meta.foreign_key or f"{meta.table}_id"
+                    foreign_field = mongo_field(
+                        target_meta,
+                        relation_meta.foreign_key or f"{meta.table}_id",
+                    )
                     relation_any_stages.append({"$lookup": {
                         "from": target_meta.table,
                         "localField": mongo_field(meta, local_field),
@@ -480,7 +483,10 @@ class MongoCompiler:
                     foreign_field = mongo_field(target_meta, target_meta.primary_key_field)
                 else:
                     local_field = rel.local_key or root_meta.primary_key_field
-                    foreign_field = rel.foreign_key or f"{to_plural_lower(root_meta.table)}_id"
+                    foreign_field = mongo_field(
+                        target_meta,
+                        rel.foreign_key or f"{to_plural_lower(root_meta.table)}_id",
+                    )
 
                 if nested_items:
                     nested_pipeline: list[dict[str, Any]] = [
@@ -629,7 +635,10 @@ class MongoCompiler:
                     foreign_field = mongo_field(target_meta, target_meta.primary_key_field)
                 else:
                     local_field = rel.local_key or owner_meta.primary_key_field
-                    foreign_field = rel.foreign_key or f"{to_plural_lower(owner_meta.table)}_id"
+                    foreign_field = mongo_field(
+                        target_meta,
+                        rel.foreign_key or f"{to_plural_lower(owner_meta.table)}_id",
+                    )
 
                 if include_filter is None and not child_stages:
                     stages.append({"$lookup": {

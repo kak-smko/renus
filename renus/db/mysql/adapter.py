@@ -351,8 +351,24 @@ class MySQLAdapter(SQLAdapter):
 
         if isinstance(compiled, QueryAST):
             sql_compiled: SQLCompiled = self.compile_query(compiled)
+            should_lock_rows = not compiled.aggregates and not compiled.group_by
         else:
             sql_compiled = compiled
+            should_lock_rows = False
+
+        if (
+            self._in_active_transaction()
+            and should_lock_rows
+            and not sql_compiled.sql.rstrip().upper().endswith("FOR UPDATE")
+        ):
+            sql_compiled = SQLCompiled(
+                f"{sql_compiled.sql} FOR UPDATE",
+                sql_compiled.params,
+                meta=sql_compiled.meta,
+                joined=sql_compiled.joined,
+                root_limit=sql_compiled.root_limit,
+                root_offset=sql_compiled.root_offset,
+            )
 
         cursor_cls = aiomysql.DictCursor if aiomysql is not None else None
 

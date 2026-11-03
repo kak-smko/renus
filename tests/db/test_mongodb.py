@@ -418,8 +418,11 @@ async def test_mongodb_transaction_context():
 async def test_mongodb_graph_delete_cascades_to_child():
     class GraphChilds(Model):
         id: str = Field(database=DatabaseField(primary_key=True))
-        gen: str | None = None
         total_childs: int = 0
+
+    class GraphScore(Model):
+        id: str = Field(database=DatabaseField(primary_key=True))
+        total: int = 0
 
     class Graph(Model):
         id: str = Field(
@@ -429,8 +432,15 @@ async def test_mongodb_graph_delete_cascades_to_child():
         rank_id: int
         childs: GraphChilds = OneToOne(
             GraphChilds,
-            local_key="id",
-            foreign_key="gen",
+            local_key="gen",
+            foreign_key="id",
+            on_save="cascade",
+            on_delete="cascade",
+        )
+        score: GraphScore = OneToOne(
+            GraphScore,
+            local_key="gen",
+            foreign_key="id",
             on_save="cascade",
             on_delete="cascade",
         )
@@ -458,7 +468,7 @@ async def test_mongodb_graph_delete_cascades_to_child():
         if not (hello.get("setName") or hello.get("msg") == "isdbgrid"):
             pytest.skip("MongoDB transactions require a replica set or sharded cluster")
 
-        await db.create_schema([Graph, GraphChilds])
+        await db.create_schema([Graph, GraphChilds, GraphScore])
         graph_repo: Repository[Graph] = db.repository(Graph)
         child_repo: Repository[GraphChilds] = db.repository(GraphChilds)
         await graph_repo.create(
@@ -466,11 +476,15 @@ async def test_mongodb_graph_delete_cascades_to_child():
                 id="123",
                 gen="graph-1",
                 rank_id=1,
-                childs=GraphChilds(id="child-1", total_childs=1),
+                childs=GraphChilds(id="graph-1", total_childs=1),
+                score=GraphScore(id="graph-1", total=10),
             )
         )
 
         assert await child_repo.count() == 1
+        node= await graph_repo.where(Graph.id=="123").include(Graph.childs).include(Graph.score).first()
+        assert node.childs.id == "graph-1"
+        assert node.score.id == "graph-1"
         assert await graph_repo.delete_many(Graph.gen == "graph-1") == 1
         assert await graph_repo.count() == 0
         assert await child_repo.count() == 0

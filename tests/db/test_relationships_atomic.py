@@ -5,6 +5,7 @@ import pytest
 from renus.db import (
     Database,
     DatabaseField,
+    DuplicateKeyError,
     Field,
     IntegrityError,
     Model,
@@ -39,6 +40,26 @@ class AtomicItem(Model):
     id: str = Field(database=DatabaseField(primary_key=True))
     children: list[AtomicChild] = OneToMany(
         AtomicChild, foreign_key="item_id", on_save="cascade"
+    )
+
+
+class AtomicKeyChild(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    owner_code: str | None = None
+
+
+class AtomicKeyOwner(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    code: str | None = Field(
+        default=None,
+        database=DatabaseField(unique=True),
+    )
+    children: list[AtomicKeyChild] = OneToMany(
+        AtomicKeyChild,
+        local_key="code",
+        foreign_key="owner_code",
+        on_save="cascade",
+        on_update="cascade",
     )
 
 
@@ -110,6 +131,44 @@ async def test_cascading_relationship_writes_are_atomic():
         assert await db.repository(AtomicChild).count() == 0
     finally:
         await db.disconnect()
+
+@pytest.mark.asyncio
+async def test_local_key_update_cascade_rolls_back_with_parent_update():
+    db = Database(SQLiteAdapter({"database": ":memory:"}))
+    await db.connect()
+    await db.create_schema([AtomicKeyOwner, AtomicKeyChild])
+    try:
+        owners = db.repository(AtomicKeyOwner)
+        children = db.repository(AtomicKeyChild)
+        await owners.create(
+            AtomicKeyOwner(
+                id="owner-1",
+                code="code-1",
+                children=[AtomicKeyChild(id="child-1")],
+            )
+        )
+        await owners.create(AtomicKeyOwner(id="owner-2", code="code-2"))
+        await owners.create(
+            AtomicKeyOwner(
+                id="owner-null",
+                children=[AtomicKeyChild(id="child-null")],
+            )
+        )
+        null_child = await children.where(AtomicKeyChild.id == "child-null").first()
+        assert null_child.owner_code is None
+
+        owner = await owners.where(AtomicKeyOwner.id == "owner-1").first()
+        owner.code = "code-2"
+        with pytest.raises(DuplicateKeyError):
+            await owners.save(owner)
+
+        stored_owner = await owners.where(AtomicKeyOwner.id == "owner-1").first()
+        stored_child = await children.where(AtomicKeyChild.id == "child-1").first()
+        assert stored_owner.code == "code-1"
+        assert stored_child.owner_code == "code-1"
+    finally:
+        await db.disconnect()
+
 
 @pytest.mark.asyncio
 async def test_cascading_relationship_writes_are_atomic2():

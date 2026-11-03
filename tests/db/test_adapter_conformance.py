@@ -29,6 +29,7 @@ from renus.db import (
     Column,
     Count,
     Database,
+    DatabaseError,
     DatabaseField,
     DuplicateKeyError,
     Field,
@@ -306,6 +307,94 @@ def _o2m_pair(
             "name": "",
             "children": OneToMany(
                 child_cls,
+                foreign_key=fk,
+                on_save=on_save,
+                on_delete=on_delete,
+                on_update=on_update,
+            ),
+        },
+    )
+    return owner_cls, child_cls, fk
+
+
+def _o2o_local_key_pair(
+    name,
+    *,
+    on_save,
+    on_delete,
+    on_update,
+) -> tuple[type, type]:
+    """Build a one-to-one pair joined on a non-primary owner field.
+
+    The owner's ``code`` references the child's primary key, so the child
+    carries no foreign key of its own; the relationship points at the owner's
+    ``code`` through ``local_key``.
+    """
+    child_cls = type(
+        f"{name}Detail",
+        (Model,),
+        {
+            "__annotations__": {"id": str, "label": str},
+            "id": Field(database=DatabaseField(primary_key=True)),
+            "label": "",
+        },
+    )
+    owner_cls = type(
+        f"{name}Owner",
+        (Model,),
+        {
+            "__annotations__": {"id": str, "name": str, "code": str, "detail": child_cls},
+            "id": Field(database=DatabaseField(primary_key=True)),
+            "name": "",
+            "code": "",
+            "detail": OneToOne(
+                child_cls,
+                local_key="code",
+                foreign_key="id",
+                on_save=on_save,
+                on_delete=on_delete,
+                on_update=on_update,
+            ),
+        },
+    )
+    return owner_cls, child_cls
+
+
+def _o2m_local_key_pair(
+    name,
+    *,
+    on_save,
+    on_delete,
+    on_update,
+) -> tuple[type, type, str]:
+    """Build a one-to-many pair joined on a non-primary owner field."""
+    fk = "owner_code"
+    child_cls = type(
+        f"{name}Child",
+        (Model,),
+        {
+            "__annotations__": {"id": str, fk: (str | None), "label": str},
+            "id": Field(database=DatabaseField(primary_key=True)),
+            fk: None,
+            "label": "",
+        },
+    )
+    owner_cls = type(
+        f"{name}Owner",
+        (Model,),
+        {
+            "__annotations__": {
+                "id": str,
+                "name": str,
+                "code": str,
+                "children": list[child_cls],
+            },
+            "id": Field(database=DatabaseField(primary_key=True)),
+            "name": "",
+            "code": "",
+            "children": OneToMany(
+                child_cls,
+                local_key="code",
                 foreign_key=fk,
                 on_save=on_save,
                 on_delete=on_delete,
@@ -2381,6 +2470,7 @@ async def test_cascade_on_update_one_to_many(kind):
         owner.id = "u2"
         await db.repository(User).save(owner)
 
+        assert await db.repository(User).where(User.id == "u2").exists()
         posts = await db.repository(Post).query().order_by(Post.title).all()
         assert {p.id for p in posts} == {"p1", "p2"}
         assert all(p.user_id == "u2" for p in posts)
@@ -2410,6 +2500,8 @@ async def test_cascade_on_update_one_to_one(kind):
         citizen.id = "c2"
         await db.repository(Citizen).save(citizen)
 
+        stored_citizen = await db.repository(Citizen).where(Citizen.id == "c2").first()
+        assert stored_citizen is not None
         assert await _row_counts(db, "citizens", "passports") == {
             "citizens": 1,
             "passports": 1,
@@ -2417,6 +2509,84 @@ async def test_cascade_on_update_one_to_one(kind):
         passports = await db.repository(Passport).query().all()
         assert len(passports) == 1
         assert passports[0].citizen_id == "c2"
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_cascade_on_update_local_key_one_to_one(kind):
+    owner_cls, child_cls = _o2o_local_key_pair(
+        "LocalKeyO2O",
+        on_save=SaveAction.CASCADE.value,
+        on_delete=ReferentialAction.CASCADE.value,
+        on_update=ReferentialAction.CASCADE.value,
+    )
+    db = await database_for(kind, [owner_cls, child_cls])
+    try:
+        await db.repository(owner_cls).create(
+            owner_cls(
+                id="o1",
+                name="owner",
+                code="c1",
+                detail=child_cls(id="c1", label="x"),
+            )
+        )
+
+        loaded = await db.repository(owner_cls).query().include(owner_cls.detail).first()
+        assert loaded.detail.id == "c1"
+
+        # Changing an unrelated field must not touch the related row.
+        owner = await db.repository(owner_cls).where(owner_cls.id == "o1").first()
+        owner.name = "renamed"
+        await db.repository(owner_cls).save(owner)
+        assert (await db.repository(child_cls).query().first()).id == "c1"
+
+        # Changing the local key cascades to the child foreign key.
+        owner = await db.repository(owner_cls).where(owner_cls.id == "o1").first()
+        owner.code = "c2"
+        await db.repository(owner_cls).save(owner)
+
+        children = await db.repository(child_cls).query().all()
+        assert [child.id for child in children] == ["c2"]
+        loaded = await db.repository(owner_cls).query().include(owner_cls.detail).first()
+        assert loaded.detail.id == "c2"
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_cascade_on_update_local_key_one_to_many(kind):
+    owner_cls, child_cls, fk = _o2m_local_key_pair(
+        "LocalKeyO2M",
+        on_save=SaveAction.CASCADE.value,
+        on_delete=ReferentialAction.CASCADE.value,
+        on_update=ReferentialAction.CASCADE.value,
+    )
+    db = await database_for(kind, [owner_cls, child_cls])
+    try:
+        await db.repository(owner_cls).create(
+            owner_cls(
+                id="o1",
+                name="owner",
+                code="c1",
+                children=[child_cls(id="ch1", label="a"), child_cls(id="ch2", label="b")],
+            )
+        )
+        assert {child.id: getattr(child, fk) for child in await db.repository(child_cls).query().all()} == {
+            "ch1": "c1",
+            "ch2": "c1",
+        }
+
+        owner = await db.repository(owner_cls).where(owner_cls.id == "o1").first()
+        owner.code = "c2"
+        await db.repository(owner_cls).save(owner)
+
+        children = await db.repository(child_cls).query().all()
+        assert {getattr(child, fk) for child in children} == {"c2"}
+        loaded = await db.repository(owner_cls).query().include(owner_cls.children).first()
+        assert {child.id for child in loaded.children} == {"ch1", "ch2"}
     finally:
         await cleanup(db)
 
@@ -3156,6 +3326,77 @@ async def test_hard_delete_object_and_query(kind):
 # ---------------------------------------------------------------------------
 # Transactions
 # ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_transaction_multi_threading(kind):
+    class User(Model):
+        id: int = Field(database=DatabaseField(primary_key=True))
+        total: int
+
+    db = await database_for(kind, [User])
+    loop = asyncio.get_running_loop()
+    try:
+        repo = db.repository(User)
+        await repo.create(User(id=1, total=0))
+        errors: list[Exception] = []
+        async def update_total(delta: int, steps: int = 50) -> None:
+            for _ in range(steps):
+                for attempt in range(1000):
+                    try:
+                        async with db.transaction():
+                            user = await repo.where(User.id == 1).first()
+                            assert user is not None
+                            user.total += delta
+                            await repo.save(user)
+                        break
+                    except DatabaseError as exc:
+                        message = str(exc).lower()
+                        if kind != "mongodb" or "write conflict" not in message:
+                            raise
+                    await asyncio.sleep(0.001)
+                else:
+                    raise RuntimeError("could not update user 1 after 1000 attempts")
+
+        def run_in_thread(delta: int) -> None:
+            future = asyncio.run_coroutine_threadsafe(update_total(delta), loop)
+            try:
+                future.result(timeout=60)
+            except Exception as exc:
+                future.cancel()
+                errors.append(exc)
+
+        async def run_workers(deltas: tuple[int, int]) -> None:
+            threads = [
+                threading.Thread(target=run_in_thread, args=(delta,))
+                for delta in deltas
+            ]
+            try:
+                for thread in threads:
+                    thread.start()
+                await asyncio.gather(
+                    *(asyncio.to_thread(thread.join, 65) for thread in threads)
+                )
+                assert not any(thread.is_alive() for thread in threads), "worker thread timed out"
+                assert not errors, errors
+            finally:
+                for thread in threads:
+                    if thread.ident is not None and thread.is_alive():
+                        await asyncio.to_thread(thread.join, 5)
+
+        # Two workers contribute 50 increments each, then two workers
+        # contribute 50 decrements each; every operation targets user 1.
+        await run_workers((1, 1))
+        user = await repo.where(User.id == 1).first()
+        assert user is not None
+        assert user.total == 100
+
+        await run_workers((-1, -1))
+        user = await repo.where(User.id == 1).first()
+        assert user is not None
+        assert user.total == 0
+    finally:
+        await cleanup(db)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)

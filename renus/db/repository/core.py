@@ -146,8 +146,10 @@ class Repository(Generic[T]):
 
         filters: list[Condition] = []
         if hasattr(obj, "identity_dict"):
+            snapshot = getattr(obj, "_db_original_snapshot", {}) or {}
             for pk_name, pk_val in obj.identity_dict().items():
-                filters.append(Path(model_cls, (pk_name,)) == pk_val)
+                original_value = snapshot.get(pk_name, pk_val)
+                filters.append(Path(model_cls, (pk_name,)) == original_value)
 
         return Update(source=model_cls, 
             values=validate_update_values(model_cls,changes),
