@@ -12,6 +12,7 @@ from renus.db.mutation.ast import (
     UpdateMany,
 )
 from renus.db.query.ast import Condition, Path, QueryAST
+from renus.datastructures.id import ID
 from renus.db.relationships import RelationshipKind
 
 from renus.db.transaction.core import Transaction
@@ -287,7 +288,26 @@ class RelationshipCoordinator:
         if parent_id is None:
             return
 
-        await self._cascade_delete_for_parent_ids(meta, [parent_id], hard=hard)
+        for rname, rel in meta.relationships.items():
+            if rel.kind not in (RelationshipKind.ONE_TO_ONE, RelationshipKind.ONE_TO_MANY):
+                continue
+            local_key = rel.local_key or parent_pk
+            local_value = getattr(obj, local_key, None)
+            if local_value is not None:
+                await self._cascade_delete_for_parent_ids(
+                    meta, [local_value], hard=hard, relationships={rname}
+                )
+
+        await self._cascade_delete_for_parent_ids(
+            meta,
+            [parent_id],
+            hard=hard,
+            relationships={
+                name
+                for name, rel in meta.relationships.items()
+                if rel.kind == RelationshipKind.MANY_TO_MANY
+            },
+        )
 
     async def cascade_delete_many(
         self,
@@ -307,25 +327,49 @@ class RelationshipCoordinator:
             q = q.where(*conditions)
         rows = await q.select(Path(self.model, (parent_pk,))).all()
 
-        parent_ids: list[Any] = [
-            self._row_pk_value(r, parent_pk) for r in rows
-        ]
-        parent_ids = [pid for pid in parent_ids if pid is not None]
-        if not parent_ids:
-            return
+        for rname, rel in meta.relationships.items():
+            if rel.kind not in (RelationshipKind.ONE_TO_ONE, RelationshipKind.ONE_TO_MANY):
+                continue
+            local_key = rel.local_key or parent_pk
+            if local_key == parent_pk:
+                local_values = [self._row_pk_value(row, parent_pk) for row in rows]
+            else:
+                local_rows = await q.select(Path(self.model, (local_key,))).all()
+                local_values = [self._row_pk_value(row, local_key) for row in local_rows]
+            local_values = [value for value in local_values if value is not None]
+            await self._cascade_delete_for_parent_ids(
+                meta, local_values, hard=hard, relationships={rname}
+            )
 
-        await self._cascade_delete_for_parent_ids(meta, parent_ids, hard=hard)
+        parent_ids = [
+            self._row_pk_value(row, parent_pk)
+            for row in rows
+            if self._row_pk_value(row, parent_pk) is not None
+        ]
+        await self._cascade_delete_for_parent_ids(
+            meta,
+            parent_ids,
+            hard=hard,
+            relationships={
+                name
+                for name, rel in meta.relationships.items()
+                if rel.kind == RelationshipKind.MANY_TO_MANY
+            },
+        )
 
     async def _cascade_delete_for_parent_ids(
         self,
         meta: Any,
         parent_ids: list[Any],
         hard: bool = False,
+        relationships: set[str] | None = None,
     ) -> None:
         if not parent_ids:
             return
 
         for rname, rel in meta.relationships.items():
+            if relationships is not None and rname not in relationships:
+                continue
             if rel.kind == RelationshipKind.MANY_TO_MANY:
                 if not rel.through:
                     continue
@@ -343,7 +387,8 @@ class RelationshipCoordinator:
             elif rel.kind in (RelationshipKind.ONE_TO_ONE, RelationshipKind.ONE_TO_MANY):
                 target_cls = rel.target if isinstance(rel.target, type) else rel.resolve_target()
                 fk_name = rel.foreign_key or f"{to_plural_lower(meta.table)}_id"
-                child_condition = Path(target_cls, (fk_name,)).in_(parent_ids)
+                related_ids = self._coerce_related_ids(target_cls, fk_name, parent_ids)
+                child_condition = Path(target_cls, (fk_name,)).in_(related_ids)
                 if rel.on_delete == "cascade":
                     child_repo = self.repo.__class__(self.adapter, target_cls, self.repo.connection_name)
                     if hard:
@@ -372,6 +417,23 @@ class RelationshipCoordinator:
                             f"rows still reference the parent"
                         )
 
+
+    @staticmethod
+    def _coerce_related_ids(target_cls: type, fk_name: str, values: list[Any]) -> list[Any]:
+        """Coerce owner keys to the declared type of the child foreign key."""
+        target_meta = getattr(target_cls, "__db_metadata__", None)
+        field_meta = target_meta.fields.get(fk_name) if target_meta else None
+        target_type = field_meta.inferred_type if field_meta else None
+        coerced: list[Any] = []
+        for value in values:
+            if isinstance(value, ID):
+                value = value.value
+                if target_type is str and value is not None:
+                    value = str(value)
+                elif target_type is ID and value is not None:
+                    value = ID(value)
+            coerced.append(value)
+        return coerced
 
     @staticmethod
     def _fk_default(target_cls: type, fk_name: str) -> Any:

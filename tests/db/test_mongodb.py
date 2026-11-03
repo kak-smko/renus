@@ -18,6 +18,7 @@ from renus.db import (
     MongoDBAdapter,
     MutationResult,
     Model,
+    OneToOne,
     Repository,
     Sum,
     Delete,
@@ -27,6 +28,7 @@ from renus.db import (
     Update,
     UpdateMany,
 )
+
 from renus.db.mongodb.adapter import MongoTransactionContext
 from renus.db.mongodb.compiler import MongoCompiledQuery, MongoCompiler
 
@@ -411,6 +413,72 @@ async def test_mongodb_transaction_context():
 
     mock_session.abort_transaction.assert_called_once()
     mock_session.end_session.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_mongodb_graph_delete_cascades_to_child():
+    class GraphChilds(Model):
+        id: str = Field(database=DatabaseField(primary_key=True))
+        gen: str | None = None
+        total_childs: int = 0
+
+    class Graph(Model):
+        id: str = Field(
+            database=DatabaseField(primary_key=True),
+        )
+        gen: str = Field(database=DatabaseField(unique=True, indexed=True))
+        rank_id: int
+        childs: GraphChilds = OneToOne(
+            GraphChilds,
+            local_key="id",
+            foreign_key="gen",
+            on_save="cascade",
+            on_delete="cascade",
+        )
+
+    database_name = f"renus_graph_delete_test_{uuid4().hex}"
+    adapter = MongoDBAdapter(
+        {
+            "uri": "mongodb://localhost:27017",
+            "database": database_name,
+            "retries": 1,
+            "server_selection_timeout_ms": 1000,
+        }
+    )
+    db = Database(adapter)
+    connected = False
+
+    try:
+        await db.connect()
+        connected = True
+    except Exception as exc:
+        pytest.skip(f"MongoDB is unavailable: {exc}")
+
+    try:
+        hello = await adapter._mongo_db.command("hello")
+        if not (hello.get("setName") or hello.get("msg") == "isdbgrid"):
+            pytest.skip("MongoDB transactions require a replica set or sharded cluster")
+
+        await db.create_schema([Graph, GraphChilds])
+        graph_repo: Repository[Graph] = db.repository(Graph)
+        child_repo: Repository[GraphChilds] = db.repository(GraphChilds)
+        await graph_repo.create(
+            Graph(
+                id="123",
+                gen="graph-1",
+                rank_id=1,
+                childs=GraphChilds(id="child-1", total_childs=1),
+            )
+        )
+
+        assert await child_repo.count() == 1
+        assert await graph_repo.delete_many(Graph.gen == "graph-1") == 1
+        assert await graph_repo.count() == 0
+        assert await child_repo.count() == 0
+    finally:
+        if connected:
+            await adapter._mongo_client.drop_database(database_name)
+        await db.disconnect()
+
 
 @pytest.mark.asyncio
 async def test_native_mongodb_graph_update():

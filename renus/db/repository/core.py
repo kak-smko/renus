@@ -357,20 +357,22 @@ class Repository(Generic[T]):
 
         first_cond: Condition = target_or_condition
         all_conditions: tuple[Condition, ...] = (first_cond,) + conditions
-        if meta and meta.soft_delete:
-            now = datetime.now(timezone.utc)
-            soft_vals = {"deleted_at": now, "is_deleted": True}
-            if meta.timestamps:
-                soft_vals["updated_at"] = now
+        async with self._atomic():
+            await self._rel_coordinator.cascade_delete_many(*all_conditions)
 
+            if meta and meta.soft_delete:
+                now = datetime.now(timezone.utc)
+                soft_vals = {"deleted_at": now, "is_deleted": True}
+                if meta.timestamps:
+                    soft_vals["updated_at"] = now
 
-            update_ast = Update(source=self.model, values=soft_vals, filters=all_conditions)
-            res = await self._execute_mutation(update_ast)
+                update_ast = Update(source=self.model, values=soft_vals, filters=all_conditions)
+                res = await self._execute_mutation(update_ast)
+                return res.rows_affected
+
+            del_ast = Delete(source=self.model, filters=all_conditions)
+            res = await self._execute_mutation(del_ast)
             return res.rows_affected
-
-        del_ast = Delete(source=self.model, filters=all_conditions)
-        res = await self._execute_mutation(del_ast)
-        return res.rows_affected
 
     async def delete_many(self,*conditions: Condition,) -> int:
         """Bulk-delete matching rows and return rows affected."""
