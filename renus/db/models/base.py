@@ -65,6 +65,15 @@ class ModelMeta(type):
         soft_delete = bool(getattr(meta_cls, "soft_delete", False))
 
         annotations = dict(ns.get("__annotations__", {}))
+        annotate_fn = ns.get("__annotate_func__") or ns.get("__annotate__")
+        if not annotations and callable(annotate_fn):
+            try:
+                annotations = dict(annotate_fn(0))
+            except Exception:
+                try:
+                    annotations = dict(annotate_fn(2))
+                except Exception:
+                    annotations = {}
 
         if timestamps:
             if "created_at" not in annotations:
