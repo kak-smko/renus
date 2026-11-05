@@ -496,7 +496,7 @@ class Slug(Model):
 
 ```python
 article = Slug(slug="portable-orm", title="Portable ORM")
-print(article.identity_values())  # portable-orm
+print(article.get_identity_values())  # portable-orm
 ```
 
 ### UUID identity
@@ -553,11 +553,11 @@ membership = Membership(
     role="admin",
 )
 
-print(membership.identity_values())  # (10, 42)
-print(membership.identity_dict())    # {"organization_id": 10, "user_id": 42}
+print(membership.get_identity_values())  # (10, 42)
+print(membership.get_identity_dict())    # {"organization_id": 10, "user_id": 42}
 ```
 
-For a single-key model, `identity_values()` returns the value itself. For a composite-key model, it returns a tuple.
+For a single-key model, `get_identity_values()` returns the value itself. For a composite-key model, it returns a tuple.
 
 ## 9. Timestamps and soft deletion
 
@@ -588,19 +588,19 @@ class Product(Model):
 Soft-deletable models receive:
 
 - `deleted_at`, initially `None`;
-- `is_deleted()`, initially `False`.
+- `model_is_deleted()`, initially `False`.
 
-Call `soft_delete()` and `restore()` on the model:
+Call `set_soft_delete()` and `set_restore()` on the model:
 
 ```python
 product = Product(sku="ITEM-1", price=19.99)
 
-product.soft_delete()
-assert product.is_deleted() is True
+product.set_soft_delete()
+assert product.model_is_deleted() is True
 assert product.deleted_at is not None
 
-product.restore()
-assert product.is_deleted() is False
+product.set_restore()
+assert product.model_is_deleted() is False
 assert product.deleted_at is None
 ```
 
@@ -615,16 +615,16 @@ from renus.db import Lifecycle
 
 
 article = Article(title="Draft")
-assert article.lifecycle_state() == Lifecycle.NEW
-assert article.is_new() is True
-assert article.is_dirty() is False
+assert article.get_state() == Lifecycle.NEW
+assert article.model_is_new() is True
+assert article.model_is_dirty() is False
 
 # After: await repository.create(article)
-assert article.is_persisted() is True
+assert article.model_is_persisted() is True
 
 article.title = "Published"
-assert article.is_dirty() is True
-assert article.dirty_fields() == {"title"}
+assert article.model_is_dirty() is True
+assert article.get_dirty_fields() == {"title"}
 assert article.get_dirty_changes() == {
     "title": ("Draft", "Published"),
 }
@@ -634,15 +634,15 @@ Useful lifecycle properties and methods are:
 
 | API | Purpose |
 | --- | --- |
-| `lifecycle_state()` | Current `Lifecycle` value |
-| `is_new()` | Whether the model has not been persisted |
-| `is_persisted()` | Whether it is persisted and clean |
-| `is_dirty()` | Whether a persisted value changed |
-| `is_deleted()` | Whether the model has been deleted |
-| `dirty_fields()` | Names of changed fields |
+| `get_state()` | Current `Lifecycle` value |
+| `model_is_new()` | Whether the model has not been persisted |
+| `model_is_persisted()` | Whether it is persisted and clean |
+| `model_is_dirty()` | Whether a persisted value changed |
+| `model_is_deleted()` | Whether the model has been deleted |
+| `get_dirty_fields()` | Names of changed fields |
 | `get_dirty_changes()` | Original and current values for changed fields |
-| `identity_values()` | Primary-key value or tuple |
-| `identity_dict()` | Primary-key fields as a dictionary |
+| `get_identity_values()` | Primary-key value or tuple |
+| `get_identity_dict()` | Primary-key fields as a dictionary |
 
 Use a repository to persist state changes:
 

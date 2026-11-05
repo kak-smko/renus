@@ -186,7 +186,7 @@ The main persistence operations are:
 
 - `count(...)` and `exists(...)` provide direct aggregate checks.
 
-After a successful insert, Renus marks the model as persisted and populates adapter-generated values when available. Model instances track states such as new, persisted, dirty, deleted, and detached; inspect `is_new`, `is_persisted`, `is_dirty`, `is_deleted`, `dirty_fields`, and `get_dirty_changes()` when coordinating application changes.
+After a successful insert, Renus marks the model as persisted and populates adapter-generated values when available. Model instances track states such as new, persisted, dirty, deleted, and detached; inspect `model_is_new()`, `model_is_persisted()`, `model_is_dirty()`, `model_is_deleted()`, `get_dirty_fields()`, and `get_dirty_changes()` when coordinating application changes.
 
 ## Queries
 

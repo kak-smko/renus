@@ -226,7 +226,7 @@ class TestModelInitMassAssignment:
     def test_declared_fields_and_relationships_still_accepted(self):
         user = User({"name": "a", "email": "b"})
         assert user.name == "a"
-        assert user.is_new() is True
+        assert user.model_is_new() is True
 
 
 # ==========================================================================

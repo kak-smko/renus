@@ -78,7 +78,7 @@ class RelationshipCoordinator:
             snapshot.get(pk) is not None
             and snapshot.get(pk) != getattr(obj, pk, None)
         )
-        persisted = not getattr(obj, "is_new", lambda: True)()
+        persisted = not getattr(obj, "model_is_new", lambda: True)()
 
         for rname, rel in meta.relationships.items():
             value = getattr(obj, rname, None)

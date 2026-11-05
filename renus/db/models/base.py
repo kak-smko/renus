@@ -235,14 +235,16 @@ class ModelMeta(type):
             column_to_field[col_name] = fname
 
             if fname not in {
-                "state",
-                "is_new",
-                "is_persisted",
-                "is_dirty",
-                "is_deleted",
-                "dirty_fields",
-                "identity_values",
-                "identity_dict",
+                "get_state",
+                "model_is_new",
+                "model_is_persisted",
+                "model_is_dirty",
+                "model_is_deleted",
+                "get_dirty_fields",
+                "set_soft_delete",
+                "set_restore",
+                "get_identity_values",
+                "get_identity_dict",
             }:
                 setattr(cls, fname, Path(cls, (fname,)))
 
@@ -903,37 +905,37 @@ class Model(metaclass=ModelMeta):
                 return True
         return False
 
-    def lifecycle_state(self) -> Lifecycle:
+    def get_state(self) -> Lifecycle:
         """Return the model's current lifecycle state."""
         return getattr(self, "_db_state", Lifecycle.NEW)
 
-    def is_new(self) -> bool:
+    def model_is_new(self) -> bool:
         """Return whether the model has not yet been persisted."""
-        return self.lifecycle_state() == Lifecycle.NEW
+        return self.get_state() == Lifecycle.NEW
 
-    def is_persisted(self) -> bool:
+    def model_is_persisted(self) -> bool:
         """Return whether the model has been persisted and is clean."""
-        return self.lifecycle_state() == Lifecycle.PERSISTED
+        return self.get_state() == Lifecycle.PERSISTED
 
-    def is_dirty(self) -> bool:
+    def model_is_dirty(self) -> bool:
         """Return whether any field differs from its persisted snapshot."""
-        if self.lifecycle_state() == Lifecycle.DIRTY:
+        if self.get_state() == Lifecycle.DIRTY:
             return True
-        if self.lifecycle_state() == Lifecycle.NEW:
+        if self.get_state() == Lifecycle.NEW:
             return False
         return self._any_field_dirty()
 
-    def is_deleted(self) -> bool:
+    def model_is_deleted(self) -> bool:
         """Return whether the model has been deleted."""
-        if self.lifecycle_state() == Lifecycle.DELETED:
+        if self.get_state() == Lifecycle.DELETED:
             return True
         if getattr(self, "deleted_at", None) is not None:
             return True
         return bool(self.__dict__.get("_is_deleted_value", False))
 
-    def dirty_fields(self) -> set[str]:
+    def get_dirty_fields(self) -> set[str]:
         """Return the set of field names that have changed."""
-        if self.lifecycle_state() == Lifecycle.NEW:
+        if self.get_state() == Lifecycle.NEW:
             return set(self.__db_metadata__.fields.keys()) & set(self.__dict__.keys())
 
         dirty: set[str] = set()
@@ -945,7 +947,7 @@ class Model(metaclass=ModelMeta):
     def get_dirty_changes(self) -> dict[str, tuple[Any, Any]]:
         """Return changed fields mapped to their original and current values."""
         changes: dict[str, tuple[Any, Any]] = {}
-        for fname in self.dirty_fields():
+        for fname in self.get_dirty_fields():
             original = self._db_original_snapshot.get(fname)
             current = self.get_sensitive(fname) if fname == "is_deleted" else self.__dict__.get(fname)
             changes[fname] = (original, current)
@@ -964,7 +966,7 @@ class Model(metaclass=ModelMeta):
     def _mark_dirty(self) -> None:
         object.__setattr__(self, "_db_state", Lifecycle.DIRTY)
 
-    def soft_delete(self) -> None:
+    def set_soft_delete(self) -> None:
         """Mark the model as softly deleted, if enabled on the model."""
         meta = self.__db_metadata__
         if not meta.soft_delete:
@@ -976,7 +978,7 @@ class Model(metaclass=ModelMeta):
         object.__setattr__(self, "_is_deleted_value", True)
         self._mark_deleted()
 
-    def restore(self) -> None:
+    def set_restore(self) -> None:
         """Restore a softly deleted model to an active dirty state."""
         meta = self.__db_metadata__
         if not meta.soft_delete:
@@ -987,7 +989,7 @@ class Model(metaclass=ModelMeta):
         object.__setattr__(self, "_is_deleted_value", False)
         object.__setattr__(self, "_db_state", Lifecycle.DIRTY)
 
-    def identity_values(self) -> Any:
+    def get_identity_values(self) -> Any:
         """Return the identity key value(s) for this model."""
         meta = self.__db_metadata__
         pk_fields = meta.identity.fields
@@ -995,7 +997,7 @@ class Model(metaclass=ModelMeta):
             return getattr(self, pk_fields[0], None)
         return tuple(getattr(self, f, None) for f in pk_fields)
 
-    def identity_dict(self) -> dict[str, Any]:
+    def get_identity_dict(self) -> dict[str, Any]:
         """Return the identity fields as a name-to-value dictionary."""
         meta = self.__db_metadata__
         return {f: getattr(self, f, None) for f in meta.identity.fields}

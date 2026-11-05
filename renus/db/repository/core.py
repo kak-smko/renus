@@ -130,8 +130,8 @@ class Repository(Generic[T]):
     @classmethod
     def _build_update_ast_for_model(cls, model_cls: type, obj: Any) -> Update:
         changes: dict[str, Any] = {}
-        if hasattr(obj, "dirty_fields"):
-            for fname in obj.dirty_fields():
+        if hasattr(obj, "get_dirty_fields"):
+            for fname in obj.get_dirty_fields():
                 changes[fname] = (
                     obj.get_sensitive(fname)
                     if hasattr(obj, "get_sensitive")
@@ -143,9 +143,9 @@ class Repository(Generic[T]):
             }
 
         filters: list[Condition] = []
-        if hasattr(obj, "identity_dict"):
+        if hasattr(obj, "get_identity_dict"):
             snapshot = getattr(obj, "_db_original_snapshot", {}) or {}
-            for pk_name, pk_val in obj.identity_dict().items():
+            for pk_name, pk_val in obj.get_identity_dict().items():
                 original_value = snapshot.get(pk_name, pk_val)
                 filters.append(Path(model_cls, (pk_name,)) == original_value)
 
@@ -158,9 +158,9 @@ class Repository(Generic[T]):
     @classmethod
     def _build_delete_ast_for_model(cls, model_cls: type, obj: Any) -> Delete:
         filters: list[Condition] = []
-        if hasattr(obj, "identity_dict"):
+        if hasattr(obj, "get_identity_dict"):
             snapshot = getattr(obj, "_db_original_snapshot", {}) or {}
-            for pk_name, pk_val in obj.identity_dict().items():
+            for pk_name, pk_val in obj.get_identity_dict().items():
                 original_value = snapshot.get(pk_name, pk_val)
                 filters.append(Path(model_cls, (pk_name,)) == original_value)
 
@@ -257,10 +257,10 @@ class Repository(Generic[T]):
     async def save(self, obj: T) -> T:
         """Insert or update the model depending on its persistence state."""
         obj = self._require_model_instance(obj)
-        if obj.is_new():
+        if obj.model_is_new():
             return await self.create(obj)
 
-        if obj.is_persisted() and not obj.is_dirty():
+        if obj.model_is_persisted() and not obj.model_is_dirty():
             return obj
 
         async with self._atomic(self._rel_coordinator.requires_transaction(obj)):
@@ -343,8 +343,8 @@ class Repository(Generic[T]):
                 await self._rel_coordinator.cascade_delete(obj)
                 if meta and meta.soft_delete:
 
-                    if hasattr(obj, "soft_delete"):
-                        obj.soft_delete()
+                    if hasattr(obj, "set_soft_delete"):
+                        obj.set_soft_delete()
                     now = datetime.now(timezone.utc)
                     soft_vals = {
                         "deleted_at": now,
@@ -354,9 +354,9 @@ class Repository(Generic[T]):
                         soft_vals["updated_at"] = now
 
                     pk_filters: list[Condition] = []
-                    if hasattr(obj, "identity_dict"):
+                    if hasattr(obj, "get_identity_dict"):
                         snapshot = getattr(obj, "_db_original_snapshot", {}) or {}
-                        for pk_name, pk_val in obj.identity_dict().items():
+                        for pk_name, pk_val in obj.get_identity_dict().items():
                             original_value = snapshot.get(pk_name, pk_val)
                             pk_filters.append(
                                 Path(self.model, (pk_name,)) == original_value
@@ -429,8 +429,8 @@ class Repository(Generic[T]):
         if not isinstance(target_or_condition, Condition):
             obj = self._require_model_instance(target_or_condition)
             row_conditions: list[Condition] = []
-            if hasattr(obj, "identity_dict"):
-                for pk_name, pk_val in obj.identity_dict().items():
+            if hasattr(obj, "get_identity_dict"):
+                for pk_name, pk_val in obj.get_identity_dict().items():
                     row_conditions.append(Path(self.model, (pk_name,)) == pk_val)
         else:
             row_conditions = [target_or_condition, *conditions]
@@ -453,8 +453,8 @@ class Repository(Generic[T]):
         result = await self._execute_mutation(update_ast)
 
         if not isinstance(target_or_condition, Condition) and result.rows_affected:
-            if hasattr(obj, "restore"):
-                obj.restore()
+            if hasattr(obj, "set_restore"):
+                obj.set_restore()
             if meta.timestamps and "updated_at" in values:
                 object.__setattr__(obj, "updated_at", values["updated_at"])
             if hasattr(obj, "_mark_persisted"):

@@ -595,25 +595,25 @@ Renus validates field assignment and tracks changes after a model is persisted:
 ```python
 user = User(name="Ada", age=36, active=True)
 
-print(user.is_new())       # True
-print(user.is_dirty())     # False
+print(user.model_is_new())       # True
+print(user.model_is_dirty())     # False
 
 # After repository persistence, changing a declared field marks the model dirty.
 user.name = "Ada Lovelace"
-print(user.dirty_fields())
+print(user.get_dirty_fields())
 print(user.get_dirty_changes())
 ```
 
 The model exposes:
 
-- `is_new()` — the model has not been persisted;
-- `is_persisted()` — the model is persisted and unchanged;
-- `is_dirty()` — a persisted model has changed;
-- `is_deleted()` — the model is marked deleted;
-- `dirty_fields()` — names of changed fields;
+- `model_is_new()` — the model has not been persisted;
+- `model_is_persisted()` — the model is persisted and unchanged;
+- `model_is_dirty()` — a persisted model has changed;
+- `model_is_deleted()` — the model is marked deleted;
+- `get_dirty_fields()` — names of changed fields;
 - `get_dirty_changes()` — changed field names and values;
-- `identity_values()` — primary-key values;
-- `identity_dict()` — primary-key names and values.
+- `get_identity_values()` — primary-key values;
+- `get_identity_dict()` — primary-key names and values.
 
 Assignment validation happens before a value is stored. If assignment raises `ValidationError`, the invalid value is not accepted.
 

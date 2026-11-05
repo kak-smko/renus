@@ -192,18 +192,18 @@ class Document(Model):
 
 
 document = Document(title="Identity basics")
-print(document.identity_values())
-print(document.identity_dict())
+print(document.get_identity_values())
+print(document.get_identity_dict())
 ```
 
-`identity_values()` returns the model's primary-key value. `identity_dict()` returns the primary-key field name and value:
+`get_identity_values()` returns the model's primary-key value. `get_identity_dict()` returns the primary-key field name and value:
 
 ```python
-print(document.identity_dict())
+print(document.get_identity_dict())
 # {"_id": ID(...)}
 ```
 
-For a single primary key, `identity_values()` returns one value rather than a tuple. These methods also work with integer, string, UUID, and composite identities.
+For a single primary key, `get_identity_values()` returns one value rather than a tuple. These methods also work with integer, string, UUID, and composite identities.
 
 ### Do not share one generated value as a class default
 

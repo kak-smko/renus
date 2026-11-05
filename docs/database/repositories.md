@@ -51,7 +51,7 @@ The `Database` form is usually preferable because it keeps connection selection 
 ```python
 user = await users.create(User(username="ada", name="Ada Lovelace"))
 print(user.username)
-print(user.is_persisted())
+print(user.model_is_persisted())
 ```
 
 ### `create_many`

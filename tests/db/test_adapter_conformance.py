@@ -538,7 +538,7 @@ async def test_create_and_read(kind):
             )
         )
         assert user.id is not None
-        assert user.is_persisted() is True
+        assert user.model_is_persisted() is True
 
         fetched = await db.repository(User).where(User.username == "alice").first()
         assert fetched is not None
@@ -645,12 +645,12 @@ async def test_save_insert_and_update(kind):
         repo = db.repository(User)
         obj = _u("s1", "saved", name="First", age=5)
         await repo.save(obj)  # insert path
-        assert obj.is_persisted() is True
+        assert obj.model_is_persisted() is True
 
         obj.name = "Second"
         obj.age = 6
         await repo.save(obj)  # update path
-        assert obj.is_dirty() is False
+        assert obj.model_is_dirty() is False
 
         loaded = await repo.where(User.username == "saved").first()
         assert loaded is not None
@@ -1294,16 +1294,16 @@ async def test_model_lifecycle_and_clean_save(kind):
         repo = db.repository(User)
         user = _u("state-1", "state-1", name="before", age=10)
 
-        assert user.is_new() is True
-        assert user.is_persisted() is False
-        assert user.is_dirty() is False
-        assert user.is_deleted() is False
+        assert user.model_is_new() is True
+        assert user.model_is_persisted() is False
+        assert user.model_is_dirty() is False
+        assert user.model_is_deleted() is False
 
         await repo.create(user)
-        assert user.is_new() is False
-        assert user.is_persisted() is True
-        assert user.is_dirty() is False
-        assert user.dirty_fields() == set()
+        assert user.model_is_new() is False
+        assert user.model_is_persisted() is True
+        assert user.model_is_dirty() is False
+        assert user.get_dirty_fields() == set()
         assert user.get_dirty_changes() == {}
 
         mutation_calls = 0
@@ -1321,9 +1321,9 @@ async def test_model_lifecycle_and_clean_save(kind):
 
         user.name = "after"
         user.age = 11
-        assert user.is_dirty() is True
-        assert user.is_persisted() is False
-        assert user.dirty_fields() == {"name", "age"}
+        assert user.model_is_dirty() is True
+        assert user.model_is_persisted() is False
+        assert user.get_dirty_fields() == {"name", "age"}
         assert user.get_dirty_changes() == {
             "name": ("before", "after"),
             "age": (10, 11),
@@ -1331,14 +1331,14 @@ async def test_model_lifecycle_and_clean_save(kind):
 
         await repo.save(user)
         assert mutation_calls == 1
-        assert user.is_persisted() is True
-        assert user.is_dirty() is False
-        assert user.dirty_fields() == set()
+        assert user.model_is_persisted() is True
+        assert user.model_is_dirty() is False
+        assert user.get_dirty_fields() == set()
         assert user.get_dirty_changes() == {}
 
         await repo.delete(user)
-        assert user.is_deleted() is True
-        assert user.is_persisted() is False
+        assert user.model_is_deleted() is True
+        assert user.model_is_persisted() is False
     finally:
         await cleanup(db)
 
@@ -1370,7 +1370,7 @@ async def test_generated_fields_on_create_and_create_many(kind, monkeypatch):
         )
         rows = [single, *many]
 
-        assert all(row.is_persisted() for row in rows)
+        assert all(row.model_is_persisted() for row in rows)
         assert all(row.id is not None for row in rows)
         assert all(isinstance(row.token, UUID) for row in rows)
         id_values = {
@@ -3287,14 +3287,14 @@ async def test_restore_soft_deleted_rows(kind):
 
         restored = await repo.where(SoftUser.username == "restore-1").first()
         assert restored is not None
-        assert restored.is_deleted() is False
+        assert restored.model_is_deleted() is False
         assert await repo.query().count() == 2
 
         await repo.delete(restored)
         loaded_deleted = await repo.query().only_deleted().first()
         assert loaded_deleted is not None
         assert await repo.restore(loaded_deleted) == 1
-        assert loaded_deleted.is_deleted() is False
+        assert loaded_deleted.model_is_deleted() is False
     finally:
         await cleanup(db)
 
