@@ -204,6 +204,10 @@ def format_rule_error(field: str, err: Any) -> str:
 class Field:
     """Declares validation and coercion rules for a model field."""
 
+    def __new__(cls, *args: Any, **kwargs: Any) -> Any:
+        """Create field metadata without overriding its annotated model value type."""
+        return super().__new__(cls)
+
     def __init__(
         self,
         *rules: Any,

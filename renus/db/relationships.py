@@ -102,6 +102,10 @@ def _resolve_loading(value: Any) -> str:
 class Relationship:
     """Descriptor defining a relationship between models."""
 
+    def __new__(cls, *args: Any, **kwargs: Any) -> Any:
+        """Create relationship metadata without overriding its model field type."""
+        return super().__new__(cls)
+
     def __init__(
         self,
         kind: RelationshipKind | str,
