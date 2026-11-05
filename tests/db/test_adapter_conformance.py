@@ -5512,3 +5512,42 @@ async def test_id_update(kind):
         assert user.name=="kak-smko"
     finally:
         await cleanup(database)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_nested_update(kind):
+    
+    class Address(Model):
+        city:str
+        state:str
+        
+    class User(Model):
+        id: int = Field(database=DatabaseField(primary_key=True))
+        name: str
+        address:Address
+
+    class Post(Model):
+        id:int
+        user:User
+
+    database = await database_for(kind, [User,Post])
+
+    try:
+        repository = database.repository(Post)
+        await repository.create(Post(
+                    id=1,
+                    user=User(name="smko",id=2,address=Address(city="tehran",state="tehran"))
+                ))
+
+
+        r=await repository.where(Post.id==1).update({"user.name":"kak-smko"})
+        assert r==1
+        r=await repository.where(Post.id==1).update({"user.address.city":"sna"})
+        assert r==1
+        post = await repository.where(Post.id==1).first()
+        assert post.user.name=="kak-smko"
+        assert post.user.id==2
+        assert post.user.address.city=="sna"
+        assert post.user.address.state=="tehran"
+    finally:
+        await cleanup(database)
