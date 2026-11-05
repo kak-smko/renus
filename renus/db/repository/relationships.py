@@ -366,32 +366,44 @@ class RelationshipCoordinator:
             return
 
         parent_pk = meta.primary_key_field
+        dependent_relationships = [
+            (name, rel, rel.local_key or parent_pk)
+            for name, rel in meta.relationships.items()
+            if rel.kind in (RelationshipKind.ONE_TO_ONE, RelationshipKind.ONE_TO_MANY)
+        ]
+        selected_fields = [parent_pk]
+        for _, _, local_key in dependent_relationships:
+            if local_key not in selected_fields:
+                selected_fields.append(local_key)
+
         q = self.repo.query()
         if hard:
             q = q.with_deleted()
         if conditions:
             q = q.where(*conditions)
-        rows = await q.select(Path(self.model, (parent_pk,))).all()
+        rows = await q.select(
+            *(Path(self.model, (field,)) for field in selected_fields)
+        ).all()
 
-        for rname, rel in meta.relationships.items():
-            if rel.kind not in (RelationshipKind.ONE_TO_ONE, RelationshipKind.ONE_TO_MANY):
-                continue
-            local_key = rel.local_key or parent_pk
-            if local_key == parent_pk:
-                local_values = [self._row_pk_value(row, parent_pk) for row in rows]
-            else:
-                local_rows = await q.select(Path(self.model, (local_key,))).all()
-                local_values = [self._row_pk_value(row, local_key) for row in local_rows]
-            local_values = [value for value in local_values if value is not None]
+        for rname, rel, local_key in dependent_relationships:
+            local_values = list(
+                dict.fromkeys(
+                    value
+                    for row in rows
+                    if (value := self._row_pk_value(row, local_key)) is not None
+                )
+            )
             await self._cascade_delete_for_parent_ids(
                 meta, local_values, hard=hard, relationships={rname}
             )
 
-        parent_ids = [
-            self._row_pk_value(row, parent_pk)
-            for row in rows
-            if self._row_pk_value(row, parent_pk) is not None
-        ]
+        parent_ids = list(
+            dict.fromkeys(
+                value
+                for row in rows
+                if (value := self._row_pk_value(row, parent_pk)) is not None
+            )
+        )
         await self._cascade_delete_for_parent_ids(
             meta,
             parent_ids,

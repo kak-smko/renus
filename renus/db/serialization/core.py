@@ -97,14 +97,24 @@ def to_dict(
 
     if isinstance(value, Mapping):
         return {
-            str(k): to_dict(v, exclude_none=exclude_none, exclude_unset=exclude_unset)
+            str(k): to_dict(
+                v,
+                exclude_none=exclude_none,
+                exclude_unset=exclude_unset,
+                include_sensitive=include_sensitive,
+            )
             for k, v in value.items()
             if not (exclude_none and v is None)
         }
 
     if isinstance(value, (list, tuple, set)):
         return [
-            to_dict(item, exclude_none=exclude_none, exclude_unset=exclude_unset)
+            to_dict(
+                item,
+                exclude_none=exclude_none,
+                exclude_unset=exclude_unset,
+                include_sensitive=include_sensitive,
+            )
             for item in value
         ]
 

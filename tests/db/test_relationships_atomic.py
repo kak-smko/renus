@@ -130,6 +130,34 @@ class DeleteParent(Model):
     )
 
 
+class BulkDeleteCodeChild(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    owner_code: str | None = None
+
+
+class BulkDeleteSlugChild(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    owner_slug: str | None = None
+
+
+class BulkDeleteOwner(Model):
+    id: str = Field(database=DatabaseField(primary_key=True))
+    code: str
+    slug: str
+    children_by_code: list[BulkDeleteCodeChild] = OneToMany(
+        BulkDeleteCodeChild,
+        local_key="code",
+        foreign_key="owner_code",
+        on_delete="cascade",
+    )
+    children_by_slug: list[BulkDeleteSlugChild] = OneToMany(
+        BulkDeleteSlugChild,
+        local_key="slug",
+        foreign_key="owner_slug",
+        on_delete="cascade",
+    )
+
+
 ADAPTERS = conformance_tests()
 
 
@@ -347,6 +375,44 @@ async def test_delete_uses_persisted_parent_and_local_keys():
 
         assert await parents.where(DeleteParent.id == "old-id").count() == 0
         assert await children.count() == 0
+    finally:
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_projects_all_relationship_keys_in_one_parent_query():
+    db = Database(SQLiteAdapter({"database": ":memory:"}))
+    await db.connect()
+    await db.create_schema([BulkDeleteOwner, BulkDeleteCodeChild, BulkDeleteSlugChild])
+    try:
+        owners = db.repository(BulkDeleteOwner)
+        code_children = db.repository(BulkDeleteCodeChild)
+        slug_children = db.repository(BulkDeleteSlugChild)
+        await owners.create(
+            BulkDeleteOwner(id="owner-1", code="code-1", slug="slug-1")
+        )
+        await code_children.create(
+            BulkDeleteCodeChild(id="code-child-1", owner_code="code-1")
+        )
+        await slug_children.create(
+            BulkDeleteSlugChild(id="slug-child-1", owner_slug="slug-1")
+        )
+
+        adapter = db.adapter()
+        original_execute_query = adapter.execute_query
+        parent_queries = 0
+
+        async def count_parent_queries(compiled):
+            nonlocal parent_queries
+            if getattr(compiled, "source", None) is BulkDeleteOwner:
+                parent_queries += 1
+            return await original_execute_query(compiled)
+
+        adapter.execute_query = count_parent_queries
+        assert await owners.delete_many(BulkDeleteOwner.id == "owner-1") == 1
+        assert parent_queries == 1
+        assert await code_children.count() == 0
+        assert await slug_children.count() == 0
     finally:
         await db.disconnect()
 

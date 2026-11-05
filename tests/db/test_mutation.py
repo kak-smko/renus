@@ -70,11 +70,24 @@ def test_insert_many_basic():
         {"username": "user2", "email": "u2@x.com"},
     ]
     ast = InsertMany(Member, records=records)
+    records.append({"username": "user3", "email": "u3@x.com"})
     assert isinstance(ast, MutationAST)
     assert ast.source is Member
     assert len(ast.records) == 2
     assert ast.records[0] == {"username": "user1", "email": "u1@x.com"}
     assert ast.records[1] == {"username": "user2", "email": "u2@x.com"}
+
+
+def test_insert_many_materializes_generators_once():
+    ast = InsertMany(
+        Member,
+        ({"username": name, "email": f"{name}@x.com"} for name in ("Ada", "Grace")),
+    )
+
+    assert ast.records == (
+        {"username": "Ada", "email": "Ada@x.com"},
+        {"username": "Grace", "email": "Grace@x.com"},
+    )
 
 def test_insert_many_from_models():
     repo = Repository(None, Member)
@@ -127,6 +140,28 @@ def test_update_from_model_with_dirty_tracking():
     assert ast.filters[0].operator == Operator.EQ
     assert ast.filters[0].path == Member.id
     assert ast.filters[0].value == 10
+
+def test_update_argument_resolution_supports_positional_and_keyword_payloads():
+    repo = Repository(None, Member)
+    condition = Member.id == 1
+    values = {"points": 10}
+
+    assert repo._resolve_update_arguments(
+        "update", (condition, values), None
+    ) == ((condition,), values)
+    assert repo._resolve_update_arguments(
+        "update_many", (condition,), values
+    ) == ((condition,), values)
+
+
+def test_update_argument_resolution_rejects_missing_payloads():
+    repo = Repository(None, Member)
+
+    with pytest.raises(ValueError, match="update requires filter conditions and values"):
+        repo._resolve_update_arguments("update", (), None)
+    with pytest.raises(ValueError, match="update_many requires a dictionary of values"):
+        repo._resolve_update_arguments("update_many", (Member.id == 1,), None)
+
 
 def test_update_many():
     cond = Member.role == "guest"

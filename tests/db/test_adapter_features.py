@@ -20,6 +20,7 @@ from renus.datastructures.id import ID
 from renus.db.query.ast import Path
 
 from renus.db.sqlite import SQLiteAdapter
+from renus.db.sqlite.dialect import SQLiteDialect
 from tests.db._conformance import (
     adapter_for,
     cleanup,
@@ -30,6 +31,22 @@ from tests.db._conformance import (
 
 
 ADAPTERS = conformance_tests()
+
+
+def test_create_table_sql_preserves_foreign_keys_from_iterable():
+    columns = (
+        column
+        for column in (
+            Column("id", int, primary_key=True),
+            Column("owner_id", int, foreign_key="owners.id"),
+        )
+    )
+
+    sql = SQLiteDialect().create_table_sql("records", columns)
+
+    assert '"id" INTEGER PRIMARY KEY' in sql
+    assert '"owner_id" INTEGER NULL' in sql
+    assert 'FOREIGN KEY ("owner_id") REFERENCES "owners"("id")' in sql
 
 
 class FeatureRecord(Model):

@@ -160,26 +160,18 @@ class SQLAdapter(AsyncDatabaseAdapter):
                     )
                     if parent is None:
                         continue
-                dedupe_key = (root_id, spec["path"])
-                seen = child_keys.setdefault(dedupe_key, set())
-                child_key = child_id if child_id is not None else repr(sorted(child.items(), key=lambda item: item[0]))
-                if spec["collection"] and child_key in seen:
-                    continue
-                seen.add(child_key)
-                if len(spec["path"]) == 1:
-                    self._put_joined_value(
-                        parent,
-                        (spec["path"][-1],),
-                        child,
-                        spec["collection"],
-                    )
-                else:
-                    self._put_joined_value(
-                        parent,
-                        (spec["path"][-1],),
-                        child,
-                        spec["collection"],
-                    )
+                if spec["collection"]:
+                    dedupe_key = (root_id, spec["path"])
+                    seen = child_keys.setdefault(dedupe_key, set())
+                    if child_id in seen:
+                        continue
+                    seen.add(child_id)
+                self._put_joined_value(
+                    parent,
+                    (spec["path"][-1],),
+                    child,
+                    spec["collection"],
+                )
 
         result = list(grouped.values())
         start = compiled.root_offset or 0
@@ -233,9 +225,7 @@ class SQLAdapter(AsyncDatabaseAdapter):
             parent = nested
         name = path[-1]
         if collection:
-            current = parent.setdefault(name, [])
-            if not any(item == value for item in current):
-                current.append(value)
+            parent.setdefault(name, []).append(value)
         else:
             parent.setdefault(name, value)
 

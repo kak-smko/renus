@@ -35,7 +35,7 @@ class Repository(Generic[T]):
     def __init__(
         self,
         adapter_or_database: AsyncDatabaseAdapter | Any,
-        model: type[Model],
+        model: type[T],
         connection_name: str = "primary",
     ) -> None:
         """Resolve the backend adapter and prepare the repository.
@@ -130,10 +130,8 @@ class Repository(Generic[T]):
     @classmethod
     def _build_update_ast_for_model(cls, model_cls: type, obj: Any) -> Update:
         changes: dict[str, Any] = {}
-        meta = getattr(model_cls, "__db_metadata__", None)
         if hasattr(obj, "dirty_fields"):
             for fname in obj.dirty_fields():
-                fmeta = meta.fields.get(fname) if meta else None
                 changes[fname] = (
                     obj.get_sensitive(fname)
                     if hasattr(obj, "get_sensitive")
@@ -151,9 +149,11 @@ class Repository(Generic[T]):
                 original_value = snapshot.get(pk_name, pk_val)
                 filters.append(Path(model_cls, (pk_name,)) == original_value)
 
-        return Update(source=model_cls, 
-            values=validate_update_values(model_cls,changes),
-            filters=tuple(filters))
+        return Update(
+            source=model_cls,
+            values=validate_update_values(model_cls, changes),
+            filters=tuple(filters),
+        )
 
     @classmethod
     def _build_delete_ast_for_model(cls, model_cls: type, obj: Any) -> Delete:
@@ -283,19 +283,13 @@ class Repository(Generic[T]):
             )
         return obj
 
-    async def update(self,*conditions: Condition,values: dict[Any, Any] | None = None,) -> int:
+    async def update(
+        self,
+        *conditions: Condition,
+        values: dict[Any, Any] | None = None,
+    ) -> int:
         """Update matching rows with the given values and return rows affected."""
-        if values is None:
-            if not conditions:
-                raise ValueError("update requires filter conditions and values")
-
-            last_arg = conditions[-1]
-            if isinstance(last_arg, dict):
-                values = last_arg
-                conditions = conditions[:-1]
-            else:
-                raise ValueError("update requires a dictionary of values")
-
+        conditions, values = self._resolve_update_arguments("update", conditions, values)
         update_ast = Update(
             source=self.model,
             values=validate_update_values(self.model, values),
@@ -304,19 +298,32 @@ class Repository(Generic[T]):
         result = await self._execute_mutation(update_ast)
         return result.rows_affected
 
-    async def update_many(
-        self,*conditions: Condition,values: dict[Any, Any] | None = None,) -> int:
-        """Bulk-update matching rows and return rows affected."""
-        if values is None:
-            if not conditions:
-                raise ValueError("update_many requires filter conditions and values")
-            last_arg = conditions[-1]
-            if isinstance(last_arg, dict):
-                values = last_arg
-                conditions = conditions[:-1]
-            else:
-                raise ValueError("update_many requires a dictionary of values")
+    @staticmethod
+    def _resolve_update_arguments(
+        operation: str,
+        conditions: tuple[Condition, ...],
+        values: dict[Any, Any] | None,
+    ) -> tuple[tuple[Condition, ...], dict[Any, Any]]:
+        """Support either a keyword payload or a final positional payload."""
+        if values is not None:
+            return conditions, values
+        if not conditions:
+            raise ValueError(f"{operation} requires filter conditions and values")
 
+        last_arg = conditions[-1]
+        if not isinstance(last_arg, dict):
+            raise ValueError(f"{operation} requires a dictionary of values")
+        return conditions[:-1], last_arg
+
+    async def update_many(
+        self,
+        *conditions: Condition,
+        values: dict[Any, Any] | None = None,
+    ) -> int:
+        """Bulk-update matching rows and return rows affected."""
+        conditions, values = self._resolve_update_arguments(
+            "update_many", conditions, values
+        )
         update_many_ast = UpdateMany(
             source=self.model,
             values=validate_update_values(self.model, values),

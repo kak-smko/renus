@@ -181,8 +181,8 @@ class SQLDialect(ABC):
         """Build a ``CREATE TABLE`` statement."""
         quoted_table = self.quote(table)
         if_clause = "IF NOT EXISTS " if if_not_exists else ""
-        col_defs = [self.column_to_sql(c) for c in columns]
         columns = list(columns)
+        col_defs = [self.column_to_sql(column) for column in columns]
 
         for c in columns:
             if c.foreign_key and "." in c.foreign_key:

@@ -2,18 +2,22 @@ from datetime import datetime, timezone
 from typing import Any
 
 from renus.db.core.exceptions import ValidationError
-from renus.db.query.ast import  Path
+from renus.db.query.ast import Path
+
+
+def _value_path_parts(key: Any) -> tuple[str, ...]:
+    if isinstance(key, Path):
+        return key.parts
+    if isinstance(key, str):
+        return tuple(key.split("."))
+    return (str(key),)
+
 
 def normalize_values(values: dict[Any, Any]) -> dict[str, Any]:
     """Map each value to its final leaf field name."""
     normalized: dict[str, Any] = {}
-    for key, val in values.items():
-        if isinstance(key, Path):
-            normalized[key.parts[-1]] = val
-        elif isinstance(key, str):
-            normalized[key.split(".")[-1]] = val
-        else:
-            normalized[str(key)] = val
+    for key, value in values.items():
+        normalized[_value_path_parts(key)[-1]] = value
     return normalized
 
 
@@ -24,15 +28,10 @@ def validate_update_values(source: type, values: dict[Any, Any]) -> dict[str, An
     are not checked. Included fields use the same field validation and
     conversion rules as model construction and attribute assignment.
     """
-    normalized: dict[str, Any] = {}
-    for key, value in values.items():
-        if isinstance(key, Path):
-            parts = key.parts
-        elif isinstance(key, str):
-            parts = tuple(key.split("."))
-        else:
-            parts = (str(key),)
-        normalized[".".join(parts)] = value
+    normalized = {
+        ".".join(_value_path_parts(key)): value
+        for key, value in values.items()
+    }
 
     meta = getattr(source, "__db_metadata__", None)
     if meta and meta.timestamps and "updated_at" not in normalized:

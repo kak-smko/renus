@@ -76,7 +76,7 @@ class InsertMany(MutationAST):
             Iterable of field-value dicts, one per row.
         """
         object.__setattr__(self, "source", source)
-        object.__setattr__(self, "records", records)
+        object.__setattr__(self, "records", tuple(records))
 
 @dataclass(frozen=True, slots=True)
 class Update(FilterableMutation):

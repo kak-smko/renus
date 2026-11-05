@@ -17,6 +17,19 @@ from renus.db.sql.dialect.base import SQLDialect
 from renus.util import to_plural_lower
 
 _ALLOWED_AGGREGATE_FUNCTIONS = frozenset({"count", "sum", "avg", "min", "max"})
+_COMPARISON_OPERATORS = {
+    Operator.EQ: "=",
+    Operator.NE: "<>",
+    Operator.GT: ">",
+    Operator.GE: ">=",
+    Operator.LT: "<",
+    Operator.LE: "<=",
+}
+_VALUE_OPERATORS = {
+    **_COMPARISON_OPERATORS,
+    Operator.LIKE: "LIKE",
+    Operator.REGEX: "REGEXP",
+}
 
 
 class SQLCompiled:
@@ -481,15 +494,8 @@ class SQLCompiler:
         if op == Operator.LIKE:
             return f"{col} LIKE {self.dialect.placeholder} ESCAPE '{LIKE_ESCAPE}'", [val]
         
-        op_map = {
-            Operator.GT: ">",
-            Operator.GE: ">=",
-            Operator.LT: "<",
-            Operator.LE: "<=",
-            Operator.REGEX: "REGEXP",
-        }
-        if op in op_map:
-            return f"{col} {op_map[op]} {self.dialect.placeholder}", [val]
+        if op in (Operator.GT, Operator.GE, Operator.LT, Operator.LE, Operator.REGEX):
+            return f"{col} {_VALUE_OPERATORS[op]} {self.dialect.placeholder}", [val]
 
         if op == Operator.IS_NULL:
             return f"{col} IS NULL", []
@@ -721,16 +727,7 @@ class SQLCompiler:
                 return f"{value_expr} IS NULL", []
             if operator == Operator.NE and value is None:
                 return f"{value_expr} IS NOT NULL", []
-            operator_sql = {
-                Operator.EQ: "=",
-                Operator.NE: "<>",
-                Operator.GT: ">",
-                Operator.GE: ">=",
-                Operator.LT: "<",
-                Operator.LE: "<=",
-                Operator.LIKE: "LIKE",
-                Operator.REGEX: "REGEXP",
-            }.get(operator)
+            operator_sql = _VALUE_OPERATORS.get(operator)
             if operator_sql is not None:
                 expression = f"{value_expr} {operator_sql} {self.dialect.placeholder}"
                 if operator == Operator.NE and value is not None:
@@ -815,15 +812,7 @@ class SQLCompiler:
             distinct_str = "DISTINCT " if agg.distinct else ""
             expr = f"{fn_name}({distinct_str}{target})"
 
-            op_map = {
-                Operator.EQ: "=",
-                Operator.NE: "<>",
-                Operator.GT: ">",
-                Operator.GE: ">=",
-                Operator.LT: "<",
-                Operator.LE: "<=",
-            }
-            op_str = op_map.get(h.operator, "=")
+            op_str = _COMPARISON_OPERATORS.get(h.operator, "=")
             return f"{expr} {op_str} {self.dialect.placeholder}", [h.value]
 
         if isinstance(h, Condition):

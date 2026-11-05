@@ -227,6 +227,22 @@ def test_to_dict_include_sensitive_true():
     assert d["security_token"] == "tok_nested_secret"
     assert d["username"] == "eve"
 
+
+def test_to_dict_include_sensitive_through_mappings_and_sequences():
+    user = SensitiveUser(
+        id="u7",
+        username="grace",
+        email="grace@example.com",
+        password="nested_secret",
+    )
+
+    mapped = to_dict({"user": user}, include_sensitive=True)
+    sequenced = to_dict([{"user": user}], include_sensitive=True)
+
+    assert mapped["user"]["password"] == "nested_secret"
+    assert sequenced[0]["user"]["password"] == "nested_secret"
+    assert "password" not in to_dict({"user": user})["user"]
+
 def test_sanitize_params_masks_sensitive_fields():
     user = SensitiveUser(
         id="p1",
