@@ -148,6 +148,57 @@ class ModelMetadata:
             return self.fields[attr]
         return None
 
+    def embedded_indexes(self) -> tuple[Index, ...]:
+        """Return indexes declared by nested model fields, qualified by this model."""
+        indexes: list[Index] = []
+
+        def qualify_index_field(model_meta: ModelMetadata, field_name: str) -> str:
+            parts = field_name.split(".")
+            parts[0] = model_meta.column_to_field.get(parts[0], parts[0])
+            return ".".join(parts)
+
+        def visit(
+            model_meta: ModelMetadata,
+            prefix: tuple[str, ...],
+            ancestors: frozenset[type],
+        ) -> None:
+            for field_meta in model_meta.fields.values():
+                nested_model = field_meta.model_cls
+                if (
+                    field_meta.storage_type is not dict
+                    or not isinstance(nested_model, type)
+                    or nested_model in ancestors
+                ):
+                    continue
+                nested_meta = getattr(nested_model, "__db_metadata__", None)
+                if nested_meta is None:
+                    continue
+
+                
+                path = field_meta.column_name if not prefix else field_meta.name
+                nested_prefix = (*prefix, path)
+                for index in nested_meta.indexes:
+                    fields = tuple(
+                        ".".join(
+                            (*nested_prefix, qualify_index_field(nested_meta, name))
+                        )
+                        for name in index.fields
+                    )
+                    name = (
+                        f"idx_{self.table}_embedded_"
+                        f"{'_'.join(fields).replace('.', '_')}"
+                    )
+                    if index.name:
+                        name = f"{name}_{index.name.replace('.', '_')}"
+                    indexes.append(
+                        Index(*fields, unique=index.unique, name=name, type=index.type)
+                    )
+
+                visit(nested_meta, nested_prefix, ancestors | {nested_model})
+
+        visit(self, (), frozenset({self.model}))
+        return tuple(indexes)
+
     def is_primary_key(self, field_name: str) -> bool:
         """Return whether the named field is part of the primary key."""
         return field_name in self.identity.fields

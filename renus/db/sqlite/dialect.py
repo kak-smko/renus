@@ -14,6 +14,18 @@ class SQLiteDialect(SQLDialect):
         escaped = name.replace('"', '""')
         return f'"{escaped}"'
 
+    def index_field_sql(self, field_path: str) -> str:
+        """Render a scalar or JSON path as a SQLite index expression."""
+        parts = field_path.split(".")
+        if len(parts) == 1:
+            return self.quote(field_path)
+        json_path = "$" + "".join(
+            f"[{int(part)}]" if part.isdigit() else f".{part}"
+            for part in parts[1:]
+        )
+        escaped_path = json_path.replace("'", "''")
+        return f"json_extract({self.quote(parts[0])}, '{escaped_path}')"
+
     def type_to_sql(self, field_meta: FieldMetadata) -> str:
         """Map a field metadata type to a SQLite SQL type."""
 

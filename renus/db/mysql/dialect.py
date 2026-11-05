@@ -22,6 +22,22 @@ class MySQLDialect(SQLDialect):
         escaped = name.replace("`", "``")
         return f"`{escaped}`"
 
+    def index_field_sql(self, field_path: str) -> str:
+        """Render a scalar or JSON path as a MySQL functional-index expression."""
+        parts = field_path.split(".")
+        if len(parts) == 1:
+            return self.quote(field_path)
+        json_path = "$" + "".join(
+            f"[{int(part)}]" if part.isdigit() else f".{part}"
+            for part in parts[1:]
+        )
+        escaped_path = json_path.replace("'", "''")
+        return (
+            "(CAST(JSON_UNQUOTE(JSON_EXTRACT("
+            f"{self.quote(parts[0])}, '{escaped_path}'"
+            ")) AS CHAR(255)))"
+        )
+
     def limit_offset(
         self,
         sql: str,

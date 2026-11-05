@@ -248,6 +248,10 @@ class SQLDialect(ABC):
         quoted_new = self.quote(new_name)
         return f"ALTER TABLE {quoted_old} RENAME TO {quoted_new};"
 
+    def index_field_sql(self, field_path: str) -> str:
+        """Render a scalar field for an index."""
+        return self.quote(field_path)
+
     def create_index_sql(
         self,
         table: str,
@@ -258,7 +262,7 @@ class SQLDialect(ABC):
         """Build a ``CREATE INDEX`` statement."""
         quoted_table = self.quote(table)
         quoted_name = self.quote(name)
-        quoted_fields = ", ".join(self.quote(f) for f in fields)
+        quoted_fields = ", ".join(self.index_field_sql(f) for f in fields)
         unique_str = "UNIQUE " if unique else ""
         dialect_name = type(self).__name__.lower()
         if "sqlite" in dialect_name:

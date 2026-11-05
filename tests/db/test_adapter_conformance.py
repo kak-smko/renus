@@ -56,6 +56,7 @@ from renus.db import (
 from renus.datastructures import ID
 from renus.db.mutation.ast import InsertMany
 from renus.db.query.ast import Path, QueryAST
+from renus.db.sql import SQLCompiled
 from renus.db.validation import MaxLen
 from tests.db.deep_relation_models import DEEP_RELATION_FAMILIES
 from tests.db.deep_embedded_models import (
@@ -1245,6 +1246,42 @@ async def test_large_query_ast_features(kind):
              {"active": False, "rows": 40, "unique_names": 4, "total_age": 2340},
             {"active": True,  "rows": 80, "unique_names": 4, "total_age": 4800},
         ]
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_cursor_pagination_reads_all_rows_in_batches_of_ten(kind):
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        expected_ids = [f"cursor-{index:04d}" for index in range(1000)]
+        for start in range(0, len(expected_ids), 100):
+            await repo.create_many(
+                [_u(user_id, user_id) for user_id in expected_ids[start : start + 100]]
+            )
+
+        collected_ids = []
+        cursor = ""
+        while True:
+            page = await (
+                repo.query()
+                .order_by(User.id.asc())
+                .cursor(cursor)
+                .limit(10)
+                .all()
+            )
+            if not page:
+                break
+
+            assert len(page) == 10
+            page_ids = [user.id for user in page]
+            assert page_ids[0] > cursor
+            collected_ids.extend(page_ids)
+            cursor = page_ids[-1]
+
+        assert collected_ids == expected_ids
     finally:
         await cleanup(db)
 
@@ -5549,5 +5586,50 @@ async def test_nested_update(kind):
         assert post.user.id==2
         assert post.user.address.city=="sna"
         assert post.user.address.state=="tehran"
+    finally:
+        await cleanup(database)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_nested_index(kind):
+    class Address(Model):
+        city: str = Field(database=DatabaseField(indexed=True))
+
+    class User(Model):
+        id: int = Field(database=DatabaseField(indexed=True))
+        address: Address
+
+    class Post(Model):
+        id: int
+        user: User
+
+    database = await database_for(kind, [Post])
+
+    try:
+        expected_indexes = {
+            "idx_posts_embedded_user_id",
+            "idx_posts_embedded_user_address_city",
+        }
+        adapter = database.adapter("primary")
+        if kind == "mongodb":
+            index_info = await adapter._mongo_db["posts"].index_information()
+            indexed_paths = {
+                tuple(field for field, _direction in index["key"])
+                for index in index_info.values()
+            }
+            assert {("user.id",), ("user.address.city",)} <= indexed_paths
+        else:
+            if kind == "sqlite":
+                indexes = await adapter.execute_query(
+                    SQLCompiled('PRAGMA index_list("posts");', ())
+                )
+                index_names = {index["name"] for index in indexes}
+            else:
+                indexes = await adapter.execute_query(
+                    SQLCompiled("SHOW INDEX FROM `posts`", ())
+                )
+                index_names = {index["Key_name"] for index in indexes}
+            assert expected_indexes <= index_names
     finally:
         await cleanup(database)

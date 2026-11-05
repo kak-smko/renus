@@ -290,7 +290,9 @@ class SQLAdapter(AsyncDatabaseAdapter):
         quoted_table = self.dialect.quote(meta.table)
         unique_str = "UNIQUE " if idx.unique else ""
         idx_name = idx.name or f"idx_{meta.table}_{'_'.join(idx.fields)}"
-        quoted_cols = ", ".join(self.dialect.quote(c) for c in idx.fields)
+        quoted_cols = ", ".join(
+            self.dialect.index_field_sql(field) for field in idx.fields
+        )
         return (
             f"CREATE {unique_str}INDEX {self._index_if_not_exists} "
             f"{self.dialect.quote(idx_name)} ON {quoted_table} ({quoted_cols});"
@@ -356,7 +358,7 @@ class SQLAdapter(AsyncDatabaseAdapter):
                 if not meta:
                     continue
                 await self._execute_ddl(self._main_table_sql(meta))
-                for idx in meta.indexes:
+                for idx in (*meta.indexes, *meta.embedded_indexes()):
                     if idx.unique and len(idx.fields) == 1:
                         field_meta = meta.get_field(idx.fields[0])
                         if field_meta is not None and field_meta.unique:

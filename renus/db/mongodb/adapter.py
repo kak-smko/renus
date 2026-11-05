@@ -523,7 +523,7 @@ class MongoDBAdapter(AsyncDatabaseAdapter):
 
             coll = self._mongo_db[meta.table]
 
-            for idx in meta.indexes:
+            for idx in (*meta.indexes, *meta.embedded_indexes()):
                 keys = [(f, 1) for f in idx.fields]
                 try:
                     await coll.create_index(keys, unique=idx.unique)
