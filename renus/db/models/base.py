@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from datetime import date, datetime, timezone
-from typing import Any, ClassVar
+from typing import Any, ClassVar, dataclass_transform, get_origin
 
 from renus.db.core.exceptions import ValidationError
 from renus.db.core.state import IdentityKind, Lifecycle
@@ -374,6 +374,10 @@ class ModelMeta(type):
 
         return cls
 
+@dataclass_transform(
+    field_specifiers=(Field, DatabaseField, Relationship),
+    kw_only_default=True,
+)
 class Model(metaclass=ModelMeta):
     """Base class for declarative database models."""
 
@@ -381,8 +385,6 @@ class Model(metaclass=ModelMeta):
     _model_fields: ClassVar[dict[str, FieldInfo]] = {}
 
     __db_metadata__: ClassVar[ModelMetadata]
-    _db_state: Lifecycle
-    _db_original_snapshot: dict[str, Any]
 
     @classmethod
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -400,6 +402,11 @@ class Model(metaclass=ModelMeta):
 
         for name, field_type in all_annotations.items():
             if name.startswith("_"):
+                continue
+            if get_origin(field_type) is ClassVar or (
+                isinstance(field_type, str)
+                and field_type.startswith("ClassVar[")
+            ):
                 continue
 
             val = cls.__dict__.get(name, _UNSET)
@@ -637,13 +644,6 @@ class Model(metaclass=ModelMeta):
             return {k: cls._dump_value(v) for k, v in val.items()}
         return val
 
-    def to_dict(self) -> dict[str, Any]:
-        """Return the model as a plain dictionary."""
-        return dict(self)
-
-    def dict(self) -> dict[str, Any]:
-        """Return the model as a plain dictionary."""
-        return dict(self)
 
     def get_sensitive(self, name: str) -> Any:
         """Return a field's raw value, bypassing sensitive masking."""
@@ -903,29 +903,29 @@ class Model(metaclass=ModelMeta):
                 return True
         return False
 
-    def state(self) -> Lifecycle:
+    def lifecycle_state(self) -> Lifecycle:
         """Return the model's current lifecycle state."""
         return getattr(self, "_db_state", Lifecycle.NEW)
 
     def is_new(self) -> bool:
         """Return whether the model has not yet been persisted."""
-        return self.state() == Lifecycle.NEW
+        return self.lifecycle_state() == Lifecycle.NEW
 
     def is_persisted(self) -> bool:
         """Return whether the model has been persisted and is clean."""
-        return self.state() == Lifecycle.PERSISTED
+        return self.lifecycle_state() == Lifecycle.PERSISTED
 
     def is_dirty(self) -> bool:
         """Return whether any field differs from its persisted snapshot."""
-        if self.state() == Lifecycle.DIRTY:
+        if self.lifecycle_state() == Lifecycle.DIRTY:
             return True
-        if self.state() == Lifecycle.NEW:
+        if self.lifecycle_state() == Lifecycle.NEW:
             return False
         return self._any_field_dirty()
 
     def is_deleted(self) -> bool:
         """Return whether the model has been deleted."""
-        if self.state() == Lifecycle.DELETED:
+        if self.lifecycle_state() == Lifecycle.DELETED:
             return True
         if getattr(self, "deleted_at", None) is not None:
             return True
@@ -933,7 +933,7 @@ class Model(metaclass=ModelMeta):
 
     def dirty_fields(self) -> set[str]:
         """Return the set of field names that have changed."""
-        if self.state() == Lifecycle.NEW:
+        if self.lifecycle_state() == Lifecycle.NEW:
             return set(self.__db_metadata__.fields.keys()) & set(self.__dict__.keys())
 
         dirty: set[str] = set()

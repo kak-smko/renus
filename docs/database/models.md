@@ -615,7 +615,7 @@ from renus.db import Lifecycle
 
 
 article = Article(title="Draft")
-assert article.state() == Lifecycle.NEW
+assert article.lifecycle_state() == Lifecycle.NEW
 assert article.is_new() is True
 assert article.is_dirty() is False
 
@@ -634,7 +634,7 @@ Useful lifecycle properties and methods are:
 
 | API | Purpose |
 | --- | --- |
-| `state()` | Current `Lifecycle` value |
+| `lifecycle_state()` | Current `Lifecycle` value |
 | `is_new()` | Whether the model has not been persisted |
 | `is_persisted()` | Whether it is persisted and clean |
 | `is_dirty()` | Whether a persisted value changed |

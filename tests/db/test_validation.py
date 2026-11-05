@@ -92,9 +92,6 @@ def test_user_model_creation_and_dict_conversion():
         },
     }
 
-    assert user.to_dict() == user_dict
-    assert user.dict() == user_dict
-
 
 def test_validation_error_on_invalid_user_data():
     with pytest.raises(ValidationError) as exc_info:

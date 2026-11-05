@@ -212,27 +212,27 @@ class Article(Model):
 def test_lifecycle_transitions():
     article = Article(title="First Draft", views=0)
 
-    assert article.state() == Lifecycle.NEW
+    assert article.lifecycle_state() == Lifecycle.NEW
     assert article.is_new() is True
     assert article.is_persisted() is False
     assert article.is_dirty() is False
 
     article._mark_persisted()
-    assert article.state() == Lifecycle.PERSISTED
+    assert article.lifecycle_state() == Lifecycle.PERSISTED
     assert article.is_new() is False
     assert article.is_persisted() is True
     assert article.is_dirty() is False
     assert article.dirty_fields() == set()
 
     article.title = "Published Title"
-    assert article.state() == Lifecycle.DIRTY
+    assert article.lifecycle_state() == Lifecycle.DIRTY
     assert article.is_dirty() is True
     assert article.dirty_fields() == {"title"}
     assert article.get_dirty_changes() == {"title": ("First Draft", "Published Title")}
 
     article.title = "First Draft"
     assert article.is_dirty() is False
-    assert article.state() == Lifecycle.PERSISTED
+    assert article.lifecycle_state() == Lifecycle.PERSISTED
     assert article.dirty_fields() == set()
 
     article.title = "New Title"
@@ -244,15 +244,15 @@ def test_lifecycle_transitions():
     }
 
     article._mark_persisted()
-    assert article.state() == Lifecycle.PERSISTED
+    assert article.lifecycle_state() == Lifecycle.PERSISTED
     assert article.is_dirty() is False
     assert article.dirty_fields() == set()
 
     article._mark_deleted()
-    assert article.state() == Lifecycle.DELETED
+    assert article.lifecycle_state() == Lifecycle.DELETED
 
     article._mark_detached()
-    assert article.state() == Lifecycle.DETACHED
+    assert article.lifecycle_state() == Lifecycle.DETACHED
 
 def test_immutable_field_enforcement():
     class ImmutableRecord(Model):
@@ -301,12 +301,12 @@ def test_timestamps_and_soft_delete():
     prod.soft_delete()
     assert prod.is_deleted() is True
     assert isinstance(prod.deleted_at, datetime)
-    assert prod.state() == Lifecycle.DELETED
+    assert prod.lifecycle_state() == Lifecycle.DELETED
 
     prod.restore()
     assert prod.is_deleted() is False
     assert prod.deleted_at is None
-    assert prod.state() == Lifecycle.DIRTY
+    assert prod.lifecycle_state() == Lifecycle.DIRTY
 
 class Address(Model):
     street: str
@@ -413,7 +413,7 @@ def test_embedded_model_instance_interaction():
     assert len(cust.items) == 1
     assert cust.items[0].product_name == "Gadget"
 
-    d = cust.to_dict()
+    d = dict(cust)
     assert d["name"] == "Alice"
     assert d["address"]["city"] == "Metropolis"
     assert d["items"][0]["quantity"] == 2
@@ -503,13 +503,3 @@ def test_field_persistence_bundle():
     assert f.database.indexed is True
     assert f.database.immutable is True
 
-def test_model_dict_and_to_dict_parity():
-    cust = Customer(
-        name="Bob",
-        address=Address(street="456 Elm St", city="Gotham"),
-    )
-    d1 = cust.to_dict()
-    d2 = cust.dict()
-    assert d1 == d2
-    assert d1["name"] == "Bob"
-    assert d1["address"]["street"] == "456 Elm St"
