@@ -34,7 +34,16 @@ users.where(
 )
 ```
 
-Multiple conditions passed to `where()` are combined by the repository as `AND` conditions. The supported field operators are:
+Multiple conditions passed to `where()` are combined with `AND`. Use `or_where()` to include another condition group with `OR`, and `not_where()` to exclude rows matching a condition:
+
+```python
+query = users.where(User.active == True, User.age >= 18).or_where(
+    User.role == "admin"
+)
+query = users.where(User.active == True).not_where(User.role == "banned")
+```
+
+These methods are available both on repositories (to start a query) and on query builders (to extend one). The supported field operators are:
 
 | Expression | Meaning |
 | --- | --- |
@@ -52,21 +61,17 @@ Multiple conditions passed to `where()` are combined by the repository as `AND` 
 | `User.name.regex(pattern)` | Matches a regular expression |
 | `User.age.between(18, 65)` | Inclusive range |
 
-Combine conditions explicitly with `&`, `|`, and `~`:
+You can also combine conditions explicitly with `&`, `|`, and `~`:
 
 ```python
-from renus.db import Q
-
 
 query = users.where(
-    Q(
         (User.active == True) & (User.age >= 18)
-        | User.role == "admin"
-    )
+        | (User.role == "admin")
 )
 ```
 
-`Q(condition1, condition2, ...)` combines its arguments with `AND`. With one argument it returns that condition unchanged. Parenthesize Python expressions when mixing `&` and `|` so the intended grouping is clear.
+`(condition1, condition2, ...)` combines its arguments with `AND`. With one argument it returns that condition unchanged. Parenthesize Python expressions when mixing `&` and `|` so the intended grouping is clear.
 
 For a condition on a related collection, use `any()`:
 

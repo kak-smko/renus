@@ -97,12 +97,16 @@ class Repository(Generic[T]):
         return q
 
     def where(self, *conditions: Condition) -> Query[T]:
-        """Start a new query, optionally filtered by the given conditions.
-
-        Alias of :meth:`query`, provided so queries read naturally off the
-        repository (e.g. ``users.where(User.name == "Ali").first()``).
-        """
+        """Start a new query, optionally filtered by the given conditions."""
         return self.query(*conditions)
+
+    def or_where(self, *conditions: Condition) -> Query[T]:
+        """Start a query matching any of the given conditions."""
+        return self.query().or_where(*conditions)
+
+    def not_where(self, *conditions: Condition) -> Query[T]:
+        """Start a query excluding rows that match the given conditions."""
+        return self.query().not_where(*conditions)
 
     @classmethod
     def _build_insert_ast_for_model(cls, model_cls: type, obj: Any) -> Insert:

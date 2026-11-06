@@ -892,6 +892,33 @@ async def test_query_conditions_and_builder_aliases(kind):
         ).order_by(User.age).all()
         assert [user.age for user in edge_rows] == [0, 1, 2, 118, 119]
 
+        active_or_older = await repo.where(User.active == True).or_where(
+            User.age >= 118
+        ).all()
+        assert len(active_or_older) == 61
+        assert await repo.or_where(User.age >= 119).count() == 1
+
+        active_under_100 = await repo.where(User.active == True).not_where(
+            User.age >= 100
+        ).all()
+        assert len(active_under_100) == 50
+        assert await repo.not_where(User.age < 119).count() == 1
+
+        chained_filters = await (
+            repo.query()
+            .where(User.active == True)
+            .where(User.age >= 20)
+            .or_where(User.age == 101)
+            .or_where(User.age == 103, User.age == 105)
+            .not_where(User.age == 20)
+            .not_where(User.age == 103)
+            .order_by(User.age)
+            .all()
+        )
+        assert [user.age for user in chained_filters] == sorted(
+            [*range(22, 120, 2), 101, 105]
+        )
+
         not_young = await repo.query(~(User.age < 118)).order_by(User.age).all()
         assert [user.age for user in not_young] == [118, 119]
 

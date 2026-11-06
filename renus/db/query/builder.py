@@ -9,6 +9,7 @@ from renus.db.query.ast import (
     Condition,
     HavingCondition,
     Include,
+    Logical,
     Operator,
     Ordering,
     Path,
@@ -129,8 +130,32 @@ class Query(Generic[T]):
         return Query(target, ast=new_ast)
 
     def where(self, *conditions: Condition) -> Query[T]:
-        """Return a new query with the given filter conditions added."""
+        """Return a new query with the given filter conditions added by AND."""
         return self._clone(filters=self.ast.filters + tuple(conditions))
+
+    def or_where(self, *conditions: Condition) -> Query[T]:
+        """Return a new query that also matches any of the given conditions."""
+        if not conditions:
+            return self
+
+        incoming = (
+            conditions[0]
+            if len(conditions) == 1
+            else Logical(Operator.OR, tuple(conditions))
+        )
+        if not self.ast.filters:
+            return self._clone(filters=(incoming,))
+
+        existing = (
+            self.ast.filters[0]
+            if len(self.ast.filters) == 1
+            else Logical(Operator.AND, self.ast.filters)
+        )
+        return self._clone(filters=(existing | incoming,))
+
+    def not_where(self, *conditions: Condition) -> Query[T]:
+        """Return a new query excluding rows that match the given conditions."""
+        return self.where(*(~condition for condition in conditions))
 
     def filter(self, *conditions: Condition) -> Query[T]:
         """Alias of where; return a new query with the conditions added."""

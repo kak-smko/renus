@@ -328,6 +328,28 @@ def test_soft_delete_and_distinct_flags():
     q_dist = q_default.distinct()
     assert q_dist.ast.distinct is True
 
+def test_or_where_and_not_where_build_grouped_conditions():
+    active = User.active == True
+    adult = User.age >= 18
+    admin = User.role == "admin"
+
+    query = Query(User).where(active, adult).or_where(admin)
+    assert len(query.ast.filters) == 1
+    condition = query.ast.filters[0]
+    assert isinstance(condition, Logical)
+    assert condition.operator == Operator.OR
+    assert condition.children[0].operator == Operator.AND
+    assert condition.children[0].children == (active, adult)
+    assert condition.children[1] == admin
+
+    excluded = Query(User).where(active).not_where(admin)
+    assert len(excluded.ast.filters) == 2
+    negated = excluded.ast.filters[1]
+    assert isinstance(negated, Logical)
+    assert negated.operator == Operator.NOT
+    assert negated.children == (admin,)
+
+
 def test_query_immutability():
     base = Query(User).where(User.active == True)
     q1 = base.where(User.age >= 18).limit(10)
