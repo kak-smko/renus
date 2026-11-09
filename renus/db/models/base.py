@@ -4,6 +4,7 @@ import copy
 from datetime import date, datetime, timezone
 from typing import Any, ClassVar, dataclass_transform, get_origin
 
+from renus.datastructures.id import ID
 from renus.db.core.exceptions import ValidationError
 from renus.db.core.state import IdentityKind, Lifecycle
 from renus.db.metadata.core import (
@@ -15,14 +16,13 @@ from renus.db.metadata.core import (
 )
 from renus.db.metadata.inference import analyze_field_type, infer_identity_kind
 from renus.db.models.db_field import UNSET, DatabaseField
-from renus.db.models.field import Field, FieldInfo, _UNSET
-from renus.db.validation.base import Rule
-from renus.datastructures.id import ID
+from renus.db.models.field import _UNSET, Field, FieldInfo
 from renus.db.query.ast import Path
 from renus.db.relationships import Relationship
-
+from renus.db.validation.base import Rule
 
 _MODEL_REGISTRY: dict[str, type] = {}
+
 
 class ModelMeta(type):
     """Metaclass that builds model metadata and field definitions."""
@@ -54,11 +54,13 @@ class ModelMeta(type):
                 ns[key] = Field(default=default_val, database=val)
             elif isinstance(val, Field):
                 extra = getattr(val, "extra", {}) or {}
-                db = getattr(val, "database", None) or extra.get("database") or extra.get("db")
+                db = (
+                    getattr(val, "database", None)
+                    or extra.get("database")
+                    or extra.get("db")
+                )
                 if isinstance(db, DatabaseField):
                     declared_db_fields[key] = db
-
-
 
         meta_cls = ns.get("Meta")
         timestamps = bool(getattr(meta_cls, "timestamps", False))
@@ -78,7 +80,9 @@ class ModelMeta(type):
         if timestamps:
             if "created_at" not in annotations:
                 annotations["created_at"] = datetime | None
-                ns["created_at"] = Field(default=None)
+                ns["created_at"] = Field(
+                    default=None, database=DatabaseField(indexed=True)
+                )
             if "updated_at" not in annotations:
                 annotations["updated_at"] = datetime | None
                 ns["updated_at"] = Field(default=None)
@@ -89,7 +93,9 @@ class ModelMeta(type):
                 ns["deleted_at"] = Field(default=None)
             if "is_deleted" not in annotations:
                 annotations["is_deleted"] = bool
-                ns["is_deleted"] = Field(default=False)
+                ns["is_deleted"] = Field(
+                    default=False, database=DatabaseField(indexed=True)
+                )
 
         ns["__annotations__"] = annotations
 
@@ -100,7 +106,6 @@ class ModelMeta(type):
 
         table = getattr(meta_cls, "table", None)
         if not table:
-
             table = f"{name.lower()}s"
 
         all_relationships: dict[str, Relationship] = {}
@@ -109,7 +114,6 @@ class ModelMeta(type):
                 if isinstance(v, Relationship):
                     all_relationships[k] = v
         all_relationships.update(declared_relationships)
-
 
         validation_fields: dict[str, FieldInfo] = getattr(cls, "_model_fields", {})
         for rname, rel in all_relationships.items():
@@ -176,9 +180,10 @@ class ModelMeta(type):
             )
             col_name = db.column_name or fname
 
-            pk = db.primary_key or (fname in ("id", "_id") and not any(
-                d.primary_key for d in declared_db_fields.values()
-            ))
+            pk = db.primary_key or (
+                fname in ("id", "_id")
+                and not any(d.primary_key for d in declared_db_fields.values())
+            )
 
             if db.auto_inc and not pk:
                 raise ValueError(
@@ -278,7 +283,6 @@ class ModelMeta(type):
                 generated=pk_meta.generated,
             )
         else:
-
             if "_id" in fields_dict:
                 pk_meta = fields_dict["_id"]
                 object.__setattr__(pk_meta, "primary_key", True)
@@ -299,7 +303,6 @@ class ModelMeta(type):
                     generated=pk_meta.generated,
                 )
             else:
-
                 default_db = DatabaseField(primary_key=True, generated=True)
                 id_meta = FieldMetadata(
                     name="id",
@@ -345,16 +348,19 @@ class ModelMeta(type):
 
         for fname, fmeta in fields_dict.items():
             if fmeta.unique:
-                indexes.append(Index(fmeta.column_name, unique=True, name=fmeta.index_name))
+                indexes.append(
+                    Index(fmeta.column_name, unique=True, name=fmeta.index_name)
+                )
             elif fmeta.indexed:
-                indexes.append(Index(fmeta.column_name, unique=False, name=fmeta.index_name))
+                indexes.append(
+                    Index(fmeta.column_name, unique=False, name=fmeta.index_name)
+                )
 
         meta_indexes = getattr(meta_cls, "indexes", ())
         if isinstance(meta_indexes, (list, tuple)):
             for idx in meta_indexes:
                 if isinstance(idx, Index):
                     indexes.append(idx)
-
 
         model_meta = ModelMetadata(
             model=cls,
@@ -375,6 +381,7 @@ class ModelMeta(type):
         _MODEL_REGISTRY[name] = cls
 
         return cls
+
 
 @dataclass_transform(
     field_specifiers=(Field, DatabaseField, Relationship),
@@ -406,8 +413,7 @@ class Model(metaclass=ModelMeta):
             if name.startswith("_"):
                 continue
             if get_origin(field_type) is ClassVar or (
-                isinstance(field_type, str)
-                and field_type.startswith("ClassVar[")
+                isinstance(field_type, str) and field_type.startswith("ClassVar[")
             ):
                 continue
 
@@ -431,7 +437,6 @@ class Model(metaclass=ModelMeta):
             )
 
         cls._model_fields = fields
-
 
     @classmethod
     def schema(cls) -> dict[str, Any]:
@@ -533,7 +538,6 @@ class Model(metaclass=ModelMeta):
                 elif field_type in (Any, object):
                     continue
                 else:
-
                     # Custom runtime types need an explicit schema rule or a
                     # custom Model schema implementation.
                     continue
@@ -563,7 +567,9 @@ class Model(metaclass=ModelMeta):
                 result = add_nullable(result)
             return result
 
-        def relationship_schema(rel: RelationshipMetadata, stack: set[type]) -> dict[str, Any]:
+        def relationship_schema(
+            rel: RelationshipMetadata, stack: set[type]
+        ) -> dict[str, Any]:
             target = rel.target
             if target is dict:
                 result: dict[str, Any] = {"type": "object"}
@@ -603,7 +609,6 @@ class Model(metaclass=ModelMeta):
                 ):
                     required.append(name)
 
-
             result: dict[str, Any] = {
                 "title": model.__name__,
                 "type": "object",
@@ -632,7 +637,11 @@ class Model(metaclass=ModelMeta):
 
     @staticmethod
     def _is_model_type(field_type: Any) -> bool:
-        return bool(field_type) and isinstance(field_type, type) and issubclass(field_type, Model)
+        return (
+            bool(field_type)
+            and isinstance(field_type, type)
+            and issubclass(field_type, Model)
+        )
 
     @classmethod
     def _dump_value(cls, val: Any) -> Any:
@@ -645,7 +654,6 @@ class Model(metaclass=ModelMeta):
         elif isinstance(val, dict):
             return {k: cls._dump_value(v) for k, v in val.items()}
         return val
-
 
     def get_sensitive(self, name: str) -> Any:
         """Return a field's raw value, bypassing sensitive masking."""
@@ -671,7 +679,9 @@ class Model(metaclass=ModelMeta):
     def __iter__(self):
         keys = list(self._model_fields.keys())
         for k in self.__dict__:
-            if (not k.startswith("_") and k not in keys) or (k == "_id" and k not in keys):
+            if (not k.startswith("_") and k not in keys) or (
+                k == "_id" and k not in keys
+            ):
                 keys.append(k)
 
         meta = self.__db_metadata__
@@ -734,10 +744,11 @@ class Model(metaclass=ModelMeta):
         meta = getattr(self.__class__, "__db_metadata__", None)
 
         try:
-
             object.__setattr__(self, "_initialized", False)
 
-            if not self._model_fields and getattr(self.__class__, "__annotations__", None):
+            if not self._model_fields and getattr(
+                self.__class__, "__annotations__", None
+            ):
                 self.__class__._setup_model_fields()
 
             data: dict[str, Any] = {}
@@ -750,7 +761,6 @@ class Model(metaclass=ModelMeta):
                     )
             if kwargs:
                 data.update(kwargs)
-
 
             errors: dict[str, list[Any]] = {}
             values: dict[str, Any] = {}
@@ -771,7 +781,9 @@ class Model(metaclass=ModelMeta):
                 else:
                     val = raw_val
 
-                cleaned_val, field_errors = field_info.clean_and_validate(val, self.__class__)
+                cleaned_val, field_errors = field_info.clean_and_validate(
+                    val, self.__class__
+                )
                 if field_errors:
                     errors[name] = field_errors
                 else:
@@ -805,7 +817,6 @@ class Model(metaclass=ModelMeta):
             if isinstance(e, ValidationError):
                 raise
             raise ValidationError(e.args or str(e)) from e
-
 
         if meta and meta.timestamps:
             now = datetime.now(timezone.utc)
@@ -864,7 +875,9 @@ class Model(metaclass=ModelMeta):
             try:
                 if name in self._model_fields:
                     field_info = self._model_fields[name]
-                    cleaned_val, field_errors = field_info.clean_and_validate(value, self.__class__)
+                    cleaned_val, field_errors = field_info.clean_and_validate(
+                        value, self.__class__
+                    )
                     if field_errors:
                         raise ValidationError({name: field_errors})
                     if name == "is_deleted":
@@ -887,14 +900,17 @@ class Model(metaclass=ModelMeta):
                 if is_relationship or self._is_field_dirty(name):
                     object.__setattr__(self, "_db_state", Lifecycle.DIRTY)
                 else:
-
                     if not self._any_field_dirty():
                         object.__setattr__(self, "_db_state", Lifecycle.PERSISTED)
         else:
             object.__setattr__(self, name, value)
 
     def _is_field_dirty(self, name: str) -> bool:
-        current = self.get_sensitive(name) if name == "is_deleted" else self.__dict__.get(name)
+        current = (
+            self.get_sensitive(name)
+            if name == "is_deleted"
+            else self.__dict__.get(name)
+        )
         original = self._db_original_snapshot.get(name)
         return current != original
 
@@ -949,7 +965,11 @@ class Model(metaclass=ModelMeta):
         changes: dict[str, tuple[Any, Any]] = {}
         for fname in self.get_dirty_fields():
             original = self._db_original_snapshot.get(fname)
-            current = self.get_sensitive(fname) if fname == "is_deleted" else self.__dict__.get(fname)
+            current = (
+                self.get_sensitive(fname)
+                if fname == "is_deleted"
+                else self.__dict__.get(fname)
+            )
             changes[fname] = (original, current)
         return changes
 
@@ -1002,9 +1022,7 @@ class Model(metaclass=ModelMeta):
         meta = self.__db_metadata__
         return {f: getattr(self, f, None) for f in meta.identity.fields}
 
-
     @classmethod
     def metadata(cls) -> ModelMetadata:
         """Return the model's metadata object."""
         return cls.__db_metadata__
-
