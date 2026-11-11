@@ -78,9 +78,18 @@ Each field takes a list of values to exclude (weekday names for `days`, integers
 
 `max_try(n)` sets the maximum number of attempts before a job is considered failed. The default is `3`.
 
-### Time offset with `timedelta`
+### Time zones and offsets
 
-`timedelta(n)` shifts the time reference used to decide whether a job is due, in minutes. The default is `0`, so jobs evaluate against the current UTC time. Advance it to align evaluations with a local time zone offset relative to UTC.
+By default, `at(...)` and `forget(...)` constraints are evaluated in UTC. Pass a `datetime.timedelta` offset to `Schedule` to evaluate those constraints in a fixed-offset local time zone. For Iran Standard Time (UTC+03:30):
+
+```python
+from datetime import timedelta
+
+schedule = Schedule(timedelta=timedelta(minutes=210))
+schedule.every().days().at(hour=9, minute=0).do("daily_report", send_report)
+```
+
+A positive offset is added to UTC. Interval checks and persisted last-run timestamps remain in UTC, so the offset changes wall-clock matching without changing elapsed-time calculations. Fixed offsets do not automatically adjust for daylight-saving changes.
 
 ## Registering and running jobs
 

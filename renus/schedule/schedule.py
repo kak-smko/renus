@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
 import functools
 import threading
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from renus.cache import Cache
@@ -12,25 +12,22 @@ from renus.log import Log
 
 from .matcher import is_due, matches
 from .runner import run_with_retry, run_with_retry_async
-from .state import Spec, TZ_OFFSET
+from .state import Spec
 
 _LAST_RUN_KEY: str = "schedule_last_run"
-_LAST_RUN_TTL: int = 24 * 60 * 60
+_LAST_RUN_TTL: int = 30*24 * 60 * 60
 
 class Schedule:
     """A fluent builder for defining and running scheduled jobs."""
 
-    def __init__(self) -> None:
+    def __init__(self, timedelta: timedelta = timedelta()) -> None:
         """Initialize a schedule with a fresh spec and no registered jobs."""
         self._spec = Spec()
         self._job_list: dict[str, Callable[[], Any]] = {}
         self._last_run: dict = Cache().get(_LAST_RUN_KEY, {})
         self._locks: dict[str, threading.Lock] = {}
-
-    def timedelta(self, n: int) -> Schedule:
-        """Set the time adjustment applied to job runs."""
-        self._spec.timedelta = n
-        return self
+        self._timezone = UTC
+        self._timedelta = timedelta
 
     def every(self, n: int = 1) -> Schedule:
         """Reset the spec and set the run interval to ``n`` units."""
@@ -98,9 +95,8 @@ class Schedule:
 
     def do(self, key: str, func: Callable, *args: Any, **kwargs: Any) -> None:
         """Register ``func`` as a job under ``key`` when it is due to run."""
-        now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
-            minutes=self._spec.timedelta
-        )
+        now = datetime.now(self._timezone)
+        local_now = now + self._timedelta
 
         job_func = functools.partial(func, *args, **kwargs)
         try:
@@ -110,7 +106,7 @@ class Schedule:
 
         if (
             is_due(key, self._last_run, now, self._spec)
-            and matches(self._spec, now)
+            and matches(self._spec, local_now)
         ):
             self._job_list[key] = job_func
 
@@ -121,7 +117,7 @@ class Schedule:
         parallel: bool = True,
     ) -> None:
         """Execute the job for ``key`` now, waiting for any running instance."""
-        now = datetime.datetime.now(datetime.timezone.utc) + TZ_OFFSET
+        now = datetime.now(self._timezone)
         self._last_run[key] = now
         Cache().put(_LAST_RUN_KEY, self._last_run, _LAST_RUN_TTL)
         self._job_list.pop(key, None)
@@ -138,7 +134,7 @@ class Schedule:
         key: str,
         func: Callable[[], Any],
         max_try: int,
-        now: datetime.datetime,
+        now: datetime,
         lock: threading.Lock,
     ) -> None:
         with lock:
@@ -153,7 +149,7 @@ class Schedule:
         key: str,
         func: Callable[[], Any],
         max_try: int,
-        now: datetime.datetime,
+        now: datetime,
         lock: threading.Lock,
         parallel: bool,
     ) -> None:
@@ -170,13 +166,13 @@ class Schedule:
         """Execute all registered jobs and wait for them to finish."""
         jobs = list(self._job_list.items())
         for key, _ in jobs:
-            now = datetime.datetime.now(datetime.timezone.utc) + TZ_OFFSET
+            now = datetime.now(self._timezone)
             self._last_run[key] = now
             Cache().put(_LAST_RUN_KEY, self._last_run, _LAST_RUN_TTL)
             self._job_list.pop(key, None)
 
         async def execute(key: str, func: Callable[[], Any]) -> None:
-            now = datetime.datetime.now(datetime.timezone.utc) + TZ_OFFSET
+            now = datetime.now(self._timezone)
             lock = self._locks.setdefault(key, threading.Lock())
             await self._run_job_async(
                 key, func, self._spec.max_try, now, lock, parallel

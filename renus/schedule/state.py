@@ -8,9 +8,6 @@ from typing import Final
 DEFAULT_INTERVAL: Final[int] = 1
 DEFAULT_MAX_TRY: Final[int] = 3
 
-DEFAULT_TIMEDELTA: Final[int] = 0
-
-TZ_OFFSET: Final[datetime.timedelta] = datetime.timedelta(hours=3, minutes=30)
 
 _INTERVAL_DELTAS: Final[dict[str, Callable[[int], datetime.timedelta]]] = {
     "weeks": lambda n: datetime.timedelta(weeks=n),
@@ -48,7 +45,7 @@ class Spec:
 
     interval: int = DEFAULT_INTERVAL
     max_try: int = DEFAULT_MAX_TRY
-    timedelta: int = DEFAULT_TIMEDELTA
+
     unit: str | None = None
     at: At = field(default_factory=At)
     forget: Forget = field(default_factory=Forget)

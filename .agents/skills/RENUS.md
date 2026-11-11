@@ -434,7 +434,7 @@ Schedule().every().days().at(hour=9, minute=30).do("report", send_report)
 ```
 
 - Units: `weeks`, `days`, `hours`, `minutes`, `seconds`.
-- `at(...)` narrows matching time; `forget(...)` excludes values; `max_try(n)` controls retries; `timedelta(minutes)` offsets evaluation.
+- `at(...)` narrows matching time; `forget(...)` excludes values; `max_try(n)` controls retries. `Schedule(timedelta=...)` applies a fixed offset to wall-clock matching (for Iran UTC+03:30, use `timedelta(minutes=210)`); interval checks and last-run timestamps stay in UTC.
 - `do` registers only when due and matching. `run(parallel=False)` runs inline; default parallel execution uses worker threads.
 - Job keys deduplicate through the cache and a per-key lock; same-key jobs do not overlap.
 - Renus does not provide an automatic scheduler loop. Drive it from a controlled lifespan task, and plan cancellation/shutdown explicitly.

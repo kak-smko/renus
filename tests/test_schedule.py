@@ -59,7 +59,10 @@ class TestBuilder:
         assert s.at(day="Monday") is s
         assert s.forget(hours=[3]) is s
         assert s.max_try(5) is s
-        assert s.timedelta(10) is s
+
+    def test_time_offset_is_a_constructor_option_not_a_builder_method(self):
+        assert not hasattr(Schedule, "timedelta")
+        assert not hasattr(Spec(), "timedelta")
 
     def test_every_resets_pending_spec(self):
         s = Schedule().weeks().at(hour=9).max_try(5)
@@ -71,13 +74,12 @@ class TestBuilder:
 
     def test_setters_populate_spec(self):
         s = Schedule()
-        s.weeks().at(day="Mon", hour=9).forget(days=["Sun"]).max_try(7).timedelta(100)
+        s.weeks().at(day="Mon", hour=9).forget(days=["Sun"]).max_try(7)
         assert s._spec.unit == "weeks"
         assert s._spec.at.day == "Mon"
         assert s._spec.at.hour == 9
         assert s._spec.forget.day == ["Sun"]
         assert s._spec.max_try == 7
-        assert s._spec.timedelta == 100
 
 class TestMatcher:
 
@@ -200,6 +202,16 @@ class TestRunner:
 
 class TestSchedule:
 
+    def test_positive_offset_matches_local_time(self):
+        sched = Schedule(timedelta=datetime.timedelta(minutes=210))
+        sched.every().days().at(hour=10, minute=30)
+
+        with patch("renus.schedule.schedule.datetime") as clock:
+            clock.now.return_value = _now(hour=7)
+            sched.do("iran-local-time", lambda: None)
+
+        assert "iran-local-time" in sched._job_list
+
     def test_do_registers_when_due(self):
         sched = Schedule().every().minutes()
         sched.do("k", lambda: None)
@@ -210,7 +222,7 @@ class TestSchedule:
 
         sched._last_run["k"] = datetime.datetime.now(
             datetime.timezone.utc
-        ) + datetime.timedelta(minutes=210)
+        ) + datetime.timedelta(minutes=1)
         sched.do("k", lambda: None)
         assert "k" not in sched._job_list
 
@@ -245,6 +257,19 @@ class TestSchedule:
         sched.job("k", lambda: None, parallel=False)
         assert cache.store["schedule_last_run"]["k"]
         assert "k" not in sched._job_list
+
+    def test_last_run_uses_utc_and_becomes_due_after_interval(self):
+        sched = Schedule(timedelta=datetime.timedelta(minutes=210)).every().minutes()
+        sched.do("k", lambda: None)
+        asyncio.run(sched.run(parallel=False))
+
+        last_run = sched._last_run["k"]
+        assert last_run <= datetime.datetime.now(datetime.timezone.utc)
+
+        next_schedule = Schedule().every().minutes()
+        next_schedule._last_run["k"] = last_run - datetime.timedelta(minutes=2)
+        next_schedule.do("k", lambda: None)
+        assert "k" in next_schedule._job_list
 
     def test_last_run_prevents_reregister(self):
         sched = Schedule().every().minutes()
