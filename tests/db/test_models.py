@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
+import json
 from uuid import UUID, uuid4
 
 import pytest
@@ -28,10 +29,12 @@ from renus.db import (
     RelationshipMetadata,
 
     ValidationError,
+    to_dict,
 )
 from renus.db.query.ast import Operator
 from renus.db.validation.rules import Email, MinLen
 from renus.datastructures.id import ID
+from renus.response import JsonResponse
 
 class ComprehensiveTypesModel(Model):
     id: int = Field(database=DatabaseField(primary_key=True, generated=True))
@@ -463,6 +466,24 @@ class IndexedModel(Model):
 
     class Meta:
         indexes = (Index("dept", "code", unique=True, name="idx_dept_code"),)
+
+
+def test_model_dict():
+    model = IndexedModel(id=1,dept="one",code="21")
+    model_dict=dict(model)
+    model_to_dict=to_dict(model)
+    assert list(model_dict.keys()) == ["id","dept", "code"]
+    assert list(model_to_dict.keys()) == ["id","dept", "code"]
+    d=JsonResponse(model)
+    load=json.loads(d.body)
+    assert list(load.keys()) == ["id","dept", "code"]
+    
+    res={"a":model}
+    model_to_dict=to_dict(res)
+    assert list(model_to_dict['a'].keys()) == ["id","dept", "code"]
+    d=JsonResponse(res)
+    load=json.loads(d.body)
+    assert list(load['a'].keys()) == ["id","dept", "code"]
 
 
 def test_declarative_indexes():

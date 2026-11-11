@@ -2009,6 +2009,18 @@ async def test_relationship_target_projections(kind):
         )
         assert loaded_user is not None
         assert [post.title for post in loaded_user.posts] == ["post-000"]
+        projected_posts = await (
+            user_repo.query(User.id == "rp-u000").select(User.posts).first()
+        )
+        assert projected_posts == {
+            "posts": [
+                {
+                    "id": "rp-p000",
+                    "title": "post-000",
+                    "user_id": "rp-u000",
+                }
+            ]
+        }
 
         # OneToOne: 100 passports reference 100 citizens; project the target.
         await citizen_repo.create_many(
@@ -2043,6 +2055,33 @@ async def test_relationship_target_projections(kind):
         assert loaded_citizen is not None
         assert loaded_citizen.passport.number == "passport-000"
 
+        citizen_projection = await (
+            citizen_repo.query(Citizen.id == "rp-c000")
+            .include(Citizen.passport)
+            .select(Citizen.name, Citizen.passport)
+            .first()
+        )
+        assert citizen_projection == {
+            "name": "citizen-000",
+            "passport": {
+                "id": "rp-pass000",
+                "citizen_id": "rp-c000",
+                "number": "passport-000",
+            },
+        }
+        projected_passport = await (
+            citizen_repo.query(Citizen.id == "rp-c000")
+            .select(Citizen.passport)
+            .first()
+        )
+        assert projected_passport == {
+            "passport": {
+                "id": "rp-pass000",
+                "citizen_id": "rp-c000",
+                "number": "passport-000",
+            },
+        }
+
         # ManyToOne: 100 employees point to 100 departments; project the holder.
         await dept_repo.create_many(
             [Dept(id=f"rp-d{i:03d}", name=f"dept-{i:03d}") for i in range(100)]
@@ -2075,6 +2114,15 @@ async def test_relationship_target_projections(kind):
         )
         assert loaded_employee is not None
         assert loaded_employee.dept.name == "dept-000"
+        projected_department = await (
+            employee_repo.query(Employee.id == "rp-e000")
+            .select(Employee.name, Employee.dept)
+            .first()
+        )
+        assert projected_department == {
+            "name": "employee-000",
+            "dept": {"id": "rp-d000", "name": "dept-000"},
+        }
 
         # ManyToMany: 100 employees each link to one role; project the target
         # endpoint and verify the link is still populated through include().
@@ -2105,6 +2153,15 @@ async def test_relationship_target_projections(kind):
         )
         assert loaded_member is not None
         assert [role.name for role in loaded_member.roles] == ["role-000"]
+        projected_roles = await (
+            employee_repo.query(Employee.id == "rp-m000")
+            .select(Employee.name, Employee.roles)
+            .first()
+        )
+        assert projected_roles == {
+            "name": "member-000",
+            "roles": [{"id": "rp-r000", "name": "role-000"}],
+        }
     finally:
         await cleanup(db)
 

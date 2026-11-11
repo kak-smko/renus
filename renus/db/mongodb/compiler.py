@@ -17,6 +17,7 @@ from renus.db.query.ast import (
     LIKE_ESCAPE,
     Condition,
     HavingCondition,
+    Include,
     Logical,
     Operator,
     Path,
@@ -314,10 +315,30 @@ class MongoCompiler:
                 pipeline.append({"$limit": ast.limit})
 
             if ast.projection:
-                pipeline.append({"$project": {
-                    "_id": 0,
-                    **{self._path_str(path): 1 for path in ast.projection.paths},
-                }})
+                project = {"_id": 0}
+                for path in ast.projection.paths:
+                    if not path.parts:
+                        continue
+                    name = path.parts[-1]
+                    if (
+                        path.model is source
+                        and len(path.parts) == 1
+                        and meta is not None
+                        and name in meta.relationships
+                    ):
+                        project[name] = 1
+                    elif (
+                        path.model is source
+                        and len(path.parts) == 1
+                        and meta is not None
+                        and name == meta.primary_key_field == "id"
+                    ):
+                        project[name] = f"${self._path_str(path)}"
+                    elif len(path.parts) > 1:
+                        project[name] = f"${self._path_str(path)}"
+                    else:
+                        project[self._path_str(path)] = 1
+                pipeline.append({"$project": project})
             return MongoCompiledQuery(
                 collection=collection_name,
                 filter_doc={},
@@ -548,12 +569,22 @@ class MongoCompiler:
         ast: QueryAST,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """Build recursive relationship lookups in one aggregation pipeline."""
-        if ast.projection or ast.aggregates:
+        if ast.aggregates:
             return [], []
         root_meta = getattr(ast.source, "__db_metadata__", None)
         if root_meta is None:
             return [], []
 
+        projected_relationships = tuple(
+            dict.fromkeys(
+                path.parts[0]
+                for path in (ast.projection.paths if ast.projection else ())
+                if path.model is ast.source
+                and len(path.parts) == 1
+                and path.parts[0] in root_meta.relationships
+            )
+        )
+        projected_relationship_names = set(projected_relationships)
         requested: dict[tuple[str, ...], Any] = {}
 
         def collect(item: Any, prefix: tuple[str, ...] = ()) -> None:
@@ -563,7 +594,14 @@ class MongoCompiler:
                 collect(nested, path)
 
         for item in ast.includes:
+            if ast.projection and (
+                not item.path.parts
+                or item.path.parts[0] not in projected_relationship_names
+            ):
+                continue
             collect(item)
+        for name in projected_relationships:
+            requested.setdefault((name,), Include(Path(ast.source, (name,))))
 
         def mongo_field(model_meta: Any, field_name: str) -> str:
             return "_id" if field_name == model_meta.primary_key_field else field_name
@@ -578,7 +616,9 @@ class MongoCompiler:
                     direct.setdefault(remainder[0], include)
             for name, rel in owner_meta.relationships.items():
                 loading = getattr(rel.loading, "value", rel.loading)
-                if loading == "joined":
+                if loading == "joined" and (
+                    not ast.projection or prefix or name in projected_relationship_names
+                ):
                     direct.setdefault(name, None)
 
             stages: list[dict[str, Any]] = []

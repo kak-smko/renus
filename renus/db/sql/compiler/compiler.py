@@ -34,7 +34,15 @@ _VALUE_OPERATORS = {
 
 class SQLCompiled:
 
-    __slots__ = ("joined", "meta", "params", "root_limit", "root_offset", "sql")
+    __slots__ = (
+        "joined",
+        "meta",
+        "params",
+        "projection_paths",
+        "root_limit",
+        "root_offset",
+        "sql",
+    )
 
     def __init__(
         self,
@@ -44,6 +52,7 @@ class SQLCompiled:
         joined: tuple[dict[str, Any], ...] = (),
         root_limit: int | None = None,
         root_offset: int | None = None,
+        projection_paths: tuple[Path, ...] = (),
     ) -> None:
         """Hold a compiled SQL statement and its binding parameters.
 
@@ -62,6 +71,7 @@ class SQLCompiled:
         self.joined = joined
         self.root_limit = root_limit
         self.root_offset = root_offset
+        self.projection_paths = projection_paths
 
     def __repr__(self) -> str:
         return f"SQLCompiled(sql={self.sql!r}, params={self.params!r})"
@@ -111,10 +121,44 @@ class SQLCompiler:
                 select_items.append(f"{fn_name}({distinct_agg}{target}) AS {alias}")
             select_clause = ", ".join(select_items)
         elif ast.projection:
-            select_clause = ", ".join(
-                f"{self._path(p)} AS {self.dialect.quote(p.parts[-1])}"
-                for p in ast.projection.paths
-            )
+            projected_relationship_names = {
+                path.parts[0]
+                for path in ast.projection.paths
+                if path.model is source
+                and len(path.parts) == 1
+                and path.parts[0] in (meta.relationships if meta else {})
+            }
+            select_items = [
+                f"{self._path(path)} AS {self.dialect.quote(path.parts[-1])}"
+                for path in ast.projection.paths
+                if not (
+                    path.model is source
+                    and path.parts
+                    and path.parts[0] in projected_relationship_names
+                )
+            ]
+            if joined and meta is not None:
+                root_pk = meta.fields.get(meta.primary_key_field)
+                root_pk_column = root_pk.column_name if root_pk else meta.primary_key_field
+                select_items.append(
+                    f"{self.dialect.quote('r0')}.{self.dialect.quote(root_pk_column)} "
+                    f"AS {self.dialect.quote('__renus_root_pk')}"
+                )
+                for spec in joined:
+                    if spec["path"][0] not in projected_relationship_names:
+                        continue
+                    target_meta = spec["meta"]
+                    target_ref = self.dialect.quote(spec["alias"])
+                    prefix = spec["prefix"]
+                    for field_name in target_meta.fields:
+                        column = self._field_name(target_meta.model, field_name)
+                        alias = self.dialect.quote(
+                            f"__renus_joined__{prefix}__{field_name}"
+                        )
+                        select_items.append(
+                            f"{target_ref}.{self.dialect.quote(column)} AS {alias}"
+                        )
+            select_clause = ", ".join(select_items) if select_items else "1"
         else:
             if joined:
                 select_parts = [f'{self.dialect.quote("r0")}.*']
@@ -220,25 +264,48 @@ class SQLCompiler:
             joined=tuple(joined),
             root_limit=ast.limit if joined else None,
             root_offset=ast.offset if joined else None,
+            projection_paths=(ast.projection.paths if ast.projection else ()),
         )
 
     def _joined_relationships(self, ast: QueryAST) -> list[dict[str, Any]]:
         """Build adapter row metadata and SQL joins for eager relationships."""
-        if ast.projection or ast.aggregates:
+        if ast.aggregates:
             return []
         meta = getattr(ast.source, "__db_metadata__", None)
         if meta is None:
             return []
 
+        projected_relationships = tuple(
+            dict.fromkeys(
+                path.parts[0]
+                for path in (ast.projection.paths if ast.projection else ())
+                if path.model is ast.source
+                and len(path.parts) == 1
+                and path.parts[0] in meta.relationships
+            )
+        )
+        projected_relationship_names = set(projected_relationships)
+        if ast.projection and not projected_relationships:
+            return []
+
         result: list[dict[str, Any]] = []
         alias_number = 0
         requested: dict[tuple[str, ...], Include] = {
-            include.path.parts: include for include in ast.includes
+            include.path.parts: include
+            for include in ast.includes
+            if not ast.projection
+            or (
+                include.path.parts
+                and include.path.parts[0] in projected_relationship_names
+            )
         }
-        for name, rel in meta.relationships.items():
-            loading = getattr(rel.loading, "value", rel.loading)
-            if loading == "joined":
-                requested.setdefault((name,), Include(Path(ast.source, (name,))))
+        for name in projected_relationships:
+            requested.setdefault((name,), Include(Path(ast.source, (name,))))
+        if not ast.projection:
+            for name, rel in meta.relationships.items():
+                loading = getattr(rel.loading, "value", rel.loading)
+                if loading == "joined":
+                    requested.setdefault((name,), Include(Path(ast.source, (name,))))
 
         def add(
             model: type,

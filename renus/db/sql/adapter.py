@@ -118,6 +118,17 @@ class SQLAdapter(AsyncDatabaseAdapter):
         root_meta = compiled.meta
         root_pk = root_meta.get_field(root_meta.primary_key_field)
         root_column = root_pk.column_name if root_pk else root_meta.primary_key_field
+        projection_paths = getattr(compiled, "projection_paths", ())
+        projected_relationships = tuple(
+            dict.fromkeys(
+                path.parts[0]
+                for path in projection_paths
+                if path.model is root_meta.model
+                and path.parts
+                and path.parts[0] in root_meta.relationships
+            )
+        )
+        projected_relationship_names = set(projected_relationships)
         grouped: dict[Any, dict[str, Any]] = {}
         child_keys: dict[tuple[Any, tuple[str, ...]], set[Any]] = {}
 
@@ -127,9 +138,12 @@ class SQLAdapter(AsyncDatabaseAdapter):
                 key: value
                 for key, value in row.items()
                 if not key.startswith("__renus_joined__")
+                and key != "__renus_root_pk"
             }
             root = self.decode_row(root_data, root_meta)
-            root_id = root.get(root_meta.primary_key_field, root.get(root_column))
+            root_id = row.get("__renus_root_pk")
+            if root_id is None:
+                root_id = root.get(root_meta.primary_key_field, root.get(root_column))
             if root_id not in grouped:
                 grouped[root_id] = root
             root = grouped[root_id]
@@ -174,6 +188,13 @@ class SQLAdapter(AsyncDatabaseAdapter):
                 )
 
         result = list(grouped.values())
+        if projection_paths:
+            for root in result:
+                for name in projected_relationship_names:
+                    root.setdefault(
+                        name,
+                        [] if root_meta.relationships[name].is_collection else None,
+                    )
         start = compiled.root_offset or 0
         end = start + compiled.root_limit if compiled.root_limit is not None else None
         return result[start:end]

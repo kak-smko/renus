@@ -43,9 +43,6 @@ from renus.db.validation import MaxLen
 from renus.datastructures import ID
 
 class {name_camel}(Model):
-    """Domain model for {name}.
-    """
-
     id: ID = Field(default_factory=ID,database=DatabaseField(primary_key=True,generated=True))
 
     # --- Example fields; customize for your domain. ---
@@ -92,8 +89,8 @@ admin_router.put("/{names}/{id:id}", {name_camel}Controller, "update", middlewar
 admin_router.delete("/{names}/{id:id}", {name_camel}Controller, "delete", middlewares=[PermissionMiddleware("{names}.delete")])
 {soft_delete_kit_routes}
 
-user_router = Router(prefix="/user", middlewares=[AuthMiddleware])
-home_router = Router(prefix="/home")
+user_router = Router(prefix="/api/user", middlewares=[AuthMiddleware])
+home_router = Router(prefix="/api/home")
 router = Router()
 router.include(admin_router)
 router.include(user_router)

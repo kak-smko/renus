@@ -165,6 +165,13 @@ rows = await users.query().select(User.profile.city).all()
 # {"city": "Paris"}
 ```
 
+A relationship path selects the related record (or records) as a nested dictionary/list. It is loaded for the projection even without a separate `include()`:
+
+```python
+rows = await users.query().select(User.id, User.posts).all()
+# {"id": ..., "posts": [{"id": ..., "title": ..., "user_id": ...}]}
+```
+
 The selected paths are represented by the model fields, so database column names and backend-specific identity mappings remain adapter concerns. MongoDB removes its internal `_id` storage field from results and exposes the model identity as `id` when it is selected or when a model is hydrated.
 
 ## 6. Ordering

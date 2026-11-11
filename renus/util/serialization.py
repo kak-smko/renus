@@ -8,6 +8,7 @@ import re
 import uuid
 from collections.abc import Mapping
 from typing import Any
+
 from renus.datastructures.id import ID
 try:
     import orjson as _orjson
@@ -60,6 +61,8 @@ def _encode_default_value(o: Any) -> Any:
     if isinstance(o, (str, int, float, bool, type(None))):
         return o
     if isinstance(o, Mapping):
+        return dict(o)
+    if getattr(type(o), "_is_model_class", False):
         return dict(o)
     if hasattr(o, "__dict__"):
         return dict(vars(o))

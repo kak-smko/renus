@@ -369,6 +369,7 @@ class MySQLAdapter(SQLAdapter):
                 joined=sql_compiled.joined,
                 root_limit=sql_compiled.root_limit,
                 root_offset=sql_compiled.root_offset,
+                projection_paths=sql_compiled.projection_paths,
             )
 
         cursor_cls = aiomysql.DictCursor if aiomysql is not None else None
