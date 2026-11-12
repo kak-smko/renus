@@ -285,11 +285,16 @@ class SQLDialect(ABC):
     def encode_value(self, value: Any, field_meta: Any = None) -> Any:
         """Encode a value for storage.
 
-        An ``ID`` is stored in its portable text form, matching the SQL text
-        column a relational backend uses for identity values.
+        An ``ID`` is stored using its configured value, not its tagged string
+        representation. This preserves numeric identity columns and keeps the
+        presentation marker out of relational keys.
         """
         if isinstance(value, ID):
-            return None if value.value is None else str(value)
+            return (
+                None
+                if value.value is None
+                else convert.encode_value(value.value, field_meta)
+            )
         return convert.encode_value(value, field_meta)
 
     def decode_value(self, value: Any, field_meta: Any = None) -> Any:

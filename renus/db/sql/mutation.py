@@ -12,8 +12,8 @@ from renus.db.mutation.ast import (
     Update,
     UpdateMany,
 )
-from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
-from renus.db.sql.dialect.base import SQLDialect
+from renus.db.sql.compiler import SQLCompiled, SQLCompiler
+from renus.db.sql.dialect import SQLDialect
 
 
 class SQLMutationCompiler:

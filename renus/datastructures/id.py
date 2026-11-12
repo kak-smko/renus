@@ -7,11 +7,13 @@
 
 The concrete identity object is read from ``Config("database")`` under ``ID``
 and may be ``int``, ``bson.ObjectId``, ``uuid.UUID``, ``str``, or any callable
-that mints a unique value. An ``ID`` instance wraps the resolved value, so the
-model stores a small value object whose string form is the identity itself.
+that mints a unique value. An ``ID`` instance wraps the resolved value, while
+its tagged string form distinguishes serialized IDs from ordinary text.
 Encoding and decoding are performed by the adapters: a document store keeps the
 identity in its native form (a MongoDB ``ObjectId`` stays an ``ObjectId``),
-while a relational store keeps it as text.
+and a relational store keeps the configured value in its bindable form. Its
+string representation is tagged to distinguish serialized IDs from ordinary
+text values.
 
 An integer identity is never minted here. It is allocated by the backend, either
 through native auto increment or, for document stores without one, through a
@@ -80,12 +82,14 @@ class ID:
     def _coerce(self, value: Any) -> Any:
         """Coerce ``value`` into the configured identity type."""
         obj = self.obj
+        if isinstance(value, str) and value.startswith("id:"):
+            value = value[3:]
         if isinstance(value, obj):
             return value
         return obj(value)
 
     def __str__(self) -> str:
-        return str(self.value)
+        return f"id:{self.value}"
 
     def __repr__(self) -> str:
         return f"ID({self.value!r})"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from renus.datastructures.id import ID
 from renus.db.query.ast import (
     LIKE_ESCAPE,
     Condition,
@@ -13,7 +14,7 @@ from renus.db.query.ast import (
     QueryAST,
     RelationAny,
 )
-from renus.db.sql.dialect.base import SQLDialect
+from renus.db.sql.dialect import SQLDialect
 from renus.util import to_plural_lower
 
 _ALLOWED_AGGREGATE_FUNCTIONS = frozenset({"count", "sum", "avg", "min", "max"})
@@ -767,6 +768,8 @@ class SQLCompiler:
 
         def compile_condition(condition: Condition) -> tuple[str, list[Any]]:
             def encode(value: Any) -> Any:
+                if isinstance(value, ID):
+                    return str(value)
                 return self.dialect.encode_value(value)
 
             if isinstance(condition, Logical):

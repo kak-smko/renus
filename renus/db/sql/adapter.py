@@ -9,8 +9,8 @@ from renus.db.core.backup import DEFAULT_PAGE_SIZE, BackupFileWriter, load_rows_
 from renus.db.mutation.ast import InsertMany, MutationAST
 from renus.db.query.ast import QueryAST
 
-from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
-from renus.db.sql.dialect.base import SQLDialect
+from renus.db.sql.compiler import SQLCompiled, SQLCompiler
+from renus.db.sql.dialect import SQLDialect
 from renus.db.sql.mutation import SQLMutationCompiler
 from renus.db.transaction.core import Transaction
 from renus.db.core.exceptions import IntegrityError

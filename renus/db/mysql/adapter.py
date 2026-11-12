@@ -20,7 +20,7 @@ from renus.db import errors
 from renus.db.mutation.ast import InsertMany, MutationAST
 from renus.db.query.ast import QueryAST
 from renus.db.sql.adapter import SQLAdapter
-from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
+from renus.db.sql.compiler import SQLCompiled, SQLCompiler
 from renus.db.mysql.dialect import MySQLDialect
 from renus.db.sql.mutation import SQLMutationCompiler
 

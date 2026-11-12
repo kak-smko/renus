@@ -25,7 +25,7 @@ from renus.db.core.exceptions import (
 from renus.db.mutation.ast import MutationAST
 from renus.db.query.ast import QueryAST
 from renus.db.sql.adapter import SQLAdapter
-from renus.db.sql.compiler.compiler import SQLCompiled, SQLCompiler
+from renus.db.sql.compiler import SQLCompiled, SQLCompiler
 from renus.db.sql.mutation import SQLMutationCompiler
 from renus.db.sqlite.dialect import SQLiteDialect
 

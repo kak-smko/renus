@@ -82,7 +82,7 @@ def test_to_dict_scalars_and_models():
     assert d["bio"] is None
     assert d["created_at"] == "2026-09-07T12:00:00+00:00"
     assert d["birth_date"] == "1990-05-20"
-    assert d["mongo_id"] == "507f1f77bcf86cd799439011"
+    assert d["mongo_id"] == "id:507f1f77bcf86cd799439011"
     assert d["address"]["street"] == "123 Main St"
     assert d["address"]["city"] == "Metropolis"
     assert d["address"]["zip_code"] == "10001"

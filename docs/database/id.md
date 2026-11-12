@@ -31,7 +31,7 @@ Create a document without supplying `_id`:
 document = Document(title="Renus guide")
 
 print(document._id)       # the configured identity value
-print(str(document._id))  # text representation of the identity
+print(str(document._id))  # tagged text representation, e.g. "id:42"
 ```
 
 `default_factory=ID` creates a separate identity for each model instance. The identity configuration is read from `config.database` through `Config("database")`.
@@ -164,7 +164,7 @@ Useful value-object behavior:
 ```python
 identity = ID("document-42")
 
-str(identity)       # "document-42"
+str(identity)       # "id:document-42"
 repr(identity)      # ID('document-42')
 bool(identity)      # based on the wrapped value
 identity == "document-42"
@@ -282,7 +282,7 @@ Use `ID` when the concrete identity should come from `config/database.py`; use `
 
 ## 8. Serialization
 
-Renus converts an `ID` value to its string form in general model serialization:
+Renus converts an `ID` value to its tagged string form (`id:<value>`) in general model serialization:
 
 ```python
 from renus.db import to_dict
@@ -290,7 +290,7 @@ from renus.db import to_dict
 
 payload = to_dict(document)
 print(payload["_id"])
-# a string representation of the identity
+# e.g. "id:document-42"
 ```
 
 When data is loaded back into a model, Renus converts an identity field into an `ID` value using the configured identity type:
@@ -302,7 +302,7 @@ from renus.db import from_dict
 loaded = from_dict(
     Document,
     {
-        "_id": "document-42",
+        "_id": "id:document-42",
         "title": "Loaded document",
     },
 )

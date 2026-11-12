@@ -126,7 +126,7 @@ class MongoDialect:
                     return None
                 if isinstance(raw, _ID_NATIVE_TYPES):
                     return raw
-                return str(value)
+                return str(raw)
             if value is not None and not isinstance(value, _ID_NATIVE_TYPES):
                 return str(value)
             return value

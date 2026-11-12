@@ -182,7 +182,7 @@ def test_configured_id_identity(monkeypatch):
 
     monkeypatch.setitem(Config._cache, "database", SimpleNamespace(ID=str))
     identity = ID("507f1f77bcf86cd799439011")
-    assert str(identity) == "507f1f77bcf86cd799439011"
+    assert str(identity) == "id:507f1f77bcf86cd799439011"
     assert isinstance(identity, ID)
 
     class MongoDoc(Model):

@@ -22,7 +22,6 @@ _UUID_RE = re.compile(
     r"[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$"
 )
 _DECIMAL_RE = re.compile(r"^-?\d+\.\d+$")
-_ID_PREFIX = "id:"
 
 class jsonEncoder(json.JSONEncoder):
     """JSON encoder with renus-specific default value handling."""
@@ -51,7 +50,7 @@ def _encode_default_value(o: Any) -> Any:
         return encoded[:8] if o.microsecond == 0 else encoded
 
     if isinstance(o, ID):
-        return f"{_ID_PREFIX}{o}"
+        return str(o)
     if isinstance(o, uuid.UUID):
         return str(o)
     if isinstance(o, decimal.Decimal):
@@ -72,9 +71,8 @@ def json_decoder(value: Any) -> Any:
     """Decode serialized values back into renus-native objects."""
     if isinstance(value, dict):
         return {k: json_decoder(v) for k, v in value.items()}
-    if isinstance(value, str) and value.startswith(_ID_PREFIX):
-
-        return ID(value[len(_ID_PREFIX):])
+    if isinstance(value, str) and value.startswith("id:"):
+        return ID(value)
     if isinstance(value, list):
         return [json_decoder(item) for item in value]
     if isinstance(value, str) and value:

@@ -5,7 +5,7 @@ from typing import Any
 
 from renus.datastructures.id import ID
 from renus.db.metadata.core import FieldMetadata
-from renus.db.sql.dialect.base import SQLDialect
+from renus.db.sql.dialect import SQLDialect
 
 
 class MySQLDialect(SQLDialect):

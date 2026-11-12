@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from renus.db.core.state import IdentityKind
 from renus.db.metadata.core import FieldMetadata
-from renus.db.sql.dialect.base import SQLDialect
+from renus.db.sql.dialect import SQLDialect
 
 class SQLiteDialect(SQLDialect):
 
