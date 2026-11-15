@@ -255,8 +255,6 @@ class QueryAST:
     ordering: tuple[Ordering, ...] = ()
     offset: int | None = None
     limit: int | None = None
-    cursor: Any = None
-    cursor_field: Path | None = None
     includes: tuple[Include, ...] = ()
     aggregates: tuple[Aggregate, ...] = ()
     group_by: tuple[Path, ...] = ()

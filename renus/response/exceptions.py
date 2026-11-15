@@ -70,7 +70,8 @@ def debug_response(exc: Exception, debug: bool = False):
         exc, capture_locals=True
     )
 
-    error = f"{traceback_obj.exc_type.__name__}: {str(traceback_obj)}"
+    exc_type_name = getattr(traceback_obj, "exc_type_str", None) or type(exc).__name__
+    error = f"{exc_type_name}: {traceback_obj}"
     stacks = traceback_obj.stack.format()
     stack_list = [stack.split("\n") for stack in stacks]
 

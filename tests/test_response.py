@@ -348,3 +348,9 @@ class TestDebugResponse:
         payload, status = debug_response(ValueError("boom"), debug=False)
         assert status == 500
         assert payload == {"msg": "Internal Server Error"}
+
+    def test_debug_response_formats_exception_type_without_deprecation(self):
+        payload, status = debug_response(ValueError("boom"), debug=True)
+
+        assert status == 500
+        assert payload["msg"].startswith("ValueError: ")

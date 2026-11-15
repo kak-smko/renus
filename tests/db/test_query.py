@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -48,6 +49,7 @@ class User(Model):
     active: bool = True
     role: str = "member"
     score: float = 0.0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     profile: UserAddress
     posts: list[Post]
 
@@ -241,11 +243,7 @@ def test_page_size_pagination():
     q_neg = Query(User).paginate(page=0, size=10)
     assert q_neg.ast.offset == 0
 
-def test_cursor_pagination():
-    cursor_token = {"id": 100, "created_at": "2024-01-01T00:00:00Z"}
-    q = Query(User).cursor(cursor_token, field=User.id)
-    assert q.ast.cursor == cursor_token
-    assert q.ast.cursor_field == User.id
+
 
 def test_includes():
     q = Query(User).include(User.posts, User.profile)
@@ -408,6 +406,141 @@ async def test_unbound_query_execution_raises():
 
     with pytest.raises(ConfigurationError, match="without a bound repository"):
         await q.exists()
+
+
+@pytest.mark.asyncio
+async def test_query_stream_batches_with_primary_key_tie_breaker():
+    rows = [
+        User(
+            id=index,
+            name=f"User {index}",
+            age=20,
+            created_at=datetime(2020, 1, 1 if index <= 3 else 2, tzinfo=timezone.utc),
+            profile=UserAddress(street="A", city="B"),
+            posts=[],
+        )
+        for index in range(1, 6)
+    ]
+
+    class StreamingRepository(FakeRepository):
+        def __init__(self) -> None:
+            super().__init__(User)
+            self.calls: list[QueryAST] = []
+
+        async def _query(self, ast: QueryAST) -> list[Any]:
+            self.calls.append(ast)
+            results = sorted(rows, key=lambda row: (row.created_at, row.id))
+            start = ast.offset or 0
+            end = None if ast.limit is None else start + ast.limit
+            return results[start:end]
+
+    repo = StreamingRepository()
+    streamed = [
+        user
+        async for user in Query(repo).order_by(User.created_at.asc()).stream(batch_size=2)
+    ]
+
+    assert [user.id for user in streamed] == [1, 2, 3, 4, 5]
+    assert [call.offset for call in repo.calls] == [0, 2, 4]
+    assert all(call.limit == 2 for call in repo.calls)
+    assert [ordering.path for ordering in repo.calls[0].ordering] == [
+        User.created_at,
+        User.id,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_query_stream_excludes_rows_created_after_stream_starts():
+    existing_rows = [
+        User(
+            id=index,
+            name=f"User {index}",
+            age=20,
+            created_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            profile=UserAddress(street="A", city="B"),
+            posts=[],
+        )
+        for index in range(1, 4)
+    ]
+
+    class ConcurrentInsertRepository(FakeRepository):
+        def __init__(self) -> None:
+            super().__init__(User)
+            self.rows = list(existing_rows)
+            self.calls: list[QueryAST] = []
+
+        async def _query(self, ast: QueryAST) -> list[Any]:
+            self.calls.append(ast)
+            cutoff_conditions = [
+                condition
+                for condition in ast.filters
+                if condition.path == User.created_at
+            ]
+            assert len(cutoff_conditions) == 1
+            cutoff_condition = cutoff_conditions[0]
+            eligible = [
+                row
+                for row in self.rows
+                if row.created_at <= cutoff_condition.value
+            ]
+            eligible.sort(key=lambda row: row.id)
+            start = ast.offset or 0
+            results = eligible[start : start + ast.limit]
+
+            if len(self.calls) == 1:
+                self.rows.append(
+                    User(
+                        id=4,
+                        name="Inserted during stream",
+                        age=20,
+                        created_at=cutoff_condition.value + timedelta(seconds=1),
+                        profile=UserAddress(street="A", city="B"),
+                        posts=[],
+                    )
+                )
+            return results
+
+    repo = ConcurrentInsertRepository()
+    streamed = [user async for user in Query(repo).stream(batch_size=2)]
+
+    assert [user.id for user in streamed] == [1, 2, 3]
+    assert len(repo.calls) == 2
+    first_cutoff = next(
+        condition.value
+        for condition in repo.calls[0].filters
+        if condition.path == User.created_at
+    )
+    second_cutoff = next(
+        condition.value
+        for condition in repo.calls[1].filters
+        if condition.path == User.created_at
+    )
+    assert first_cutoff == second_cutoff
+
+
+@pytest.mark.asyncio
+async def test_query_stream_defaults_to_primary_key_order():
+    rows = [
+        User(
+            id=index,
+            name=f"User {index}",
+            age=20,
+            profile=UserAddress(street="A", city="B"),
+            posts=[],
+        )
+        for index in range(1, 4)
+    ]
+
+    class StreamingRepository(FakeRepository):
+        async def _query(self, ast: QueryAST) -> list[Any]:
+            start = ast.offset or 0
+            return sorted(rows, key=lambda row: row.id)[start : start + ast.limit]
+
+    repo = StreamingRepository(User)
+    streamed = [user async for user in Query(repo).stream(batch_size=2)]
+
+    assert [user.id for user in streamed] == [1, 2, 3]
+    assert repo.last_ast is None
 
 
 @pytest.mark.asyncio

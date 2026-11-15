@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import replace
+from datetime import datetime, timezone
 from typing import Any, Generic, TypeVar
 
 from renus.db.core.exceptions import ConfigurationError
@@ -187,9 +189,6 @@ class Query(Generic[T]):
         offset_val = (page - 1) * size
         return self._clone(offset=offset_val, limit=size)
 
-    def cursor(self, token: Any, field: Path | None = None) -> Query[T]:
-        """Return a new query starting after the given cursor token."""
-        return self._clone(cursor=token, cursor_field=field)
 
     def include(self, *paths: Path | Include) -> Query[T]:
         """Return a new query that eagerly loads the given relations."""
@@ -241,6 +240,53 @@ class Query(Generic[T]):
         if self.repository is None:
             raise ConfigurationError("Cannot execute query without a bound repository")
         return await self.repository._query(self.ast)
+
+    async def stream(self, batch_size: int = 1000) -> AsyncIterator[T]:
+        """Yield matching rows in bounded batches until the query is exhausted."""
+        if self.repository is None:
+            raise ConfigurationError("Cannot execute query without a bound repository")
+        batch_size = int(batch_size)
+        if batch_size <= 0:
+            raise ValueError("batch_size must be greater than zero")
+
+        meta = getattr(self.model, "__db_metadata__", None)
+        primary_keys = tuple(getattr(meta, "primary_key_fields", ()))
+        ordering = self.ast.ordering
+        if not ordering:
+            if not primary_keys:
+                raise ValueError(
+                    f"Model '{self.model.__name__}' must define a primary key to stream"
+                )
+            ordering = tuple(Ordering(Path(self.model, (name,))) for name in primary_keys)
+        elif primary_keys:
+            ordered_paths = {item.path for item in ordering}
+            ordering += tuple(
+                Ordering(Path(self.model, (name,)))
+                for name in primary_keys
+                if Path(self.model, (name,)) not in ordered_paths
+            )
+
+        filters = self.ast.filters
+        if meta and "created_at" in meta.fields:
+            cutoff = datetime.now(timezone.utc)
+            created_at = Path(self.model, ("created_at",))
+            filters += (created_at <= cutoff,)
+
+        offset = max(0, self.ast.offset or 0)
+        remaining = self.ast.limit
+        while remaining is None or remaining > 0:
+            size = batch_size if remaining is None else min(batch_size, remaining)
+            batch_ast = replace(self.ast,filters=filters, ordering=ordering, offset=offset, limit=size)
+            rows = await self.repository._query(batch_ast)
+            if not rows:
+                break
+            for row in rows:
+                yield row
+            offset += len(rows)
+            if remaining is not None:
+                remaining -= len(rows)
+            if len(rows) < size:
+                break
 
     async def first(self) -> T | None:
         """Execute the query and return the first matching row, if any."""

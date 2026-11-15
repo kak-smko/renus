@@ -57,6 +57,10 @@ all = [
     "uvicorn>=0.29",
 ]
 dev = [
+    "pytest-asyncio",
+    "pytest",
+    "pymongo",
+    "aiomysql",
     "uvicorn>=0.29",
     "fastapi",
     "litestar",

@@ -1234,11 +1234,10 @@ async def test_large_query_ast_features(kind):
         )
         assert [user.age for user in window] == list(range(17, 30))
 
-        # A cursor starts strictly after its token and honors the ordering.
+        # A greater-than filter starts strictly after its token and honors the ordering.
         cursor_page = await (
-            repo.query()
+            repo.query(User.age > 59)
             .order_by(User.age.asc())
-            .cursor(59, field=User.age)
             .limit(10)
             .all()
         )
@@ -1293,9 +1292,8 @@ async def test_cursor_pagination_reads_all_rows_in_batches_of_ten(kind):
         cursor = ""
         while True:
             page = await (
-                repo.query()
+                repo.query(User.id > cursor)
                 .order_by(User.id.asc())
-                .cursor(cursor)
                 .limit(10)
                 .all()
             )

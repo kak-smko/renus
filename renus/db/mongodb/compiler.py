@@ -202,16 +202,6 @@ class MongoCompiler:
                     }})
             filter_parts.append(self._compile_condition(cond, relation_any_lookups))
 
-        if ast.cursor is not None:
-            cursor_path = ast.cursor_field
-            if cursor_path is None and meta and meta.primary_key_field:
-                cursor_path = Path(source, (meta.primary_key_field,))
-            if cursor_path is not None:
-                filter_parts.append({
-                    self._path_str(cursor_path): {
-                        "$gt": self.dialect.encode_value(ast.cursor)
-                    }
-                })
 
         filter_doc = self._combine_filter_parts(filter_parts)
         joined_stages, joined_names = self._joined_lookups_recursive(ast)
