@@ -220,7 +220,7 @@ Supported query operations include:
 - projections with `select()`
 - ordering with `order_by()`, `asc()`, and `desc()`
 - pagination with `offset()`, `limit()`, and `paginate()`
-- cursor positioning with `cursor()`
+- batched async iteration with `stream()`
 - eager relationship loading with `include()`
 - grouping and aggregates with `group_by()`, `aggregate()`, and `having()`
 - `distinct()` results

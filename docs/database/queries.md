@@ -206,19 +206,25 @@ page_three = await (
 )
 ```
 
-`paginate(page, size)` treats pages as one-based: page 1 starts at offset 0. `cursor(token, field=None)` creates a query that starts strictly after the token (`field > token`). If `field` is omitted, the model primary key is used when available:
+`paginate(page, size)` treats pages as one-based: page 1 starts at offset 0. For stable pages, provide an explicit order, especially when using offset pagination.
+
+### Streaming results in batches
+
+Use `stream()` to asynchronously iterate through query results without loading every match into memory at once:
 
 ```python
-next_page = await (
+async for user in (
     users.query()
-    .order_by(User.id.asc())
-    .cursor(last_id, field=User.id)
-    .limit(20)
-    .all()
-)
+    .where(User.created_at >= start)
+    .order_by(User.created_at.asc())
+    .stream(batch_size=1000)
+):
+    print(user)
 ```
 
-Cursor values are compared by the database and are not opaque encoded tokens. Use a field and ordering with compatible ascending semantics; cursor pagination is not a substitute for a compound cursor when the ordering uses multiple fields. For stable pages, provide an explicit order, especially when using offset pagination.
+The default batch size is 1000 and must be greater than zero. Each yielded value has the same shape as a result from `all()` (normally a hydrated model instance; projections and aggregates return dictionaries). If no order is specified, streaming orders by the model primary key. For an explicit ordering, primary-key fields are appended as tie-breakers when they are not already present. For example, ordering by `created_at` also orders equal timestamps by primary key, so a timestamp tie at a batch boundary is not by itself a reason for a row to be skipped.
+
+Streaming currently fetches successive batches using offsets; it does not guarantee a database snapshot. Concurrent inserts can appear in later batches, and inserts or deletes before the current offset can shift rows, potentially causing duplicates or omissions. For models with a `created_at` field, the stream applies a `created_at <=` cutoff captured when iteration starts; this can exclude later-created rows, but it does not prevent changes to existing rows or guarantee a snapshot (for example, backdated or equal-cutoff inserts may still be visible). To require a consistent point-in-time result, run the stream in a transaction with snapshot semantics supported by the chosen adapter and isolation level.
 
 ## 8. Eager-load relationships
 
@@ -351,7 +357,7 @@ The query builder produces a backend-neutral query structure. SQL adapters compi
 
 Nested JSON/model fields are stored within the owner record. SQL adapters use JSON path expressions, while MongoDB uses document paths and `$elemMatch` for arrays. Nested projections return the selected leaf field under its field name on both backends.
 
-The same public query API is intended to work across the built-in adapters, but backend support can vary for advanced operations. In particular, cursor comparisons use `>` against the selected field. See [`/docs/database/adapters.md`](adapters.md) when choosing a backend.
+The same public query API is intended to work across the built-in adapters, but backend support can vary for advanced operations. See [`/docs/database/adapters.md`](adapters.md) when choosing a backend.
 
 ## Next steps
 
