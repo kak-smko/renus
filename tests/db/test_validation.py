@@ -414,6 +414,15 @@ def test_validate_model_fields_rejects_invalid_selected_values():
     assert exc_info.value.status_code == Status.HTTP_406_NOT_ACCEPTABLE
     assert exc_info.value.detail["msg"] == "invalid_data"
     assert "age" in exc_info.value.detail["errors"]
+    assert len(exc_info.value.detail["errors"])==1
+    
+def test_no_id_moded():
+    class _v(Model):
+        name: str
+        last_name: str
+
+    
+    Validate(_v, {"name":"ali","last_name":"ba"})
 
 
 def test_validate_model_fields_nested_failed():

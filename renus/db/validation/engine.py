@@ -4,7 +4,6 @@ import copy
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
-from renus.db.core.exceptions import ValidationError
 from renus.response import Status, abort_if
 
 if TYPE_CHECKING:
@@ -27,19 +26,20 @@ class Validate(dict[str, Any]):
         super().__init__()
 
         form=dict(form)
-        if fields is None :
-            fields=model.metadata().fields.keys()
+        if fields is None:
+            fields = model._model_fields.keys()
 
         selected_fields = [fields] if isinstance(fields, str) else list(fields)
-        if any(not isinstance(name, str) for name in selected_fields):
-            raise TypeError("fields must contain only field names as strings")
-
+        for name in selected_fields:
+            abort_if(not isinstance(name, str) ,
+            {"msg":"invalid_data","errors":{name:["fields must contain only field names as strings"]}},Status.HTTP_406_NOT_ACCEPTABLE)
         model_cls = model
         model_fields = model_cls._model_fields
         invalid_fields = [name for name in selected_fields if name not in model_fields]
-        if invalid_fields:
-            raise ValueError(f"Unknown model field(s): {', '.join(invalid_fields)}")
-
+       
+        abort_if(invalid_fields ,
+            {"msg":"invalid_data","errors":{"Unknown":[f"Unknown model field(s): {', '.join(invalid_fields)}"]}},Status.HTTP_406_NOT_ACCEPTABLE)
+        
         source = copy.deepcopy(form)
         values: dict[str, Any] = {}
         errors: dict[str, list[Any]] = {}

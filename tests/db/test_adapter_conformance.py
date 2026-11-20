@@ -1278,6 +1278,69 @@ async def test_large_query_ast_features(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ADAPTERS)
+async def test_query_stream_with_ordering_keeps_tied_values(kind):
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        users = [
+            _u("stream-c", "stream-c", age=20),
+            _u("stream-a", "stream-a", age=10),
+            _u("stream-e", "stream-e", age=20),
+            _u("stream-b", "stream-b", age=10),
+            _u("stream-d", "stream-d", age=30),
+        ]
+        await repo.create_many(users)
+
+        streamed = [
+            user
+            async for user in repo.query().order_by(User.age.asc()).stream(batch_size=2)
+        ]
+
+        assert [(user.age, user.id) for user in streamed] == [
+            (10, "stream-a"),
+            (10, "stream-b"),
+            (20, "stream-c"),
+            (20, "stream-e"),
+            (30, "stream-d"),
+        ]
+
+        streamed = [
+            user
+            async for user in repo.query().stream(batch_size=2)
+        ]
+
+        assert [(user.age, user.id) for user in streamed] == [
+            (10, "stream-a"),
+            (10, "stream-b"),
+            (20, "stream-c"),
+            (30, "stream-d"),
+            (20, "stream-e"),   
+        ]
+        
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
+async def test_query_stream_defaults_to_primary_key_order(kind):
+    db = await database_for(kind)
+    try:
+        repo = db.repository(User)
+        inserted_ids = ["stream-c", "stream-a", "stream-e", "stream-b", "stream-d"]
+        await repo.create_many([_u(user_id, user_id) for user_id in inserted_ids])
+
+        streamed_ids = [
+            user.id async for user in repo.query().stream(batch_size=2)
+        ]
+
+        assert streamed_ids == sorted(inserted_ids)
+    finally:
+        await cleanup(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ADAPTERS)
 async def test_cursor_pagination_reads_all_rows_in_batches_of_ten(kind):
     db = await database_for(kind)
     try:
